@@ -5,7 +5,12 @@
       "Bash(grep -r \"claude\\\\|openai\\\\|gemini\\\\|codex\\\\|anthropic\\\\|MCP\\\\|model\\\\|provider\" /media/earthling/Calebs Files/Harkonnen-Labs --include=*.rs --include=*.yaml --include=*.toml --include=*.md)",
       "Bash(chmod +x \"/media/earthling/Caleb''s Files/Harkonnen-Labs/scripts/coobie-seed-anythingllm.sh\")",
       "Bash(chmod +x \"/media/earthling/Caleb''s Files/Harkonnen-Labs/scripts/coobie-seed-mcp.sh\")",
-      "Bash(chmod +x \"/media/earthling/Caleb''s Files/Harkonnen-Labs/scripts/factory-up-linux.sh\")"
+      "Bash(chmod +x \"/media/earthling/Caleb''s Files/Harkonnen-Labs/scripts/factory-up-linux.sh\")",
+      "WebFetch(domain:github.com)",
+      "WebFetch(domain:raw.githubusercontent.com)",
+      "WebSearch",
+      "WebFetch(domain:liquidos-ai.github.io)",
+      "WebFetch(domain:dev.to)"
     ],
     "additionalDirectories": [
       "/media/earthling/Caleb''''s Files/Harkonnen-Labs/factory",

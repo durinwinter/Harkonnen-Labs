@@ -44,8 +44,25 @@ pub struct FailureHarness {
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     pub spec_path: String,
-    pub product: String,
+    pub product: Option<String>,
+    pub product_path: Option<String>,
     pub failure_harness: Option<FailureHarness>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TargetGitMetadata {
+    branch: Option<String>,
+    commit: Option<String>,
+    remote_origin: Option<String>,
+    clean: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize)]
+struct TargetSourceMetadata {
+    label: String,
+    source_kind: String,
+    source_path: String,
+    git: Option<TargetGitMetadata>,
 }
 
 impl RunRequest {
@@ -96,16 +113,13 @@ impl AppContext {
 
     pub async fn start_run(&self, req: RunRequest) -> Result<RunRecord> {
         let spec_obj = spec::load_spec(&req.spec_path)?;
-        let product_source = self.paths.products.join(&req.product);
-        if !product_source.exists() {
-            bail!("product not found: {}", product_source.display());
-        }
+        let target_source = self.resolve_target_source(&req).await?;
 
         let run_id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let log_path = self.run_log_path(&run_id);
 
-        self.insert_run(&run_id, &spec_obj.id, &req.product, "queued", now)
+        self.insert_run(&run_id, &spec_obj.id, &target_source.label, "queued", now)
             .await?;
         let _ = self
             .record_event(
@@ -115,14 +129,17 @@ impl AppContext {
                 "orchestrator",
                 "queued",
                 &format!(
-                    "Created run for spec {} against product {}",
-                    spec_obj.id, req.product
+                    "Created run for spec {} against target {} ({})",
+                    spec_obj.id, target_source.label, target_source.source_path
                 ),
                 &log_path,
             )
             .await?;
 
-        match self.execute_run(&run_id, &req, &spec_obj, &log_path).await {
+        match self
+            .execute_run(&run_id, &req, &spec_obj, &target_source, &log_path)
+            .await
+        {
             Ok(output) => {
                 let final_status = if output.validation.passed && output.hidden_scenarios.passed {
                     "completed"
@@ -219,6 +236,7 @@ impl AppContext {
         run_id: &str,
         req: &RunRequest,
         spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
         log_path: &Path,
     ) -> Result<ExecutionOutput> {
         let profiles = agents::load_profiles(&self.paths.factory.join("agents").join("profiles"))?;
@@ -229,6 +247,8 @@ impl AppContext {
         tokio::fs::copy(&req.spec_path, run_dir.join("spec.yaml"))
             .await
             .with_context(|| format!("copying spec snapshot for run {run_id}"))?;
+        self.write_json_file(&run_dir.join("target_source.json"), target_source)
+            .await?;
 
         let mut blackboard = BlackboardState {
             run_id: run_id.to_string(),
@@ -236,6 +256,7 @@ impl AppContext {
             active_goal: spec_obj.title.clone(),
             ..Default::default()
         };
+        push_unique(&mut blackboard.artifact_refs, "target_source.json");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         let mut agent_executions = Vec::new();
@@ -366,10 +387,9 @@ impl AppContext {
                 log_path,
             )
             .await?;
-        let staged_product = workspace::stage_product_workspace(
-            &self.paths.products,
+        let staged_product = workspace::stage_target_workspace(
+            Path::new(&target_source.source_path),
             &workspace_root,
-            &req.product,
         )
         .await?;
         policy::ensure_path_within(&workspace_root, &staged_product)?;

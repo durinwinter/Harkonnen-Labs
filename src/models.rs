@@ -92,9 +92,48 @@ pub struct BlackboardState {
 impl BlackboardState {
     pub fn role_view(&self, role: &str) -> Self {
         let mut view = self.clone();
-        if role.eq_ignore_ascii_case("sable") {
-            view.agent_claims.clear();
+        let role = role.to_ascii_lowercase();
+
+        if role == "keeper" {
+            return view;
         }
+
+        view.policy_flags.clear();
+
+        match role.as_str() {
+            "coobie" => {
+                view.agent_claims.clear();
+            }
+            "sable" => {
+                view.agent_claims.clear();
+            }
+            "scout" => {
+                view.agent_claims.retain(|agent, _| agent == "scout");
+                view.artifact_refs
+                    .retain(|artifact| artifact == "intent.json" || artifact == "memory_context.md");
+            }
+            "mason" => {
+                view.agent_claims.retain(|agent, _| agent == "mason");
+                view.artifact_refs.retain(|artifact| {
+                    matches!(
+                        artifact.as_str(),
+                        "intent.json" | "memory_context.md" | "implementation_plan.md" | "validation.json"
+                    )
+                });
+            }
+            "bramble" => {
+                view.agent_claims.retain(|agent, _| agent == "bramble");
+                view.artifact_refs
+                    .retain(|artifact| artifact == "validation.json" || artifact == "twin.json");
+            }
+            "flint" => {
+                view.agent_claims.retain(|agent, _| agent == "flint");
+            }
+            _ => {
+                view.agent_claims.retain(|agent, _| agent == &role);
+            }
+        }
+
         view
     }
 }

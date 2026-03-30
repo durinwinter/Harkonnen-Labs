@@ -36,6 +36,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id", get(get_run))
         .route("/api/runs/:id/events", get(get_run_events))
         .route("/api/runs/:id/blackboard", get(get_run_blackboard))
+        .route("/api/runs/:id/blackboard/:role", get(get_run_blackboard_for_role))
         .route("/api/runs/:id/lessons", get(get_run_lessons))
         .route("/api/runs/:id/state", get(get_run_state))
         .layer(cors)
@@ -81,6 +82,26 @@ async fn get_run_blackboard(
             let run_dir = app.paths.workspaces.join(&id).join("run");
             match read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await {
                 Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
+                Ok(None) => (StatusCode::NOT_FOUND, "Blackboard not found").into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
+            }
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_blackboard_for_role(
+    Path((id, role)): Path<(String, String)>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => {
+            let run_dir = app.paths.workspaces.join(&id).join("run");
+            match read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await {
+                Ok(Some(board)) => (StatusCode::OK, Json(board.role_view(&role))).into_response(),
                 Ok(None) => (StatusCode::NOT_FOUND, "Blackboard not found").into_response(),
                 Err(error) => {
                     (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()

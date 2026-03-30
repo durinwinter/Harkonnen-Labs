@@ -69,15 +69,19 @@ pub enum RunCommands {
 #[derive(Args, Debug)]
 pub struct RunStartArgs {
     pub spec: String,
-    #[arg(long)]
-    pub product: String,
+    #[arg(long, conflicts_with = "product_path")]
+    pub product: Option<String>,
+    #[arg(long, conflicts_with = "product")]
+    pub product_path: Option<String>,
 }
 
 #[derive(Args, Debug)]
 pub struct RunHarnessArgs {
     pub spec: String,
-    #[arg(long)]
-    pub product: String,
+    #[arg(long, conflicts_with = "product_path")]
+    pub product: Option<String>,
+    #[arg(long, conflicts_with = "product")]
+    pub product_path: Option<String>,
     #[arg(long, value_parser = ["validation", "hidden_scenarios"])]
     pub phase: String,
     #[arg(long, default_value_t = 4)]
@@ -226,11 +230,7 @@ pub async fn handle_serve(args: ServeArgs, app: AppContext) -> Result<()> {
 pub async fn handle_run(command: RunCommands, app: AppContext) -> Result<()> {
     match command {
         RunCommands::Start(args) => {
-            let req = RunRequest {
-                spec_path: args.spec,
-                product: args.product,
-                failure_harness: None,
-            };
+            let req = build_run_request(args.spec, args.product, args.product_path, None)?;
             let run = app.start_run(req).await?;
             println!("Run {} finished with status: {}", run.run_id, run.status);
         }
@@ -240,14 +240,15 @@ pub async fn handle_run(command: RunCommands, app: AppContext) -> Result<()> {
                 .unwrap_or_else(|| format!("Harness injected failure in {}", args.phase));
             let mut run_ids = Vec::new();
             for index in 0..args.times {
-                let req = RunRequest {
-                    spec_path: args.spec.clone(),
-                    product: args.product.clone(),
-                    failure_harness: Some(FailureHarness {
+                let req = build_run_request(
+                    args.spec.clone(),
+                    args.product.clone(),
+                    args.product_path.clone(),
+                    Some(FailureHarness {
                         phase: args.phase.clone(),
                         message: message.clone(),
                     }),
-                };
+                )?;
                 let run = app.start_run(req).await?;
                 println!(
                     "Harness run {}/{} -> {} ({})",
@@ -273,6 +274,24 @@ pub async fn handle_run(command: RunCommands, app: AppContext) -> Result<()> {
         }
     }
     Ok(())
+}
+
+fn build_run_request(
+    spec_path: String,
+    product: Option<String>,
+    product_path: Option<String>,
+    failure_harness: Option<FailureHarness>,
+) -> Result<RunRequest> {
+    if product.is_none() && product_path.is_none() {
+        bail!("provide either --product <name> or --product-path <path>");
+    }
+
+    Ok(RunRequest {
+        spec_path,
+        product,
+        product_path,
+        failure_harness,
+    })
 }
 
 pub async fn handle_artifact(command: ArtifactCommands, app: AppContext) -> Result<()> {

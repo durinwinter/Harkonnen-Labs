@@ -41,6 +41,55 @@ function Require($cmd, $hint) {
     Ok "$cmd $(& $cmd --version 2>&1 | Select-Object -First 1)"
 }
 
+function Require-NodeVersion($min) {
+    if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
+        Fail "Node.js is required (v$min+). Install from https://nodejs.org"
+    }
+    $raw = (node --version 2>&1) -replace '[^0-9].*', ''
+    if ([int]$raw -lt $min) {
+        Fail "Node.js v$min+ required (found: $(node --version)). Upgrade at https://nodejs.org"
+    }
+    Ok "node $(node --version) — meets minimum v$min"
+}
+
+function Test-PortFree($port) {
+    $connections = [System.Net.NetworkInformation.IPGlobalProperties]::GetIPGlobalProperties().GetActiveTcpListeners()
+    $taken = $connections | Where-Object { $_.Port -eq $port }
+    return ($null -eq $taken -or $taken.Count -eq 0)
+}
+
+function Check-Port($port, $label) {
+    if (Test-PortFree $port) {
+        Ok "Port $port is free ($label)"
+    } else {
+        Warn "Port $port is already in use ($label)"
+        Info "Find the process: netstat -ano | findstr :$port"
+        # Return false so caller can decide whether to fail
+        return $false
+    }
+    return $true
+}
+
+function Npm-GlobalInstall($pkg) {
+    $installed = npm list -g --depth=0 2>$null | Select-String ([regex]::Escape($pkg))
+    if ($installed) {
+        Ok "$pkg (already installed)"
+        return
+    }
+    Info "Installing $pkg ..."
+    $output = npm install --global $pkg 2>&1
+    if ($LASTEXITCODE -ne 0) {
+        Warn "npm install -g $pkg failed (exit $LASTEXITCODE)"
+        $output | Select-String "^npm (ERR!|WARN)" | Select-Object -First 5 |
+            ForEach-Object { Info $_.Line }
+        Info "Try running this terminal as Administrator, or set a user-writable prefix:"
+        Info "  npm config set prefix `"$env:APPDATA\npm`""
+        $script:McpFailures++
+    } else {
+        Ok "$pkg installed"
+    }
+}
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 Write-Host ""
@@ -53,9 +102,12 @@ Write-Host "  Root:  $RepoRoot"
 # ── 1. Prerequisites ──────────────────────────────────────────────────────────
 
 Step "Checking prerequisites"
-Require "node"  "https://nodejs.org"
+Require-NodeVersion 18
 Require "npm"   "bundled with Node.js"
 Require "cargo" "https://rustup.rs"
+
+# Port check for the harkonnen serve port (3000). Informational — does not block install.
+Check-Port 3000 "harkonnen serve" | Out-Null
 
 # ── 2. ANTHROPIC_API_KEY ──────────────────────────────────────────────────────
 
@@ -129,15 +181,13 @@ $packages = @(
     "@modelcontextprotocol/server-sqlite"
 )
 
+$script:McpFailures = 0
 foreach ($pkg in $packages) {
-    $installed = npm list -g --depth=0 2>$null | Select-String $pkg
-    if ($installed) {
-        Ok "$pkg (already installed)"
-    } else {
-        Info "Installing $pkg ..."
-        npm install --global $pkg --silent
-        Ok "$pkg"
-    }
+    Npm-GlobalInstall $pkg
+}
+
+if ($script:McpFailures -gt 0) {
+    Warn "$($script:McpFailures) MCP package(s) failed to install — Claude Code MCP tools will not work until resolved"
 }
 
 # ── 6. Build harkonnen binary ─────────────────────────────────────────────────
@@ -217,20 +267,38 @@ $McpBlock = [ordered]@{
 }
 
 if (Test-Path $ClaudeSettings) {
-    # Merge into existing file rather than clobber it
-    $existing = Get-Content $ClaudeSettings -Raw | ConvertFrom-Json
-    if (-not $existing.mcpServers) {
-        $existing | Add-Member -NotePropertyName mcpServers -NotePropertyValue $McpBlock.mcpServers
-    } else {
-        foreach ($key in $McpBlock.mcpServers.Keys) {
-            $existing.mcpServers | Add-Member -NotePropertyName $key `
-                -NotePropertyValue $McpBlock.mcpServers[$key] -Force
-        }
+    # Merge into existing file — guard against malformed JSON
+    $rawJson = Get-Content $ClaudeSettings -Raw
+    $existing = $null
+    try {
+        $existing = $rawJson | ConvertFrom-Json
+    } catch {
+        Warn "settings.local.json exists but could not be parsed: $_"
+        $backup = "$ClaudeSettings.bak"
+        Copy-Item $ClaudeSettings $backup -Force
+        Warn "Backed up to $backup — will overwrite with a fresh config"
     }
-    $existing | ConvertTo-Json -Depth 10 | Set-Content $ClaudeSettings
-    Ok "Merged MCP servers into existing $ClaudeSettings"
+
+    if ($null -ne $existing) {
+        if (-not $existing.PSObject.Properties['mcpServers']) {
+            $existing | Add-Member -NotePropertyName mcpServers -NotePropertyValue $McpBlock.mcpServers
+        } else {
+            foreach ($key in $McpBlock.mcpServers.Keys) {
+                if ($existing.mcpServers.PSObject.Properties[$key]) {
+                    $existing.mcpServers.PSObject.Properties.Remove($key)
+                }
+                $existing.mcpServers | Add-Member -NotePropertyName $key `
+                    -NotePropertyValue $McpBlock.mcpServers[$key]
+            }
+        }
+        $existing | ConvertTo-Json -Depth 10 | Set-Content $ClaudeSettings -Encoding UTF8
+        Ok "Merged MCP servers into existing $ClaudeSettings"
+    } else {
+        $McpBlock | ConvertTo-Json -Depth 10 | Set-Content $ClaudeSettings -Encoding UTF8
+        Ok "Created fresh $ClaudeSettings (old file backed up)"
+    }
 } else {
-    $McpBlock | ConvertTo-Json -Depth 10 | Set-Content $ClaudeSettings
+    $McpBlock | ConvertTo-Json -Depth 10 | Set-Content $ClaudeSettings -Encoding UTF8
     Ok "Created $ClaudeSettings"
 }
 

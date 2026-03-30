@@ -96,6 +96,8 @@ function App() {
   const [runs, setRuns] = useState([]);
   const [activeRunId, setActiveRunId] = useState('');
   const [runState, setRunState] = useState(null);
+  const [selectedRole, setSelectedRole] = useState('mason');
+  const [roleBoard, setRoleBoard] = useState(null);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -163,6 +165,35 @@ function App() {
     };
   }, [activeRunId]);
 
+  useEffect(() => {
+    if (!activeRunId || !selectedRole) {
+      setRoleBoard(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadRoleBoard = async () => {
+      try {
+        const data = await fetchJson(`${API_BASE}/runs/${activeRunId}/blackboard/${selectedRole}`);
+        if (!cancelled) {
+          setRoleBoard(data);
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setRoleBoard(null);
+        }
+      }
+    };
+
+    loadRoleBoard();
+    const interval = setInterval(loadRoleBoard, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeRunId, selectedRole]);
+
   const run = runState?.run || null;
   const events = runState?.events || [];
   const blackboard = runState?.blackboard || null;
@@ -176,6 +207,7 @@ function App() {
   const recentEvents = [...events].slice(-14).reverse();
   const activeThreads = agents.filter((agent) => agent.status === 'running');
   const claims = Object.entries(blackboard?.agent_claims || {});
+  const roleClaims = Object.entries(roleBoard?.agent_claims || {});
 
   return (
     <div className="pack-board-shell">
@@ -278,6 +310,22 @@ function App() {
                 ))
               )}
             </div>
+            <div className="role-lens top-gap">
+              <div className="role-lens-header">
+                <span>Role lens</span>
+                <select value={selectedRole} onChange={(event) => setSelectedRole(event.target.value)}>
+                  {AGENT_DEFS.map((agent) => (
+                    <option key={agent.id} value={agent.id}>{agent.name}</option>
+                  ))}
+                </select>
+              </div>
+              <div className="info-stack">
+                <div className="info-row"><span>Lens phase</span><strong>{titleCase(roleBoard?.current_phase || 'idle')}</strong></div>
+                <div className="info-row"><span>Visible lessons</span><strong>{roleBoard?.lesson_refs?.length || 0}</strong></div>
+                <div className="info-row"><span>Visible artifacts</span><strong>{roleBoard?.artifact_refs?.length || 0}</strong></div>
+                <div className="info-row"><span>Visible claims</span><strong>{roleClaims.length}</strong></div>
+              </div>
+            </div>
           </Panel>
 
           <Panel title="Coobie Memory Vault" compact>
@@ -327,6 +375,24 @@ function App() {
                   </div>
                 ))
               )}
+            </div>
+            <div className="role-lens top-gap">
+              <div className="list-item">
+                <div className="list-item-title">{selectedRole} role view</div>
+                <div className="list-item-subtle">{roleBoard?.active_goal || 'No role-scoped board loaded.'}</div>
+              </div>
+              <div className="list-block compact-list">
+                {roleClaims.length === 0 ? (
+                  <div className="empty-state">No claims visible to this role.</div>
+                ) : (
+                  roleClaims.map(([agent, claim]) => (
+                    <div key={agent} className="list-item">
+                      <div className="list-item-title">{agent}</div>
+                      <div className="list-item-subtle">{claim}</div>
+                    </div>
+                  ))
+                )}
+              </div>
             </div>
           </Panel>
         </aside>
@@ -504,6 +570,29 @@ function App() {
 
         .top-gap {
           margin-top: 0.9rem;
+        }
+
+        .role-lens-header {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          gap: 0.75rem;
+          margin-bottom: 0.75rem;
+          color: var(--text-secondary);
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          font-size: 0.72rem;
+          font-weight: 700;
+        }
+
+        .role-lens-header select {
+          min-width: 150px;
+          border-radius: 10px;
+          border: 1px solid var(--border-glass);
+          background: rgba(255, 255, 255, 0.04);
+          color: var(--text-primary);
+          padding: 0.45rem 0.65rem;
+          font: inherit;
         }
 
         .info-row {

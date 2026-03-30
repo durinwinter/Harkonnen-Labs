@@ -7,7 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::config::Paths;
-use crate::orchestrator::{AppContext, RunRequest};
+use crate::orchestrator::{AppContext, FailureHarness, RunRequest};
 use crate::reporting;
 use crate::setup::{
     available_template_names, command_available, compose_setup_id, default_provider_config,
@@ -61,6 +61,7 @@ pub struct SpecValidateArgs {
 #[derive(Subcommand, Debug)]
 pub enum RunCommands {
     Start(RunStartArgs),
+    Harness(RunHarnessArgs),
     Status(RunStatusArgs),
     Report(RunReportArgs),
 }
@@ -70,6 +71,19 @@ pub struct RunStartArgs {
     pub spec: String,
     #[arg(long)]
     pub product: String,
+}
+
+#[derive(Args, Debug)]
+pub struct RunHarnessArgs {
+    pub spec: String,
+    #[arg(long)]
+    pub product: String,
+    #[arg(long, value_parser = ["validation", "hidden_scenarios"])]
+    pub phase: String,
+    #[arg(long, default_value_t = 4)]
+    pub times: usize,
+    #[arg(long)]
+    pub message: Option<String>,
 }
 
 #[derive(Args, Debug)]
@@ -215,9 +229,36 @@ pub async fn handle_run(command: RunCommands, app: AppContext) -> Result<()> {
             let req = RunRequest {
                 spec_path: args.spec,
                 product: args.product,
+                failure_harness: None,
             };
             let run = app.start_run(req).await?;
             println!("Run {} finished with status: {}", run.run_id, run.status);
+        }
+        RunCommands::Harness(args) => {
+            let message = args
+                .message
+                .unwrap_or_else(|| format!("Harness injected failure in {}", args.phase));
+            let mut run_ids = Vec::new();
+            for index in 0..args.times {
+                let req = RunRequest {
+                    spec_path: args.spec.clone(),
+                    product: args.product.clone(),
+                    failure_harness: Some(FailureHarness {
+                        phase: args.phase.clone(),
+                        message: message.clone(),
+                    }),
+                };
+                let run = app.start_run(req).await?;
+                println!(
+                    "Harness run {}/{} -> {} ({})",
+                    index + 1,
+                    args.times,
+                    run.run_id,
+                    run.status
+                );
+                run_ids.push(run.run_id);
+            }
+            println!("Harness complete for phase '{}'. Run IDs: {}", args.phase, run_ids.join(", "));
         }
         RunCommands::Status(args) => {
             let run = app

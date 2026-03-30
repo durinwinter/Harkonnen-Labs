@@ -40,6 +40,64 @@ require() {
     ok "$cmd $($cmd --version 2>&1 | head -1)"
 }
 
+# Check whether a TCP port is already bound. Exits with 0 if free, 1 if taken.
+port_free() {
+    port="$1"
+    # ss is preferred; fall back to netstat, then to /proc/net/tcp
+    if command -v ss > /dev/null 2>&1; then
+        ! ss -tlnH 2>/dev/null | awk '{print $4}' | grep -q ":${port}$"
+    elif command -v netstat > /dev/null 2>&1; then
+        ! netstat -tlnp 2>/dev/null | awk '{print $4}' | grep -q ":${port}$"
+    else
+        ! grep -q ":$(printf '%04X' "$port") " /proc/net/tcp /proc/net/tcp6 2>/dev/null
+    fi
+}
+
+check_port() {
+    port="$1"; label="$2"
+    if port_free "$port"; then
+        ok "Port $port is free ($label)"
+    else
+        warn "Port $port is already in use ($label)"
+        info "Find the process: ss -tlnp | grep :$port"
+        info "If that is an old $label container: docker stop \$(docker ps -q --filter publish=$port)"
+        # Not a hard fail — let the caller decide
+        return 1
+    fi
+}
+
+# Require a minimum Node major version.
+require_node_version() {
+    min="$1"
+    actual=$(node --version 2>/dev/null | sed 's/[^0-9].*//')
+    if [ -z "$actual" ] || [ "$actual" -lt "$min" ]; then
+        fail "Node.js v${min}+ required (found: $(node --version 2>/dev/null || echo 'none')). Install from https://nodejs.org"
+    fi
+    ok "node $(node --version) — meets minimum v${min}"
+}
+
+# Install an npm global package and surface errors clearly (no --silent).
+npm_global_install() {
+    pkg="$1"
+    if npm list -g --depth=0 2>/dev/null | grep -q "$pkg"; then
+        ok "$pkg (already installed)"
+        return 0
+    fi
+    info "Installing $pkg ..."
+    # Capture output so we can diagnose failures without dumping the full log
+    if npm_out=$(npm install --global "$pkg" 2>&1); then
+        ok "$pkg installed"
+    else
+        warn "npm install -g $pkg failed"
+        # Surface the first actionable line (EACCES, ENOENT, etc.)
+        echo "$npm_out" | grep -E "^npm (ERR!|WARN)" | head -5 | while IFS= read -r line; do
+            info "$line"
+        done
+        info "Try: sudo npm install -g $pkg  or  npm config set prefix ~/.npm-global"
+        return 1
+    fi
+}
+
 # ── Banner ────────────────────────────────────────────────────────────────────
 
 printf '\n'
@@ -52,14 +110,21 @@ printf '  Root:  %s\n' "$REPO_ROOT"
 # ── 1. Prerequisites ──────────────────────────────────────────────────────────
 
 step "Checking prerequisites"
-require "node"  "https://nodejs.org"
+require_node_version 18
 require "npm"   "bundled with Node.js"
 require "cargo" "https://rustup.rs"
 
 DOCKER_OK=false
 if command -v docker > /dev/null 2>&1; then
-    ok "docker $(docker --version 2>&1 | head -1)"
-    DOCKER_OK=true
+    # docker binary found — now verify the daemon is actually running
+    if docker info > /dev/null 2>&1; then
+        ok "docker $(docker --version 2>&1 | head -1) (daemon running)"
+        DOCKER_OK=true
+    else
+        warn "docker binary found but daemon is not running (or not accessible)"
+        info "Start it with: sudo systemctl start docker  or  sudo service docker start"
+        info "AnythingLLM step will be skipped"
+    fi
 else
     warn "docker not found — AnythingLLM step will be skipped"
 fi
@@ -81,17 +146,20 @@ else
     ok ".env exists"
 fi
 
-# Source .env (skip comment lines and lines without =)
-while IFS= read -r line; do
-    case "$line" in
-        '#'*|'') continue ;;
-        *=*)
-            key="${line%%=*}"
-            val="${line#*=}"
-            # Only set if not already in environment
-            eval "[ -z \"\${${key}+x}\" ] && export ${key}=\"${val}\" || true"
-            ;;
+# Source .env safely — no eval. Only export simple KEY=value lines.
+# Keys must be valid shell identifiers; values are taken literally.
+while IFS='=' read -r key val; do
+    case "$key" in
+        ''|'#'*) continue ;;              # blank lines and comments
     esac
+    # Validate key is a safe identifier (letters, digits, underscores)
+    case "$key" in
+        *[!A-Za-z0-9_]*) continue ;;     # skip keys with unusual chars
+    esac
+    # Strip surrounding quotes from value if present
+    val=$(printf '%s' "$val" | sed "s/^['\"]//;s/['\"]$//")
+    # Only set if not already in the environment (don't override caller's exports)
+    export "$key=${val}"
 done < "$ENV_FILE"
 
 # Ensure HARKONNEN_SETUP is set in the file
@@ -120,6 +188,7 @@ done
 
 step "Installing MCP server packages"
 
+MCP_FAILURES=0
 for pkg in \
     "@modelcontextprotocol/server-filesystem" \
     "@modelcontextprotocol/server-memory" \
@@ -127,14 +196,13 @@ for pkg in \
     "@modelcontextprotocol/server-github" \
     "@modelcontextprotocol/server-brave-search"
 do
-    if npm list -g --depth=0 2>/dev/null | grep -q "$pkg"; then
-        ok "$pkg (already installed)"
-    else
-        info "Installing $pkg ..."
-        npm install --global "$pkg" --silent
-        ok "$pkg"
-    fi
+    npm_global_install "$pkg" || MCP_FAILURES=$((MCP_FAILURES + 1))
 done
+
+if [ "$MCP_FAILURES" -gt 0 ]; then
+    warn "$MCP_FAILURES MCP package(s) failed to install — Claude Code MCP tools will not work until resolved"
+    info "Common fix: sudo chown -R \$(whoami) \$(npm config get prefix)/{lib/node_modules,bin,share}"
+fi
 
 # ── 5. Build harkonnen binary ─────────────────────────────────────────────────
 
@@ -254,27 +322,64 @@ fi
 
 step "AnythingLLM (home-linux, Docker-based RAG)"
 
+ANYTHINGLLM_PORT="${ANYTHINGLLM_PORT:-3001}"
+
 if [ "$DOCKER_OK" = "true" ]; then
-    ANYTHINGLLM_DIR="${ANYTHINGLLM_DIR:-$HOME/harkonnen-local/anythingllm}"
     UP_CMD="$HOME/harkonnen-local/bin/anythingllm-up"
 
     if [ -f "$UP_CMD" ]; then
-        info "Starting AnythingLLM ..."
-        "$UP_CMD" && ok "AnythingLLM started on http://localhost:3001" || warn "AnythingLLM start failed (check Docker)"
-
-        if [ -n "${ANYTHINGLLM_API_KEY:-}" ]; then
-            info "Seeding Coobie documents into AnythingLLM ..."
-            ./scripts/coobie-seed-anythingllm.sh && ok "AnythingLLM seeded" || warn "Seeding failed (check ANYTHINGLLM_API_KEY)"
+        # Check if the port is already serving (container already up)
+        if ! port_free "$ANYTHINGLLM_PORT"; then
+            ok "AnythingLLM already running on port $ANYTHINGLLM_PORT"
+            ANYTHINGLLM_RUNNING=true
         else
-            warn "ANYTHINGLLM_API_KEY not set — skipping document upload"
-            info "After setting the key, run: ./scripts/coobie-seed-anythingllm.sh"
+            info "Starting AnythingLLM on port $ANYTHINGLLM_PORT ..."
+            if "$UP_CMD" > /dev/null 2>&1; then
+                # Wait for the API to become healthy (up to 60 s)
+                ANYTHINGLLM_RUNNING=false
+                for i in $(seq 1 12); do
+                    if curl -sf "http://localhost:${ANYTHINGLLM_PORT}/api/ping" > /dev/null 2>&1; then
+                        ANYTHINGLLM_RUNNING=true
+                        break
+                    fi
+                    info "Waiting for AnythingLLM... (${i}/12)"
+                    sleep 5
+                done
+                if [ "$ANYTHINGLLM_RUNNING" = "true" ]; then
+                    ok "AnythingLLM ready on http://localhost:${ANYTHINGLLM_PORT}"
+                else
+                    warn "AnythingLLM did not become healthy after 60 s"
+                    info "Check logs: $HOME/harkonnen-local/bin/anythingllm-logs"
+                fi
+            else
+                warn "AnythingLLM compose up failed — check Docker daemon and image"
+                ANYTHINGLLM_RUNNING=false
+            fi
+        fi
+
+        if [ "${ANYTHINGLLM_RUNNING:-false}" = "true" ]; then
+            if [ -n "${ANYTHINGLLM_API_KEY:-}" ]; then
+                info "Seeding Coobie documents into AnythingLLM ..."
+                if ANYTHINGLLM_BASE_URL="http://localhost:${ANYTHINGLLM_PORT}/api" \
+                   ./scripts/coobie-seed-anythingllm.sh; then
+                    ok "AnythingLLM seeded"
+                else
+                    warn "Seeding failed — check ANYTHINGLLM_API_KEY and AnythingLLM logs"
+                    info "Retry: ./scripts/coobie-seed-anythingllm.sh"
+                fi
+            else
+                warn "ANYTHINGLLM_API_KEY not set — skipping document upload"
+                info "Open http://localhost:${ANYTHINGLLM_PORT} > Admin > API Keys, then:"
+                info "  export ANYTHINGLLM_API_KEY=<key> && ./scripts/coobie-seed-anythingllm.sh"
+            fi
         fi
     else
         warn "AnythingLLM not bootstrapped yet"
         info "Run first: ./scripts/bootstrap-local-stack.sh"
+        info "Then re-run this script to seed documents"
     fi
 else
-    info "Skipped (Docker not available)"
+    info "Skipped (Docker not available or daemon not running)"
 fi
 
 # ── 10. Summary ───────────────────────────────────────────────────────────────

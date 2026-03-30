@@ -3,7 +3,10 @@ use serde::de::DeserializeOwned;
 use std::path::Path;
 
 use crate::{
-    models::{AgentExecution, HiddenScenarioSummary, TwinEnvironment, ValidationSummary},
+    models::{
+        AgentExecution, BlackboardState, HiddenScenarioSummary, LessonRecord, TwinEnvironment,
+        ValidationSummary,
+    },
     orchestrator::AppContext,
 };
 
@@ -19,6 +22,10 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
     let twin: Option<TwinEnvironment> = read_optional_json(&run_dir.join("twin.json")).await?;
     let hidden: Option<HiddenScenarioSummary> =
         read_optional_json(&run_dir.join("hidden_scenarios.json")).await?;
+    let blackboard: Option<BlackboardState> =
+        read_optional_json(&run_dir.join("blackboard.json")).await?;
+    let lessons: Option<Vec<LessonRecord>> =
+        read_optional_json(&run_dir.join("lessons.json")).await?;
     let agent_executions: Option<Vec<AgentExecution>> =
         read_optional_json(&run_dir.join("agent_executions.json")).await?;
 
@@ -111,6 +118,65 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
         }
     } else {
         report.push_str("No hidden scenario summary written yet.\n");
+    }
+
+    report.push_str("\nBlackboard\n----------\n");
+    if let Some(blackboard) = blackboard {
+        report.push_str(&format!("Phase: {}\n", blackboard.current_phase));
+        report.push_str(&format!("Active goal: {}\n", blackboard.active_goal));
+        report.push_str(&format!(
+            "Open blockers: {}\n",
+            if blackboard.open_blockers.is_empty() {
+                "none".to_string()
+            } else {
+                blackboard.open_blockers.join(", ")
+            }
+        ));
+        report.push_str(&format!(
+            "Resolved items: {}\n",
+            if blackboard.resolved_items.is_empty() {
+                "none".to_string()
+            } else {
+                blackboard.resolved_items.join(", ")
+            }
+        ));
+        report.push_str(&format!(
+            "Artifacts tracked: {}\n",
+            if blackboard.artifact_refs.is_empty() {
+                "none".to_string()
+            } else {
+                blackboard.artifact_refs.join(", ")
+            }
+        ));
+        report.push_str(&format!(
+            "Lesson refs: {}\n",
+            if blackboard.lesson_refs.is_empty() {
+                "none".to_string()
+            } else {
+                blackboard.lesson_refs.join(", ")
+            }
+        ));
+    } else {
+        report.push_str("No blackboard snapshot written yet.\n");
+    }
+
+    report.push_str("\nConsolidated Lessons\n--------------------\n");
+    if let Some(lessons) = lessons {
+        if lessons.is_empty() {
+            report.push_str("No lessons were promoted for this run.\n");
+        } else {
+            for lesson in lessons {
+                report.push_str(&format!(
+                    "- {} (strength {:.1})\n  tags={}\n  intervention={}\n",
+                    lesson.pattern,
+                    lesson.strength,
+                    lesson.tags.join(","),
+                    lesson.intervention.unwrap_or_else(|| "none".to_string())
+                ));
+            }
+        }
+    } else {
+        report.push_str("No lessons were promoted for this run.\n");
     }
 
     Ok(report)

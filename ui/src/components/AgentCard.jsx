@@ -1,384 +1,292 @@
 import React from 'react';
 
+const STATUS_LABELS = {
+  idle: 'idle',
+  queued: 'queued',
+  running: 'running',
+  complete: 'complete',
+  blocked: 'blocked',
+  failed: 'failed',
+  waiting: 'waiting',
+};
+
+const STATUS_COLORS = {
+  idle: '#67727b',
+  queued: '#67727b',
+  waiting: '#67727b',
+  running: 'var(--accent-gold)',
+  complete: '#8fae7c',
+  blocked: '#c7684c',
+  failed: '#c7684c',
+};
+
 const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
-  const { id, name, status, task, latestLog, accentColor, role } = agent;
+  const {
+    id,
+    name,
+    role,
+    status,
+    task,
+    latestLog,
+    accentColor,
+    engine,
+    ownership,
+    latestPhase,
+  } = agent;
 
-  const isSilhouette = status === 'idle' || status === 'waiting';
-  const effectiveVariant = isSilhouette ? 'silhouette' : variant;
-
-  const statusColor = {
-    idle: '#5d5d66',
-    waiting: '#5d5d66',
-    running: 'var(--accent-gold)',
-    blocked: '#e74c3c',
-    complete: '#a8c69f', // Muted green matching the industrial tone
-    scanned: 'var(--accent-gold)',
-  }[status];
-
+  const cardStatus = STATUS_LABELS[status] || 'idle';
+  const statusColor = STATUS_COLORS[cardStatus] || STATUS_COLORS.idle;
   const iconPath = `/icons/agents/${id}/icon.png`;
 
   return (
-    <div className={`split-agent-card v-${effectiveVariant} s-${status} ${status === 'running' ? 'pulse-border' : ''} ${isSingleton ? 'singleton-layout' : ''}`}>
-      {/* ── PART 1: THE TILE ──────────────────────────────────────────────── */}
-      <div className="icon-tile" style={{ borderColor: accentColor + '44' }}>
-        {status === 'running' && (
-          <div className="tech-rings">
-            <div className="ring ring-1"></div>
-            <div className="ring ring-2"></div>
-            <div className="h-emblem">H</div>
-          </div>
-        )}
-        <div className="image-container">
-          {status === 'running' && <div className="scanning-beam"></div>}
+    <div
+      className={`agent-card variant-${variant} status-${cardStatus} ${isSingleton ? 'singleton' : ''}`}
+      style={{ '--agent-accent': accentColor || 'var(--accent-gold)' }}
+    >
+      <div className="agent-tile">
+        <div className="agent-image-wrap">
           <img
             src={iconPath}
             alt={name}
-            className={effectiveVariant === 'silhouette' ? 'img-silhouette' : ''}
-            onError={(e) => {
-              e.target.parentElement.innerHTML = `<div class="silhouette-placeholder">${name[0]}</div>`;
+            className="agent-image"
+            onError={(event) => {
+              event.currentTarget.style.display = 'none';
             }}
           />
+          <div className="agent-fallback">{name[0]}</div>
         </div>
-        <div className="nameplate" style={{ backgroundColor: isSingleton ? 'var(--accent-gold)' : accentColor }}>
-          <span className="agent-name" style={{ color: isSingleton ? 'var(--bg-primary)' : 'white' }}>{name}</span>
-          <span className="agent-role-short" style={{ color: isSingleton ? 'var(--bg-primary)' : 'white' }}>{role ? role.split(' ')[0] : ''}</span>
-          {status === 'running' && <div className="active-pulse"></div>}
+        <div className="agent-nameplate">
+          <div className="agent-name">{name}</div>
+          <div className="agent-role-short">{role}</div>
         </div>
-        {status === 'running' && (
-          <div className="corner-brackets">
-            <div className="bracket top-left"></div>
-            <div className="bracket bottom-right"></div>
-          </div>
-        )}
       </div>
 
-      {/* ── PART 2: THE DATA ─────────────────────────────────────────────── */}
-      <div className="activity-panel">
-        <div className="panel-header">
-          <div className="role-full">{role}</div>
-          <div className="status-indicator">
+      <div className="agent-body">
+        <div className="agent-head">
+          <div className="agent-phase">{latestPhase || 'awaiting signal'}</div>
+          <div className="status-chip" style={{ borderColor: `${statusColor}55`, color: statusColor }}>
             <span className="status-dot" style={{ backgroundColor: statusColor }}></span>
-            <span className="status-text">{status}</span>
+            {cardStatus}
           </div>
         </div>
 
-        {effectiveVariant !== 'silhouette' && (
-          <div className="panel-body">
-            <div className="task-box">
-              <label>ACTIVE_TASK</label>
-              <div className="task-text">{task}</div>
-            </div>
-            {!isSingleton && (
-              <div className="log-box">
-                <label>LATEST_LOG</label>
-                <div className="log-text mono">{latestLog}</div>
-              </div>
-            )}
-            {isSingleton && (
-              <div className="singleton-log">
-                <div className="log-line">{`>> ${latestLog}`}</div>
-                <div className="log-cursor">_</div>
-              </div>
-            )}
+        <div className="agent-meta-grid">
+          <div className="meta-cell">
+            <span className="meta-label">ENGINE</span>
+            <span className="meta-value">{engine || 'offline'}</span>
           </div>
-        )}
+          <div className="meta-cell">
+            <span className="meta-label">CLAIM</span>
+            <span className="meta-value">{ownership || 'unclaimed'}</span>
+          </div>
+        </div>
 
-        {effectiveVariant === 'silhouette' && (
-          <div className="inactive-shade">
-            <span>AWAITING_SIGNAL</span>
-          </div>
-        )}
+        <div className="info-block">
+          <div className="info-label">ACTIVE TASK</div>
+          <div className="info-value">{task}</div>
+        </div>
+
+        <div className="info-block log-block">
+          <div className="info-label">LATEST LOG</div>
+          <div className="info-value mono">{latestLog}</div>
+        </div>
       </div>
 
       <style jsx>{`
-        .split-agent-card {
-          display: flex;
-          background: var(--bg-secondary);
-          border-radius: 12px;
-          overflow: hidden;
+        .agent-card {
+          display: grid;
+          grid-template-columns: 128px minmax(0, 1fr);
+          min-height: 220px;
+          background: linear-gradient(180deg, rgba(36, 40, 43, 0.95), rgba(24, 27, 29, 0.98));
           border: 1px solid var(--border-glass);
-          height: 180px;
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
-          position: relative;
-        }
-
-        .singleton-layout {
-          height: auto;
-          flex-direction: column;
-          border: 1px solid var(--border-strong);
-        }
-
-        .singleton-layout .icon-tile {
-          width: 100%;
-          height: 180px;
-          border-right: none;
-          border-bottom: 1px solid var(--border-glass);
-        }
-
-        .split-agent-card:hover {
-          transform: translateY(-2px);
-          border-color: var(--accent-gold);
-          box-shadow: 0 10px 30px -10px rgba(0,0,0,0.5);
-        }
-
-        .v-light {
-          background: #e5e1d8;
-          color: #1b1e20;
-        }
-
-        .icon-tile {
-          width: 140px;
-          flex-shrink: 0;
-          display: flex;
-          flex-direction: column;
-          background: rgba(0, 0, 0, 0.2);
-          border-right: 1px solid var(--border-glass);
-          position: relative;
-        }
-
-        .image-container {
-          flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          padding: 10px;
+          border-radius: 16px;
           overflow: hidden;
+          box-shadow: 0 16px 40px rgba(0, 0, 0, 0.28);
           position: relative;
         }
 
-        .image-container img {
-          max-width: 90%;
-          max-height: 90%;
+        .agent-card::after {
+          content: '';
+          position: absolute;
+          inset: 0;
+          pointer-events: none;
+          border-top: 1px solid rgba(255, 255, 255, 0.03);
+        }
+
+        .agent-card.status-running {
+          box-shadow: 0 0 0 1px rgba(194, 163, 114, 0.25), 0 18px 48px rgba(0, 0, 0, 0.34);
+        }
+
+        .agent-card.singleton {
+          grid-template-columns: 120px minmax(0, 1fr);
+        }
+
+        .variant-light {
+          background: linear-gradient(180deg, #e5dece, #d3c8b2);
+          color: #202224;
+        }
+
+        .agent-tile {
+          display: flex;
+          flex-direction: column;
+          background: linear-gradient(180deg, rgba(255, 255, 255, 0.03), rgba(0, 0, 0, 0.1));
+          border-right: 1px solid rgba(255, 255, 255, 0.05);
+        }
+
+        .agent-image-wrap {
+          flex: 1;
+          position: relative;
+          display: grid;
+          place-items: center;
+          padding: 16px;
+        }
+
+        .agent-image {
+          max-width: 100%;
+          max-height: 100%;
           object-fit: contain;
-          z-index: 2;
+          z-index: 1;
         }
 
-        .img-silhouette {
-          filter: grayscale(1) brightness(0.3) contrast(1.2);
-          opacity: 0.4;
-        }
-
-        .silhouette-placeholder {
+        .agent-fallback {
+          position: absolute;
+          inset: 0;
+          display: grid;
+          place-items: center;
           font-size: 3rem;
           font-weight: 900;
-          opacity: 0.1;
-          color: white;
+          color: rgba(229, 225, 216, 0.16);
+          letter-spacing: 0.08em;
         }
 
-        .nameplate {
-          padding: 8px 12px;
+        .agent-nameplate {
+          background: var(--agent-accent);
+          color: #17191a;
+          padding: 10px 12px;
           display: flex;
           flex-direction: column;
-          justify-content: center;
-          height: 52px;
-          position: relative;
-          z-index: 3;
+          gap: 2px;
         }
 
         .agent-name {
-          font-size: 0.9rem;
-          font-weight: 900;
-          letter-spacing: 2px;
+          font-size: 0.92rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
           text-transform: uppercase;
         }
 
         .agent-role-short {
-          font-size: 0.65rem;
-          font-weight: 800;
-          opacity: 0.7;
-          text-transform: uppercase;
+          font-size: 0.68rem;
+          font-weight: 700;
+          opacity: 0.86;
+          line-height: 1.3;
         }
 
-        .activity-panel {
-          flex: 1;
+        .agent-body {
+          padding: 1rem 1.1rem;
           display: flex;
           flex-direction: column;
-          padding: 1.25rem;
-          gap: 1rem;
+          gap: 0.9rem;
+          min-width: 0;
         }
 
-        .panel-header {
+        .agent-head {
           display: flex;
           justify-content: space-between;
           align-items: center;
-          border-bottom: 1px solid var(--border-glass);
-          padding-bottom: 0.75rem;
+          gap: 0.75rem;
         }
 
-        .role-full {
+        .agent-phase {
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          font-size: 0.68rem;
+          color: var(--text-secondary);
+          font-weight: 800;
+        }
+
+        .status-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.45rem;
+          border: 1px solid;
+          border-radius: 999px;
+          padding: 0.28rem 0.6rem;
           font-size: 0.7rem;
           font-weight: 800;
           text-transform: uppercase;
-          letter-spacing: 1px;
-          color: var(--text-secondary);
+          letter-spacing: 0.08em;
+          background: rgba(0, 0, 0, 0.14);
+          white-space: nowrap;
         }
 
-        .status-text {
-          font-size: 0.7rem;
-          font-weight: 900;
-          text-transform: uppercase;
-          letter-spacing: 1.5px;
+        .status-dot {
+          width: 0.5rem;
+          height: 0.5rem;
+          border-radius: 999px;
+          flex-shrink: 0;
         }
 
-        .panel-body {
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
+        .agent-meta-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.65rem;
         }
 
-        label {
-          font-size: 0.6rem;
-          font-weight: 900;
-          color: var(--accent-gold);
-          opacity: 0.6;
-          letter-spacing: 2px;
-          margin-bottom: 0.25rem;
+        .meta-cell,
+        .info-block {
+          border: 1px solid rgba(255, 255, 255, 0.06);
+          background: rgba(0, 0, 0, 0.18);
+          border-radius: 10px;
+          padding: 0.72rem 0.8rem;
+          min-width: 0;
+        }
+
+        .meta-label,
+        .info-label {
           display: block;
+          font-size: 0.62rem;
+          font-weight: 800;
+          letter-spacing: 0.12em;
+          color: var(--accent-gold);
+          text-transform: uppercase;
+          margin-bottom: 0.3rem;
         }
 
-        .task-text {
-          font-size: 0.9rem;
+        .meta-value,
+        .info-value {
+          display: block;
+          font-size: 0.84rem;
           font-weight: 600;
-          letter-spacing: 0.5px;
+          color: inherit;
+          line-height: 1.45;
+          word-break: break-word;
         }
 
-        .log-box {
-          background: rgba(0, 0, 0, 0.3);
-          padding: 0.75rem;
-          border-radius: 6px;
-          border: 1px solid var(--border-glass);
-        }
-
-        .log-text {
-          font-size: 0.75rem;
-          color: var(--text-secondary);
-        }
-
-        .singleton-log {
-          background: #000;
-          padding: 1rem;
-          border-radius: 4px;
-          font-family: var(--font-mono);
-          font-size: 0.8rem;
-          min-height: 80px;
-          color: var(--accent-gold);
-          border-left: 2px solid var(--accent-gold);
-        }
-
-        .log-cursor {
-          display: inline-block;
-          animation: blink 1s infinite;
-        }
-
-        @keyframes blink {
-          0%, 100% { opacity: 1; }
-          50% { opacity: 0; }
-        }
-
-        .scanning-beam {
-          position: absolute;
-          top: -20%;
-          left: 0;
-          width: 100%;
-          height: 15px;
-          background: linear-gradient(180deg, transparent, var(--accent-gold-glow), transparent);
-          z-index: 5;
-          animation: scan 4s infinite linear;
-        }
-
-        @keyframes scan {
-          0% { top: -20%; opacity: 0; }
-          10%, 90% { opacity: 1; }
-          100% { top: 120%; opacity: 0; }
-        }
-
-        .tech-rings {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          width: 130px;
-          height: 130px;
-          z-index: 1;
-        }
-
-        .h-emblem {
-          position: absolute;
-          top: 50%;
-          left: 50%;
-          transform: translate(-50%, -50%);
-          font-size: 3rem;
-          font-weight: 900;
-          color: var(--accent-gold);
-          opacity: 0.05;
-          font-family: serif;
-        }
-
-        .ring {
-          position: absolute;
-          border: 1px solid var(--accent-gold-glow);
-          border-radius: 50%;
-          top: 0; left: 0; right: 0; bottom: 0;
-        }
-
-        .ring-1 { border-style: dashed; animation: rotate 20s infinite linear; }
-        .ring-2 { border-style: dotted; animation: rotate 30s infinite linear reverse; width: 80%; height: 80%; top: 10%; left: 10%; }
-
-        @keyframes rotate {
-          from { transform: rotate(0deg); }
-          to { transform: rotate(360deg); }
-        }
-
-        .bracket {
-          position: absolute;
-          width: 12px;
-          height: 12px;
-          border: 2px solid var(--accent-gold);
-          opacity: 0.4;
-        }
-
-        .top-left { top: -2px; left: -2px; border-right: 0; border-bottom: 0; }
-        .bottom-right { bottom: -2px; right: -2px; border-left: 0; border-top: 0; }
-
-        .pulse-border {
-          border-color: var(--accent-gold);
-          box-shadow: 0 0 20px var(--accent-gold-glow);
-        }
-
-        .active-pulse {
-          position: absolute;
-          right: 12px;
-          top: 50%;
-          transform: translateY(-50%);
-          width: 8px;
-          height: 8px;
-          background: var(--accent-gold);
-          border-radius: 50%;
-          box-shadow: 0 0 10px var(--accent-gold);
-          animation: pulse-active 2s infinite;
-        }
-
-        @keyframes pulse-active {
-          0% { transform: translateY(-50%) scale(1); opacity: 1; }
-          100% { transform: translateY(-50%) scale(2.5); opacity: 0; }
-        }
-
-        .inactive-shade {
+        .log-block {
           flex: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          opacity: 0.2;
-        }
-
-        .inactive-shade span {
-          font-size: 0.75rem;
-          font-weight: 700;
-          letter-spacing: 2px;
         }
 
         .mono {
           font-family: var(--font-mono);
+          color: var(--text-secondary);
+          font-size: 0.76rem;
+        }
+
+        @media (max-width: 760px) {
+          .agent-card,
+          .agent-card.singleton {
+            grid-template-columns: 1fr;
+          }
+
+          .agent-tile {
+            border-right: none;
+            border-bottom: 1px solid rgba(255, 255, 255, 0.05);
+          }
+
+          .agent-image-wrap {
+            min-height: 140px;
+          }
         }
       `}</style>
     </div>

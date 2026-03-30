@@ -1,391 +1,665 @@
-import React, { useState, useEffect } from 'react';
+import React, { useEffect, useState } from 'react';
 import AgentCard from './components/AgentCard';
 
-const API_BASE = 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
-const initialAgents = [
-  { id: 'scout', name: 'Scout', role: 'Spec Retriever', status: 'idle', task: 'Awaiting spec...', latestLog: 'Ready.', accentColor: '#c4922a' },
-  { id: 'coobie', name: 'Coobie', role: 'Memory Retriever', status: 'idle', task: 'Awaiting memory query', latestLog: 'Ready.', accentColor: '#7a2a3a' },
-  { id: 'keeper', name: 'Keeper', role: 'Boundary Retriever', status: 'idle', task: 'Monitoring perimeter', latestLog: 'Ready.', accentColor: '#8a7a3a' },
-  { id: 'mason', name: 'Mason', role: 'Build Retriever', status: 'idle', task: 'Awaiting design', latestLog: 'Ready.', accentColor: '#c4662a' },
-  { id: 'piper', name: 'Piper', role: 'Tool Retriever', status: 'idle', task: 'Awaiting signal', latestLog: 'Ready.', accentColor: '#5a7a5a' },
-  { id: 'ash', name: 'Ash', role: 'Twin Retriever', status: 'idle', task: 'Awaiting signal', latestLog: 'Ready.', accentColor: '#2a7a7a' },
-  { id: 'bramble', name: 'Bramble', role: 'Test Retriever', status: 'idle', task: 'Awaiting signal', latestLog: 'Ready.', accentColor: '#a89a2a' },
-  { id: 'sable', name: 'Sable', role: 'Scenario Retriever', status: 'idle', task: 'Awaiting signal', latestLog: 'Ready.', accentColor: '#3a4a5a' },
-  { id: 'flint', name: 'Flint', role: 'Artifact Retriever', status: 'idle', task: 'Awaiting signal', latestLog: 'Ready.', accentColor: '#8a6a3a' },
+const AGENT_DEFS = [
+  { id: 'scout', name: 'Scout', role: 'Spec Retriever', group: 'planning', accentColor: '#c4922a' },
+  { id: 'keeper', name: 'Keeper', role: 'Boundary Retriever', group: 'planning', accentColor: '#8a7a3a' },
+  { id: 'mason', name: 'Mason', role: 'Build Retriever', group: 'action', accentColor: '#c4662a' },
+  { id: 'piper', name: 'Piper', role: 'Tool Retriever', group: 'action', accentColor: '#5a7a5a' },
+  { id: 'ash', name: 'Ash', role: 'Twin Retriever', group: 'action', accentColor: '#2a7a7a' },
+  { id: 'bramble', name: 'Bramble', role: 'Test Retriever', group: 'verification', accentColor: '#a89a2a' },
+  { id: 'sable', name: 'Sable', role: 'Scenario Retriever', group: 'verification', accentColor: '#3a4a5a' },
+  { id: 'flint', name: 'Flint', role: 'Artifact Retriever', group: 'verification', accentColor: '#8a6a3a' },
+  { id: 'coobie', name: 'Coobie', role: 'Memory Retriever', group: 'memory', accentColor: '#7a2a3a' },
 ];
 
-function App() {
-  const [run, setRun] = useState(null);
-  const [events, setEvents] = useState([]);
-  const [agents, setAgents] = useState(initialAgents);
+function titleCase(value) {
+  if (!value) {
+    return 'idle';
+  }
+  return value
+    .replaceAll('_', ' ')
+    .split(' ')
+    .filter(Boolean)
+    .map((part) => part[0].toUpperCase() + part.slice(1))
+    .join(' ');
+}
 
-  // 1. Fetch latest run on mount
+function normalizeStatus(status, ownership) {
+  const normalized = (status || '').toLowerCase();
+  if (normalized === 'warning' || normalized === 'failed') {
+    return 'blocked';
+  }
+  if (normalized === 'complete') {
+    return 'complete';
+  }
+  if (normalized === 'running') {
+    return 'running';
+  }
+  if (ownership) {
+    return 'running';
+  }
+  return 'idle';
+}
+
+function deriveAgents(events, blackboard, executions) {
+  const claims = blackboard?.agent_claims || {};
+  const executionMap = Object.fromEntries(
+    (executions || []).map((execution) => [execution.agent_name.toLowerCase(), execution]),
+  );
+
+  return AGENT_DEFS.map((definition) => {
+    const agentEvents = (events || []).filter(
+      (event) => event.agent.toLowerCase() === definition.id.toLowerCase(),
+    );
+    const latest = agentEvents.length > 0 ? agentEvents[agentEvents.length - 1] : null;
+    const execution = executionMap[definition.id.toLowerCase()];
+    const ownership = claims[definition.id] || '';
+
+    return {
+      ...definition,
+      status: normalizeStatus(latest?.status, ownership),
+      task: ownership || latest?.message || `Awaiting ${definition.role.toLowerCase()}`,
+      latestLog: latest
+        ? `${titleCase(latest.phase)} · ${latest.message}`
+        : 'Ready for the next run.',
+      latestPhase: latest ? titleCase(latest.phase) : 'Awaiting signal',
+      ownership,
+      engine: execution ? `${execution.provider}/${execution.model}` : 'unassigned',
+    };
+  });
+}
+
+async function fetchJson(url) {
+  const response = await fetch(url);
+  if (!response.ok) {
+    throw new Error(`${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
+function Panel({ title, children, compact = false }) {
+  return (
+    <section className={`ops-panel ${compact ? 'compact' : ''}`}>
+      <div className="panel-title-row">
+        <h3>{title}</h3>
+        <div className="panel-line"></div>
+      </div>
+      {children}
+    </section>
+  );
+}
+
+function App() {
+  const [runs, setRuns] = useState([]);
+  const [activeRunId, setActiveRunId] = useState('');
+  const [runState, setRunState] = useState(null);
+  const [error, setError] = useState('');
+
   useEffect(() => {
-    const fetchLatest = async () => {
+    let cancelled = false;
+
+    const loadRuns = async () => {
       try {
-        const res = await fetch(`${API_BASE}/runs`);
-        const data = await res.json();
-        if (data && data.length > 0) {
-          setRun(data[0]);
+        const data = await fetchJson(`${API_BASE}/runs`);
+        if (cancelled) {
+          return;
         }
-      } catch (e) {
-        console.error("Failed to fetch runs", e);
+        setRuns(data);
+        setActiveRunId((current) => {
+          if (!data.length) {
+            return '';
+          }
+          if (current && data.some((run) => run.run_id === current)) {
+            return current;
+          }
+          return data[0].run_id;
+        });
+        setError('');
+      } catch (fetchError) {
+        if (!cancelled) {
+          setError(fetchError.message);
+        }
       }
     };
-    fetchLatest();
-    const interval = setInterval(fetchLatest, 5000);
-    return () => clearInterval(interval);
+
+    loadRuns();
+    const interval = setInterval(loadRuns, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
   }, []);
 
-  // 2. Poll events for current run
   useEffect(() => {
-    if (!run) return;
-    const fetchEvents = async () => {
+    if (!activeRunId) {
+      setRunState(null);
+      return undefined;
+    }
+
+    let cancelled = false;
+
+    const loadState = async () => {
       try {
-        const res = await fetch(`${API_BASE}/runs/${run.run_id}/events`);
-        const data = await res.json();
-        setEvents(data);
-      } catch (e) {
-        console.error("Failed to fetch events", e);
+        const data = await fetchJson(`${API_BASE}/runs/${activeRunId}/state`);
+        if (!cancelled) {
+          setRunState(data);
+          setError('');
+        }
+      } catch (fetchError) {
+        if (!cancelled) {
+          setError(fetchError.message);
+        }
       }
     };
-    fetchEvents();
-    const interval = setInterval(fetchEvents, 1000);
-    return () => clearInterval(interval);
-  }, [run]);
 
-  // 3. Map events to agent state
-  useEffect(() => {
-    if (events.length === 0) return;
+    loadState();
+    const interval = setInterval(loadState, 1500);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, [activeRunId]);
 
-    setAgents(prev => prev.map(agent => {
-      const agentEvents = events.filter(e => e.agent.toLowerCase() === agent.id.toLowerCase());
-      if (agentEvents.length === 0) return agent;
-
-      const latest = agentEvents[agentEvents.length - 1];
-      return {
-        ...agent,
-        status: latest.status.toLowerCase(),
-        task: latest.phase || agent.task,
-        latestLog: latest.message
-      };
-    }));
-  }, [events]);
-
-  const memoryAgent = agents.find(a => a.id === 'coobie');
-  const planningAgents = agents.filter(a => ['scout', 'keeper'].includes(a.id));
-  const actionAgents = agents.filter(a => ['mason', 'piper', 'ash'].includes(a.id) || (!['scout', 'coobie', 'keeper', 'bramble', 'sable', 'flint'].includes(a.id) && !a.id.startsWith('verifier')));
-  const verificationAgents = agents.filter(a => ['bramble', 'sable', 'flint'].includes(a.id));
+  const run = runState?.run || null;
+  const events = runState?.events || [];
+  const blackboard = runState?.blackboard || null;
+  const lessons = runState?.lessons || [];
+  const agentExecutions = runState?.agent_executions || [];
+  const agents = deriveAgents(events, blackboard, agentExecutions);
+  const planningAgents = agents.filter((agent) => agent.group === 'planning');
+  const actionAgents = agents.filter((agent) => agent.group === 'action');
+  const verificationAgents = agents.filter((agent) => agent.group === 'verification');
+  const memoryAgent = agents.find((agent) => agent.group === 'memory');
+  const recentEvents = [...events].slice(-14).reverse();
+  const activeThreads = agents.filter((agent) => agent.status === 'running');
+  const claims = Object.entries(blackboard?.agent_claims || {});
 
   return (
-    <div className="app-container">
-      <header className="run-header glass">
-        <div className="header-brand">
-          <div className="logo-container">
-            <div className="css-logo">H</div>
-            <img
-              src="/images/logo.png"
-              alt=""
-              className="brand-logo"
-              onError={(e) => e.target.style.display = 'none'}
-            />
-          </div>
-          <div className="header-info">
-            <h1>HARKONNEN LABS / THE PACK</h1>
-            <div className="run-meta">
-              <span className="run-id">RUN: {run?.run_id?.split('-')[0] || 'OFFLINE'}</span>
-              <span className="spec-title">SPEC: {run?.product || 'NO ACTIVE SPEC'}</span>
-            </div>
+    <div className="pack-board-shell">
+      <header className="run-header glass-panel">
+        <div>
+          <div className="eyebrow">Harkonnen Labs / Pack Board</div>
+          <h1>{run ? `${run.product} · ${run.spec_id}` : 'Factory offline'}</h1>
+          <div className="header-meta">
+            <span>Run: {run?.run_id?.slice(0, 8) || 'none'}</span>
+            <span>Phase: {titleCase(blackboard?.current_phase || run?.status || 'idle')}</span>
+            <span>Status: {(run?.status || 'idle').toUpperCase()}</span>
           </div>
         </div>
-        <div className="run-status">
-          <span className={`status-badge ${run?.status === 'active' ? 'running' : ''}`}>
-            {run?.status?.toUpperCase() || 'IDLE'}
-          </span>
-        </div>
-        <div className="header-actions">
-          <button className="btn-secondary">VIEW_LOGS</button>
-          <button className="btn-primary">TERMINATE</button>
+
+        <div className="header-controls">
+          <label className="run-selector-label">
+            Recent runs
+            <select
+              className="run-selector"
+              value={activeRunId}
+              onChange={(event) => setActiveRunId(event.target.value)}
+            >
+              {runs.length === 0 ? <option value="">No runs</option> : null}
+              {runs.map((candidate) => (
+                <option key={candidate.run_id} value={candidate.run_id}>
+                  {candidate.run_id.slice(0, 8)} · {candidate.product} · {candidate.status}
+                </option>
+              ))}
+            </select>
+          </label>
+          <div className={`status-pill status-${run?.status || 'idle'}`}>
+            {run?.status || 'idle'}
+          </div>
         </div>
       </header>
 
-      <main className="dashboard-content">
-        <div className="grid-layout">
-          <div className="main-phases">
-            <section className="phase-section">
-              <div className="section-header">
-                <h2>01_INTAKE & PLANNING</h2>
-                <div className="section-line"></div>
-              </div>
-              <div className="agent-grid">
-                {planningAgents.map((agent) => (
-                  <AgentCard key={agent.id} agent={agent} variant="dark" />
-                ))}
-              </div>
-            </section>
+      {error ? <div className="error-banner">API error: {error}</div> : null}
 
-            <section className="phase-section">
-              <div className="section-header">
-                <h2>02_IMPLEMENTATION & ACTION</h2>
-                <div className="section-line"></div>
-              </div>
-              <div className="agent-grid dynamic-grid">
-                {actionAgents.map((agent) => (
-                  <AgentCard key={agent.id} agent={agent} variant={agent.id === 'mason' ? 'light' : 'dark'} />
-                ))}
-              </div>
-            </section>
-
-            <section className="phase-section">
-              <div className="section-header">
-                <h2>03_VERIFICATION & BUNDLING</h2>
-                <div className="section-line"></div>
-              </div>
-              <div className="agent-grid">
-                {verificationAgents.map((agent) => (
-                  <AgentCard key={agent.id} agent={agent} variant="dark" />
-                ))}
-              </div>
-            </section>
-          </div>
-
-          <aside className="sidebar-coobie">
-            <div className="section-header">
-              <h2>MEMORY_VAULT</h2>
-              <div className="section-line"></div>
+      <main className="dashboard-grid">
+        <section className="main-column">
+          <Panel title="01 · Intake & Planning">
+            <div className="agent-grid two-up">
+              {planningAgents.map((agent) => (
+                <AgentCard key={agent.id} agent={agent} />
+              ))}
             </div>
-            {memoryAgent && (
-              <div className="coobie-singleton">
-                <AgentCard agent={memoryAgent} variant="dark" isSingleton />
-              </div>
-            )}
-            <div className="vault-stats glass">
-              <div className="stat-row">
-                <span className="stat-label">PATTERNS_CACHED:</span>
-                <span className="stat-value">1,248</span>
-              </div>
-              <div className="stat-row">
-                <span className="stat-label">CONTEXT_DEPTH:</span>
-                <span className="stat-value">84%</span>
-              </div>
+          </Panel>
+
+          <Panel title="02 · Implementation & Action">
+            <div className="agent-grid three-up">
+              {actionAgents.map((agent) => (
+                <AgentCard key={agent.id} agent={agent} variant={agent.id === 'mason' ? 'light' : 'dark'} />
+              ))}
             </div>
-          </aside>
-        </div>
+          </Panel>
+
+          <Panel title="03 · Verification & Bundling">
+            <div className="agent-grid three-up">
+              {verificationAgents.map((agent) => (
+                <AgentCard key={agent.id} agent={agent} />
+              ))}
+            </div>
+          </Panel>
+
+          <Panel title="Run Timeline">
+            <div className="timeline-list">
+              {recentEvents.length === 0 ? (
+                <div className="empty-state">No events recorded yet.</div>
+              ) : (
+                recentEvents.map((event) => (
+                  <div key={event.event_id} className="timeline-item">
+                    <div className="timeline-meta">
+                      <span>{titleCase(event.phase)}</span>
+                      <span>{event.agent}</span>
+                      <span>{event.status}</span>
+                    </div>
+                    <div className="timeline-message">{event.message}</div>
+                    <div className="timeline-time">{new Date(event.created_at).toLocaleString()}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+        </section>
+
+        <aside className="side-column">
+          <Panel title="Mission Board" compact>
+            <div className="info-stack">
+              <div className="info-row"><span>Current phase</span><strong>{titleCase(blackboard?.current_phase || 'idle')}</strong></div>
+              <div className="info-row"><span>Active goal</span><strong>{blackboard?.active_goal || 'Awaiting a run.'}</strong></div>
+              <div className="info-row"><span>Resolved items</span><strong>{blackboard?.resolved_items?.length || 0}</strong></div>
+              <div className="info-row"><span>Artifacts tracked</span><strong>{blackboard?.artifact_refs?.length || 0}</strong></div>
+            </div>
+            <div className="chip-row">
+              {(blackboard?.open_blockers || []).length === 0 ? (
+                <span className="soft-chip ok">No blockers</span>
+              ) : (
+                blackboard.open_blockers.map((blocker) => (
+                  <span key={blocker} className="soft-chip danger">{blocker}</span>
+                ))
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Coobie Memory Vault" compact>
+            {memoryAgent ? <AgentCard agent={memoryAgent} isSingleton /> : null}
+            <div className="info-stack top-gap">
+              <div className="info-row"><span>Lesson refs</span><strong>{blackboard?.lesson_refs?.length || 0}</strong></div>
+              <div className="info-row"><span>Promoted lessons</span><strong>{lessons.length}</strong></div>
+              <div className="info-row"><span>Recent recalls</span><strong>{agentExecutions.length}</strong></div>
+            </div>
+            <div className="list-block">
+              {(lessons || []).length === 0 ? (
+                <div className="empty-state">No lessons promoted for this run yet.</div>
+              ) : (
+                lessons.map((lesson) => (
+                  <div key={lesson.lesson_id} className="list-item">
+                    <div className="list-item-title">{lesson.pattern}</div>
+                    <div className="list-item-subtle">
+                      intervention: {lesson.intervention || 'none recorded'}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Evidence Board" compact>
+            <div className="list-block compact-list">
+              {(blackboard?.artifact_refs || []).length === 0 ? (
+                <div className="empty-state">No artifact refs yet.</div>
+              ) : (
+                blackboard.artifact_refs.map((artifact) => (
+                  <div key={artifact} className="list-item tight">{artifact}</div>
+                ))
+              )}
+            </div>
+          </Panel>
+
+          <Panel title="Action Board" compact>
+            <div className="list-block compact-list">
+              {claims.length === 0 ? (
+                <div className="empty-state">No active claims.</div>
+              ) : (
+                claims.map(([agent, claim]) => (
+                  <div key={agent} className="list-item">
+                    <div className="list-item-title">{agent}</div>
+                    <div className="list-item-subtle">{claim}</div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+        </aside>
       </main>
 
-      <footer className="dashboard-footer glass">
-        <div className="stat-group">
-          <span className="stat-label">RESOURCES:</span>
-          <span className="stat-value">CPU: 38% / MEM: 0.9GB</span>
-        </div>
-        <div className="stat-group">
-          <span className="stat-label">ACTIVE_THREADS:</span>
-          <span className="stat-value">
-            {agents.filter(a => a.status === 'running').map(a => a.name.toUpperCase()).join(', ') || 'NONE'}
-          </span>
-        </div>
-        <div className="stat-group ml-auto">
-          <span className="stat-label">SYSTEM_UPTIME:</span>
-          <span className="stat-value">04:12:33</span>
-        </div>
+      <footer className="footer-bar glass-panel">
+        <span>Active threads: {activeThreads.length ? activeThreads.map((agent) => agent.name).join(', ') : 'none'}</span>
+        <span>Events: {events.length}</span>
+        <span>Lessons: {lessons.length}</span>
       </footer>
 
       <style jsx>{`
-        .app-container {
+        .pack-board-shell {
           min-height: 100vh;
-          background: var(--bg-primary);
+          background:
+            radial-gradient(circle at top left, rgba(194, 163, 114, 0.12), transparent 28%),
+            radial-gradient(circle at top right, rgba(94, 125, 113, 0.14), transparent 32%),
+            linear-gradient(180deg, #171a1c 0%, #121416 100%);
           color: var(--text-primary);
-          padding: 2rem;
+          padding: 1.5rem;
           display: flex;
           flex-direction: column;
-          gap: 2rem;
-          max-width: 1800px;
-          margin: 0 auto;
+          gap: 1.25rem;
+        }
+
+        .glass-panel {
+          background: rgba(27, 30, 32, 0.84);
+          border: 1px solid var(--border-glass);
+          box-shadow: 0 18px 40px rgba(0, 0, 0, 0.28);
+          backdrop-filter: blur(14px);
+        }
+
+        .run-header,
+        .footer-bar {
+          border-radius: 18px;
+          padding: 1.1rem 1.3rem;
         }
 
         .run-header {
           display: flex;
           justify-content: space-between;
-          align-items: center;
-          padding: 1rem 2rem;
+          gap: 1rem;
+          align-items: start;
+        }
+
+        .eyebrow {
+          text-transform: uppercase;
+          letter-spacing: 0.16em;
+          font-size: 0.72rem;
+          color: var(--accent-gold);
+          margin-bottom: 0.45rem;
+          font-weight: 800;
+        }
+
+        h1 {
+          font-size: clamp(1.7rem, 3vw, 2.5rem);
+          margin-bottom: 0.55rem;
+          font-family: 'IBM Plex Sans', 'Segoe UI', sans-serif;
+        }
+
+        .header-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.65rem;
+          color: var(--text-secondary);
+          font-size: 0.88rem;
+        }
+
+        .header-meta span,
+        .status-pill,
+        .soft-chip {
+          border-radius: 999px;
+          padding: 0.28rem 0.65rem;
+          border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.03);
+        }
+
+        .header-controls {
+          display: flex;
+          flex-direction: column;
+          align-items: end;
+          gap: 0.75rem;
+        }
+
+        .run-selector-label {
+          display: flex;
+          flex-direction: column;
+          gap: 0.3rem;
+          font-size: 0.72rem;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          color: var(--text-secondary);
+          font-weight: 700;
+        }
+
+        .run-selector {
+          min-width: 320px;
+          max-width: 100%;
           border-radius: 12px;
           border: 1px solid var(--border-glass);
+          background: #15181a;
+          color: var(--text-primary);
+          padding: 0.72rem 0.85rem;
+          font: inherit;
         }
 
-        .header-brand {
-          display: flex;
-          align-items: center;
-          gap: 1.5rem;
-        }
-
-        .logo-container {
-          position: relative;
-          width: 50px;
-          height: 50px;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-        }
-
-        .css-logo {
-          position: absolute;
-          font-family: serif;
-          font-size: 2.5rem;
-          font-weight: 900;
-          color: var(--accent-gold);
-          text-shadow: 0 0 15px var(--accent-gold-glow);
-          z-index: 1;
-        }
-
-        .brand-logo {
-          height: 100%;
-          position: relative;
-          z-index: 2;
-          filter: drop-shadow(0 0 10px var(--accent-gold-glow));
-        }
-
-        .header-info h1 {
-          font-size: 1.25rem;
-          letter-spacing: 4px;
-          color: var(--accent-gold);
-          margin: 0;
-          font-weight: 900;
-        }
-
-        .run-meta {
-          display: flex;
-          gap: 1.5rem;
-          font-family: var(--font-mono);
-          font-size: 0.75rem;
-          color: var(--text-secondary);
-          margin-top: 4px;
-        }
-
-        .status-badge {
-          background: rgba(194, 163, 114, 0.1);
-          color: var(--accent-gold);
-          padding: 6px 16px;
-          border: 1px solid var(--border-strong);
-          border-radius: 4px;
-          font-size: 0.8rem;
+        .status-pill {
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
           font-weight: 800;
-          letter-spacing: 2px;
+          color: var(--accent-gold);
         }
 
-        .grid-layout {
+        .dashboard-grid {
           display: grid;
-          grid-template-columns: 1fr 400px;
-          gap: 2.5rem;
+          grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.95fr);
+          gap: 1.2rem;
+          align-items: start;
         }
 
-        .main-phases {
+        .main-column,
+        .side-column {
           display: flex;
           flex-direction: column;
-          gap: 3rem;
+          gap: 1.1rem;
         }
 
-        .phase-section {
-          display: flex;
-          flex-direction: column;
-          gap: 1.5rem;
+        .ops-panel {
+          background: rgba(22, 24, 26, 0.88);
+          border: 1px solid var(--border-glass);
+          border-radius: 18px;
+          padding: 1rem 1rem 1.05rem;
+          box-shadow: 0 18px 36px rgba(0, 0, 0, 0.24);
         }
 
-        .section-header {
+        .panel-title-row {
           display: flex;
           align-items: center;
-          gap: 1.5rem;
+          gap: 0.8rem;
+          margin-bottom: 0.95rem;
         }
 
-        .section-header h2 {
-          font-size: 0.75rem;
-          letter-spacing: 3px;
-          color: var(--accent-gold);
+        .panel-title-row h3 {
           white-space: nowrap;
-          margin: 0;
-          opacity: 0.8;
+          text-transform: uppercase;
+          letter-spacing: 0.12em;
+          font-size: 0.82rem;
+          color: var(--accent-gold);
         }
 
-        .section-line {
+        .panel-line {
           height: 1px;
-          background: linear-gradient(90deg, var(--border-strong) 0%, transparent 100%);
           flex: 1;
+          background: linear-gradient(90deg, rgba(194, 163, 114, 0.55), transparent);
         }
 
         .agent-grid {
           display: grid;
-          grid-template-columns: repeat(auto-fill, minmax(400px, 1fr));
-          gap: 1.5rem;
+          gap: 0.95rem;
         }
 
-        .dynamic-grid {
-          grid-template-columns: repeat(auto-fill, minmax(380px, 1fr));
+        .two-up {
+          grid-template-columns: repeat(2, minmax(0, 1fr));
         }
 
-        .sidebar-coobie {
+        .three-up {
+          grid-template-columns: repeat(3, minmax(0, 1fr));
+        }
+
+        .info-stack {
           display: flex;
           flex-direction: column;
-          gap: 1.5rem;
+          gap: 0.6rem;
         }
 
-        .coobie-singleton {
-          transform: scale(1);
-          transition: all 0.3s cubic-bezier(0.4, 0, 0.2, 1);
+        .top-gap {
+          margin-top: 0.9rem;
         }
 
-        .vault-stats {
-          padding: 1.5rem;
-          border-radius: 12px;
-          display: flex;
-          flex-direction: column;
-          gap: 1rem;
-          border: 1px solid var(--border-glass);
-        }
-
-        .stat-row {
+        .info-row {
           display: flex;
           justify-content: space-between;
+          gap: 0.8rem;
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          background: rgba(255, 255, 255, 0.03);
+          padding: 0.7rem 0.8rem;
+          border-radius: 12px;
+        }
+
+        .info-row span {
+          color: var(--text-secondary);
+          font-size: 0.78rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+        }
+
+        .info-row strong {
+          font-size: 0.86rem;
+          text-align: right;
+        }
+
+        .chip-row {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          margin-top: 0.85rem;
+        }
+
+        .soft-chip.ok {
+          color: #8fae7c;
+        }
+
+        .soft-chip.danger {
+          color: #d8876e;
+        }
+
+        .list-block {
+          display: flex;
+          flex-direction: column;
+          gap: 0.55rem;
+          margin-top: 0.9rem;
+        }
+
+        .compact-list {
+          margin-top: 0;
+        }
+
+        .list-item {
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: 12px;
+          padding: 0.72rem 0.8rem;
+        }
+
+        .list-item.tight {
+          padding: 0.6rem 0.75rem;
+          font-family: var(--font-mono);
+          font-size: 0.8rem;
+        }
+
+        .list-item-title {
+          font-size: 0.86rem;
+          font-weight: 700;
+          margin-bottom: 0.25rem;
+        }
+
+        .list-item-subtle {
+          color: var(--text-secondary);
+          font-size: 0.76rem;
+          line-height: 1.45;
+        }
+
+        .timeline-list {
+          display: flex;
+          flex-direction: column;
+          gap: 0.7rem;
+        }
+
+        .timeline-item {
+          border-left: 2px solid rgba(194, 163, 114, 0.55);
+          padding: 0.3rem 0 0.3rem 0.85rem;
+        }
+
+        .timeline-meta {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.5rem;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          font-size: 0.68rem;
+          color: var(--accent-gold);
+          margin-bottom: 0.25rem;
+        }
+
+        .timeline-message {
+          font-size: 0.9rem;
+          line-height: 1.45;
+        }
+
+        .timeline-time {
+          margin-top: 0.25rem;
+          color: var(--text-secondary);
           font-size: 0.75rem;
           font-family: var(--font-mono);
         }
 
-        .stat-label {
+        .empty-state {
           color: var(--text-secondary);
+          font-size: 0.82rem;
         }
 
-        .stat-value {
-          color: var(--accent-gold);
+        .error-banner {
+          border: 1px solid rgba(199, 104, 76, 0.5);
+          background: rgba(120, 39, 30, 0.35);
+          color: #f0c7bc;
+          border-radius: 14px;
+          padding: 0.8rem 1rem;
+          font-size: 0.88rem;
         }
 
-        .dashboard-footer {
-          margin-top: auto;
+        .footer-bar {
           display: flex;
-          gap: 4rem;
-          padding: 1rem 2rem;
-          border-radius: 12px;
-          align-items: center;
-          border: 1px solid var(--border-glass);
+          flex-wrap: wrap;
+          gap: 0.9rem;
+          justify-content: space-between;
+          color: var(--text-secondary);
+          font-size: 0.82rem;
         }
 
-        .btn-primary {
-          background: var(--accent-gold);
-          border: none;
-          color: var(--bg-primary);
-          font-weight: 900;
-        }
-
-        .btn-secondary {
-          background: transparent;
-          border: 1px solid var(--border-strong);
-          color: var(--accent-gold);
-        }
-
-        @media (max-width: 1400px) {
-          .grid-layout {
+        @media (max-width: 1280px) {
+          .dashboard-grid {
             grid-template-columns: 1fr;
           }
-          .sidebar-coobie {
-            order: -1;
+        }
+
+        @media (max-width: 980px) {
+          .two-up,
+          .three-up {
+            grid-template-columns: 1fr;
+          }
+
+          .run-header {
+            flex-direction: column;
+          }
+
+          .header-controls {
+            align-items: stretch;
+            width: 100%;
+          }
+
+          .run-selector {
+            min-width: 0;
+            width: 100%;
           }
         }
       `}</style>

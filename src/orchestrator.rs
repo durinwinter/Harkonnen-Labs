@@ -4,9 +4,11 @@ use serde::Serialize;
 use sqlx::{Row, SqlitePool};
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
+use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
 use tokio::process::Command;
+use tokio::sync::RwLock;
 use uuid::Uuid;
 
 use crate::{
@@ -15,8 +17,9 @@ use crate::{
     db,
     memory::MemoryStore,
     models::{
-        AgentExecution, HiddenScenarioSummary, IntentPackage, RunEvent, RunRecord,
-        ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
+        AgentExecution, BlackboardState, EpisodeRecord, HiddenScenarioCheckResult,
+        HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord, RunEvent,
+        RunRecord, ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
     },
     policy,
     scenarios,
@@ -29,18 +32,36 @@ pub struct AppContext {
     pub paths: Paths,
     pub pool: SqlitePool,
     pub memory_store: MemoryStore,
+    pub blackboard: Arc<RwLock<BlackboardState>>,
+}
+
+#[derive(Debug, Clone)]
+pub struct FailureHarness {
+    pub phase: String,
+    pub message: String,
 }
 
 #[derive(Debug, Clone)]
 pub struct RunRequest {
     pub spec_path: String,
     pub product: String,
+    pub failure_harness: Option<FailureHarness>,
+}
+
+impl RunRequest {
+    fn harness_message(&self, phase: &str) -> Option<&str> {
+        self.failure_harness
+            .as_ref()
+            .filter(|harness| harness.phase == phase)
+            .map(|harness| harness.message.as_str())
+    }
 }
 
 #[derive(Debug, Clone)]
 struct ExecutionOutput {
     validation: ValidationSummary,
     hidden_scenarios: HiddenScenarioSummary,
+    run_dir: PathBuf,
 }
 
 #[derive(Debug, Clone)]
@@ -69,6 +90,7 @@ impl AppContext {
             paths,
             pool,
             memory_store,
+            blackboard: Arc::new(RwLock::new(BlackboardState::default())),
         })
     }
 
@@ -85,18 +107,20 @@ impl AppContext {
 
         self.insert_run(&run_id, &spec_obj.id, &req.product, "queued", now)
             .await?;
-        self.record_event(
-            &run_id,
-            "queued",
-            "orchestrator",
-            "queued",
-            &format!(
-                "Created run for spec {} against product {}",
-                spec_obj.id, req.product
-            ),
-            &log_path,
-        )
-        .await?;
+        let _ = self
+            .record_event(
+                &run_id,
+                None,
+                "queued",
+                "orchestrator",
+                "queued",
+                &format!(
+                    "Created run for spec {} against product {}",
+                    spec_obj.id, req.product
+                ),
+                &log_path,
+            )
+            .await?;
 
         match self.execute_run(&run_id, &req, &spec_obj, &log_path).await {
             Ok(output) => {
@@ -106,33 +130,81 @@ impl AppContext {
                     "completed_with_issues"
                 };
                 self.update_run_status(&run_id, final_status).await?;
-                self.record_event(
-                    &run_id,
-                    "complete",
-                    "orchestrator",
-                    if final_status == "completed" {
-                        "complete"
-                    } else {
-                        "warning"
-                    },
-                    &format!("Run finished with status {}", final_status),
-                    &log_path,
-                )
-                .await?;
+
+                let lessons = match self.consolidate_run(&run_id).await {
+                    Ok(lessons) => lessons,
+                    Err(error) => {
+                        let _ = self
+                            .record_event(
+                                &run_id,
+                                None,
+                                "memory",
+                                "coobie",
+                                "warning",
+                                &format!("Consolidation skipped: {error}"),
+                                &log_path,
+                            )
+                            .await;
+                        Vec::new()
+                    }
+                };
+                self.attach_lessons_to_blackboard(&output.run_dir, &lessons)
+                    .await?;
+
+                let _ = self
+                    .record_event(
+                        &run_id,
+                        None,
+                        "complete",
+                        "orchestrator",
+                        if final_status == "completed" {
+                            "complete"
+                        } else {
+                            "warning"
+                        },
+                        &format!("Run finished with status {}", final_status),
+                        &log_path,
+                    )
+                    .await?;
+                self.finalize_blackboard(final_status, &output.run_dir).await?;
                 self.package_artifacts(&run_id).await?;
             }
             Err(error) => {
                 let message = error.to_string();
                 self.update_run_status(&run_id, "failed").await?;
-                self.record_event(
-                    &run_id,
-                    "complete",
-                    "orchestrator",
-                    "failed",
-                    &message,
-                    &log_path,
-                )
-                .await?;
+                let _ = self
+                    .record_event(
+                        &run_id,
+                        None,
+                        "complete",
+                        "orchestrator",
+                        "failed",
+                        &message,
+                        &log_path,
+                    )
+                    .await?;
+                let run_dir = self.run_dir(&run_id);
+                self.mark_blackboard_failed(&message, &run_dir).await?;
+                let lessons = match self.consolidate_run(&run_id).await {
+                    Ok(lessons) => lessons,
+                    Err(consolidation_error) => {
+                        let _ = self
+                            .record_event(
+                                &run_id,
+                                None,
+                                "memory",
+                                "coobie",
+                                "warning",
+                                &format!("Consolidation skipped: {consolidation_error}"),
+                                &log_path,
+                            )
+                            .await;
+                        Vec::new()
+                    }
+                };
+                if run_dir.exists() {
+                    self.attach_lessons_to_blackboard(&run_dir, &lessons).await?;
+                }
                 let _ = self.package_artifacts(&run_id).await;
             }
         }
@@ -158,21 +230,39 @@ impl AppContext {
             .await
             .with_context(|| format!("copying spec snapshot for run {run_id}"))?;
 
+        let mut blackboard = BlackboardState {
+            run_id: run_id.to_string(),
+            current_phase: "queued".to_string(),
+            active_goal: spec_obj.title.clone(),
+            ..Default::default()
+        };
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
         let mut agent_executions = Vec::new();
 
+        let intake_episode = self
+            .start_episode(run_id, "intake", &format!("Interpret spec {}", spec_obj.id))
+            .await?;
+        blackboard.current_phase = "intake".to_string();
+        blackboard.active_goal = format!("Interpret spec {}", spec_obj.title);
+        claim_agent(&mut blackboard, "scout", "interpret spec and normalize intent");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "intake").await?;
-        self.record_event(
-            run_id,
-            "intake",
-            "scout",
-            "running",
-            &format!("Loading spec '{}'", spec_obj.title),
-            log_path,
-        )
-        .await?;
+        let intake_start = self
+            .record_event(
+                run_id,
+                Some(&intake_episode),
+                "intake",
+                "scout",
+                "running",
+                &format!("Loading spec '{}'", spec_obj.title),
+                log_path,
+            )
+            .await?;
         let memory_hits = self.memory_store.retrieve_context(&spec_obj.title).await?;
         let intent = self.scout_intake(spec_obj, &memory_hits).await?;
         self.write_json_file(&run_dir.join("intent.json"), &intent).await?;
+        push_unique(&mut blackboard.artifact_refs, "intent.json");
         self.write_agent_execution(
             &profiles,
             "scout",
@@ -183,34 +273,52 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "intake",
-            "scout",
-            "complete",
-            &format!(
-                "Intent package ready with {} recommended steps",
-                intent.recommended_steps.len()
-            ),
-            log_path,
-        )
-        .await?;
+        let intake_end = self
+            .record_event(
+                run_id,
+                Some(&intake_episode),
+                "intake",
+                "scout",
+                "complete",
+                &format!(
+                    "Intent package ready with {} recommended steps",
+                    intent.recommended_steps.len()
+                ),
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&intake_episode, "success", Some(1.0)).await?;
+        self.link_events(intake_start.event_id, intake_end.event_id, "contributed_to", 1.0)
+            .await?;
+        release_agent(&mut blackboard, "scout");
+        push_unique(&mut blackboard.resolved_items, "intake");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let memory_episode = self
+            .start_episode(run_id, "memory", &format!("Retrieve memory for {}", spec_obj.id))
+            .await?;
+        blackboard.current_phase = "memory".to_string();
+        blackboard.active_goal = format!("Retrieve memory for {}", spec_obj.title);
+        claim_agent(&mut blackboard, "coobie", "retrieve prior context");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "memory").await?;
-        self.record_event(
-            run_id,
-            "memory",
-            "coobie",
-            "running",
-            "Retrieving prior factory context",
-            log_path,
-        )
-        .await?;
+        let memory_start = self
+            .record_event(
+                run_id,
+                Some(&memory_episode),
+                "memory",
+                "coobie",
+                "running",
+                "Retrieving prior factory context",
+                log_path,
+            )
+            .await?;
         tokio::fs::write(
             run_dir.join("memory_context.md"),
             format_memory_context(&memory_hits),
         )
         .await?;
+        push_unique(&mut blackboard.artifact_refs, "memory_context.md");
         self.write_agent_execution(
             &profiles,
             "coobie",
@@ -221,26 +329,43 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "memory",
-            "coobie",
-            "complete",
-            &format!("Captured {} memory hit(s)", memory_hits.len()),
-            log_path,
-        )
-        .await?;
+        let memory_end = self
+            .record_event(
+                run_id,
+                Some(&memory_episode),
+                "memory",
+                "coobie",
+                "complete",
+                &format!("Captured {} memory hit(s)", memory_hits.len()),
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&memory_episode, "success", Some(1.0)).await?;
+        self.link_events(memory_start.event_id, memory_end.event_id, "contributed_to", 0.9)
+            .await?;
+        release_agent(&mut blackboard, "coobie");
+        push_unique(&mut blackboard.resolved_items, "memory");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let workspace_episode = self
+            .start_episode(run_id, "workspace", "Verify and stage isolated workspace")
+            .await?;
+        blackboard.current_phase = "workspace".to_string();
+        blackboard.active_goal = "Stage isolated product workspace".to_string();
+        claim_agent(&mut blackboard, "keeper", "verify workspace boundaries");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "workspace").await?;
-        self.record_event(
-            run_id,
-            "workspace",
-            "keeper",
-            "running",
-            "Verifying workspace boundaries",
-            log_path,
-        )
-        .await?;
+        let workspace_start = self
+            .record_event(
+                run_id,
+                Some(&workspace_episode),
+                "workspace",
+                "keeper",
+                "running",
+                "Verifying workspace boundaries",
+                log_path,
+            )
+            .await?;
         let staged_product = workspace::stage_product_workspace(
             &self.paths.products,
             &workspace_root,
@@ -262,28 +387,52 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "workspace",
-            "keeper",
-            "complete",
-            "Workspace boundaries verified",
-            log_path,
+        let workspace_end = self
+            .record_event(
+                run_id,
+                Some(&workspace_episode),
+                "workspace",
+                "keeper",
+                "complete",
+                "Workspace boundaries verified",
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&workspace_episode, "success", Some(1.0)).await?;
+        self.link_events(
+            workspace_start.event_id,
+            workspace_end.event_id,
+            "contributed_to",
+            1.0,
         )
         .await?;
+        release_agent(&mut blackboard, "keeper");
+        claim_agent(&mut blackboard, "mason", "owns staged product workspace");
+        push_unique(&mut blackboard.resolved_items, "workspace");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let implementation_episode = self
+            .start_episode(run_id, "implementation", &format!("Plan work for {}", req.product))
+            .await?;
+        blackboard.current_phase = "implementation".to_string();
+        blackboard.active_goal = format!("Prepare implementation plan for {}", req.product);
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "implementation").await?;
-        self.record_event(
-            run_id,
-            "implementation",
-            "mason",
-            "running",
-            "Drafting implementation plan for the staged product",
-            log_path,
-        )
-        .await?;
-        let implementation_plan = build_implementation_plan(spec_obj, &intent, &memory_hits, &staged_product);
+        let implementation_start = self
+            .record_event(
+                run_id,
+                Some(&implementation_episode),
+                "implementation",
+                "mason",
+                "running",
+                "Drafting implementation plan for the staged product",
+                log_path,
+            )
+            .await?;
+        let implementation_plan =
+            build_implementation_plan(spec_obj, &intent, &memory_hits, &staged_product);
         tokio::fs::write(run_dir.join("implementation_plan.md"), &implementation_plan).await?;
+        push_unique(&mut blackboard.artifact_refs, "implementation_plan.md");
         self.write_agent_execution(
             &profiles,
             "mason",
@@ -297,28 +446,52 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "implementation",
-            "mason",
-            "complete",
-            &format!("Staged product copy at {}", staged_product.display()),
-            log_path,
+        let implementation_end = self
+            .record_event(
+                run_id,
+                Some(&implementation_episode),
+                "implementation",
+                "mason",
+                "complete",
+                &format!("Staged product copy at {}", staged_product.display()),
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&implementation_episode, "success", Some(1.0))
+            .await?;
+        self.link_events(
+            implementation_start.event_id,
+            implementation_end.event_id,
+            "contributed_to",
+            1.0,
         )
         .await?;
+        release_agent(&mut blackboard, "mason");
+        push_unique(&mut blackboard.resolved_items, "implementation");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let tools_episode = self
+            .start_episode(run_id, "tools", "Review tool and MCP availability")
+            .await?;
+        blackboard.current_phase = "tools".to_string();
+        blackboard.active_goal = "Summarize tools and MCP surface".to_string();
+        claim_agent(&mut blackboard, "piper", "review tools and MCP availability");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "tools").await?;
-        self.record_event(
-            run_id,
-            "tools",
-            "piper",
-            "running",
-            "Reviewing tool and MCP availability",
-            log_path,
-        )
-        .await?;
+        let tools_start = self
+            .record_event(
+                run_id,
+                Some(&tools_episode),
+                "tools",
+                "piper",
+                "running",
+                "Reviewing tool and MCP availability",
+                log_path,
+            )
+            .await?;
         let tool_plan = self.build_tool_plan();
         tokio::fs::write(run_dir.join("tool_plan.md"), &tool_plan).await?;
+        push_unique(&mut blackboard.artifact_refs, "tool_plan.md");
         self.write_agent_execution(
             &profiles,
             "piper",
@@ -329,28 +502,46 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "tools",
-            "piper",
-            "complete",
-            "Tool and MCP plan captured",
-            log_path,
-        )
-        .await?;
+        let tools_end = self
+            .record_event(
+                run_id,
+                Some(&tools_episode),
+                "tools",
+                "piper",
+                "complete",
+                "Tool and MCP plan captured",
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&tools_episode, "success", Some(1.0)).await?;
+        self.link_events(tools_start.event_id, tools_end.event_id, "contributed_to", 0.9)
+            .await?;
+        release_agent(&mut blackboard, "piper");
+        push_unique(&mut blackboard.resolved_items, "tools");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let twin_episode = self
+            .start_episode(run_id, "twin", "Provision local twin environment")
+            .await?;
+        blackboard.current_phase = "twin".to_string();
+        blackboard.active_goal = "Provision local twin environment".to_string();
+        claim_agent(&mut blackboard, "ash", "prepare twin environment");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "twin").await?;
-        self.record_event(
-            run_id,
-            "twin",
-            "ash",
-            "running",
-            "Provisioning local twin environment",
-            log_path,
-        )
-        .await?;
+        let twin_start = self
+            .record_event(
+                run_id,
+                Some(&twin_episode),
+                "twin",
+                "ash",
+                "running",
+                "Provisioning local twin environment",
+                log_path,
+            )
+            .await?;
         let twin = self.build_twin_environment(run_id, spec_obj);
         self.write_json_file(&run_dir.join("twin.json"), &twin).await?;
+        push_unique(&mut blackboard.artifact_refs, "twin.json");
         self.write_agent_execution(
             &profiles,
             "ash",
@@ -361,29 +552,55 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "twin",
-            "ash",
-            "complete",
-            &format!("Provisioned {} twin service(s)", twin.services.len()),
-            log_path,
-        )
-        .await?;
+        let twin_end = self
+            .record_event(
+                run_id,
+                Some(&twin_episode),
+                "twin",
+                "ash",
+                "complete",
+                &format!("Provisioned {} twin service(s)", twin.services.len()),
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&twin_episode, "success", Some(1.0)).await?;
+        self.link_events(twin_start.event_id, twin_end.event_id, "contributed_to", 1.0)
+            .await?;
+        release_agent(&mut blackboard, "ash");
+        push_unique(&mut blackboard.resolved_items, "twin");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let validation_episode = self
+            .start_episode(run_id, "validation", "Run visible validation")
+            .await?;
+        blackboard.current_phase = "validation".to_string();
+        blackboard.active_goal = "Run visible validation".to_string();
+        claim_agent(&mut blackboard, "bramble", "run visible validation");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "validation").await?;
-        self.record_event(
-            run_id,
-            "validation",
-            "bramble",
-            "running",
-            "Running visible validation",
-            log_path,
-        )
-        .await?;
-        let validation = self.run_visible_validation(&workspace_root, &staged_product).await?;
+        let validation_start = self
+            .record_event(
+                run_id,
+                Some(&validation_episode),
+                "validation",
+                "bramble",
+                "running",
+                "Running visible validation",
+                log_path,
+            )
+            .await?;
+        let mut validation = self.run_visible_validation(&workspace_root, &staged_product).await?;
+        if let Some(message) = req.harness_message("validation") {
+            validation.passed = false;
+            validation.results.push(ScenarioResult {
+                scenario_id: "failure_harness".to_string(),
+                passed: false,
+                details: message.to_string(),
+            });
+        }
         self.write_json_file(&run_dir.join("validation.json"), &validation)
             .await?;
+        push_unique(&mut blackboard.artifact_refs, "validation.json");
         self.write_agent_execution(
             &profiles,
             "bramble",
@@ -397,34 +614,68 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "validation",
-            "bramble",
-            if validation.passed {
-                "complete"
-            } else {
-                "warning"
-            },
-            &format!(
+        let validation_outcome = if validation.passed { "success" } else { "failure" };
+        let validation_message = if let Some(message) = req.harness_message("validation") {
+            format!("Failure harness forced validation failure: {message}")
+        } else {
+            format!(
                 "Visible validation finished: {} checks, {} passed",
                 validation.results.len(),
                 validation.results.iter().filter(|result| result.passed).count()
-            ),
-            log_path,
+            )
+        };
+        let validation_end = self
+            .record_event(
+                run_id,
+                Some(&validation_episode),
+                "validation",
+                "bramble",
+                if validation.passed { "complete" } else { "warning" },
+                &validation_message,
+                log_path,
+            )
+            .await?;
+        self.finish_episode(
+            &validation_episode,
+            validation_outcome,
+            Some(if validation.passed { 1.0 } else { 0.5 }),
         )
         .await?;
+        self.link_events(
+            validation_start.event_id,
+            validation_end.event_id,
+            "contributed_to",
+            if validation.passed { 1.0 } else { 0.5 },
+        )
+        .await?;
+        release_agent(&mut blackboard, "bramble");
+        if validation.passed {
+            push_unique(&mut blackboard.resolved_items, "validation");
+            remove_blocker(&mut blackboard, "visible_validation_failed");
+        } else {
+            push_unique(&mut blackboard.open_blockers, "visible_validation_failed");
+        }
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let hidden_episode = self
+            .start_episode(run_id, "hidden_scenarios", "Evaluate hidden scenarios")
+            .await?;
+        blackboard.current_phase = "hidden_scenarios".to_string();
+        blackboard.active_goal = "Evaluate hidden scenarios".to_string();
+        claim_agent(&mut blackboard, "sable", "evaluate hidden scenarios");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "hidden_scenarios").await?;
-        self.record_event(
-            run_id,
-            "hidden_scenarios",
-            "sable",
-            "running",
-            "Evaluating hidden scenarios",
-            log_path,
-        )
-        .await?;
+        let hidden_start = self
+            .record_event(
+                run_id,
+                Some(&hidden_episode),
+                "hidden_scenarios",
+                "sable",
+                "running",
+                "Evaluating hidden scenarios",
+                log_path,
+            )
+            .await?;
         let predicted_final_status = if validation.passed {
             "completed"
         } else {
@@ -432,7 +683,7 @@ impl AppContext {
         };
         let events_so_far = self.list_run_events(run_id).await?;
         let hidden_definitions = scenarios::load_hidden_scenarios(&self.paths.scenarios, &spec_obj.id)?;
-        let hidden_scenarios = scenarios::evaluate_hidden_scenarios(
+        let mut hidden_scenarios = scenarios::evaluate_hidden_scenarios(
             &hidden_definitions,
             predicted_final_status,
             &events_so_far,
@@ -441,8 +692,23 @@ impl AppContext {
             &agent_executions,
             &run_dir,
         );
+        if let Some(message) = req.harness_message("hidden_scenarios") {
+            hidden_scenarios.passed = false;
+            hidden_scenarios.results.push(HiddenScenarioEvaluation {
+                scenario_id: "failure-harness".to_string(),
+                title: "Failure Harness".to_string(),
+                passed: false,
+                details: message.to_string(),
+                checks: vec![HiddenScenarioCheckResult {
+                    kind: "failure_harness".to_string(),
+                    passed: false,
+                    details: message.to_string(),
+                }],
+            });
+        }
         self.write_json_file(&run_dir.join("hidden_scenarios.json"), &hidden_scenarios)
             .await?;
+        push_unique(&mut blackboard.artifact_refs, "hidden_scenarios.json");
         self.write_agent_execution(
             &profiles,
             "sable",
@@ -453,23 +719,64 @@ impl AppContext {
             &mut agent_executions,
         )
         .await?;
-        self.record_event(
-            run_id,
-            "hidden_scenarios",
-            "sable",
-            if hidden_scenarios.passed {
-                "complete"
-            } else {
-                "warning"
-            },
-            &format!(
+        let hidden_outcome = if hidden_scenarios.passed { "success" } else { "failure" };
+        let hidden_message = if let Some(message) = req.harness_message("hidden_scenarios") {
+            format!("Failure harness forced hidden scenario failure: {message}")
+        } else {
+            format!(
                 "Hidden scenario evaluation finished: {} scenario(s)",
                 hidden_scenarios.results.len()
-            ),
-            log_path,
+            )
+        };
+        let hidden_end = self
+            .record_event(
+                run_id,
+                Some(&hidden_episode),
+                "hidden_scenarios",
+                "sable",
+                if hidden_scenarios.passed { "complete" } else { "warning" },
+                &hidden_message,
+                log_path,
+            )
+            .await?;
+        self.finish_episode(
+            &hidden_episode,
+            hidden_outcome,
+            Some(if hidden_scenarios.passed { 1.0 } else { 0.5 }),
         )
         .await?;
+        self.link_events(
+            hidden_start.event_id,
+            hidden_end.event_id,
+            "contributed_to",
+            if hidden_scenarios.passed { 1.0 } else { 0.5 },
+        )
+        .await?;
+        release_agent(&mut blackboard, "sable");
+        if hidden_scenarios.passed {
+            push_unique(&mut blackboard.resolved_items, "hidden_scenarios");
+            remove_blocker(&mut blackboard, "hidden_scenarios_failed");
+        } else {
+            push_unique(&mut blackboard.open_blockers, "hidden_scenarios_failed");
+        }
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let memory_store_episode = self
+            .start_episode(run_id, "memory", "Store run summary back into long-term memory")
+            .await?;
+        claim_agent(&mut blackboard, "coobie", "store run summary and prepare future recall");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+        let memory_store_start = self
+            .record_event(
+                run_id,
+                Some(&memory_store_episode),
+                "memory",
+                "coobie",
+                "running",
+                "Storing run summary back into local memory",
+                log_path,
+            )
+            .await?;
         self.memory_store
             .store(
                 &format!("run-{}", run_id),
@@ -495,26 +802,48 @@ impl AppContext {
                 ),
             )
             .await?;
-        self.record_event(
-            run_id,
-            "memory",
-            "coobie",
-            "complete",
-            "Stored run summary back into local memory",
-            log_path,
+        let memory_store_end = self
+            .record_event(
+                run_id,
+                Some(&memory_store_episode),
+                "memory",
+                "coobie",
+                "complete",
+                "Stored run summary back into local memory",
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&memory_store_episode, "success", Some(1.0)).await?;
+        self.link_events(
+            memory_store_start.event_id,
+            memory_store_end.event_id,
+            "corrected",
+            0.8,
         )
         .await?;
+        release_agent(&mut blackboard, "coobie");
+        push_unique(&mut blackboard.resolved_items, "memory_store");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
+        let artifacts_episode = self
+            .start_episode(run_id, "artifacts", "Package run artifacts")
+            .await?;
+        blackboard.current_phase = "artifacts".to_string();
+        blackboard.active_goal = "Refresh artifact bundle".to_string();
+        claim_agent(&mut blackboard, "flint", "prepare artifact bundle");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "artifacts").await?;
-        self.record_event(
-            run_id,
-            "artifacts",
-            "flint",
-            "running",
-            "Packaging run artifacts",
-            log_path,
-        )
-        .await?;
+        let artifacts_start = self
+            .record_event(
+                run_id,
+                Some(&artifacts_episode),
+                "artifacts",
+                "flint",
+                "running",
+                "Packaging run artifacts",
+                log_path,
+            )
+            .await?;
         self.write_agent_execution(
             &profiles,
             "flint",
@@ -526,19 +855,33 @@ impl AppContext {
         )
         .await?;
         self.package_artifacts(run_id).await?;
-        self.record_event(
-            run_id,
-            "artifacts",
-            "flint",
-            "complete",
-            "Artifact bundle refreshed",
-            log_path,
+        let artifacts_end = self
+            .record_event(
+                run_id,
+                Some(&artifacts_episode),
+                "artifacts",
+                "flint",
+                "complete",
+                "Artifact bundle refreshed",
+                log_path,
+            )
+            .await?;
+        self.finish_episode(&artifacts_episode, "success", Some(1.0)).await?;
+        self.link_events(
+            artifacts_start.event_id,
+            artifacts_end.event_id,
+            "contributed_to",
+            1.0,
         )
         .await?;
+        release_agent(&mut blackboard, "flint");
+        push_unique(&mut blackboard.resolved_items, "artifacts");
+        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         Ok(ExecutionOutput {
             validation,
             hidden_scenarios,
+            run_dir,
         })
     }
 
@@ -638,7 +981,8 @@ impl AppContext {
                 results.push(ScenarioResult {
                     scenario_id: "build_manifest".to_string(),
                     passed: true,
-                    details: "No Cargo.toml or package.json found; visible validation skipped".to_string(),
+                    details: "No Cargo.toml or package.json found; visible validation skipped"
+                        .to_string(),
                 });
             }
         }
@@ -783,7 +1127,10 @@ impl AppContext {
             .machine
             .as_ref()
             .and_then(|machine| machine.fingerprint.as_ref());
-        if fingerprint.map(|fingerprint| fingerprint.docker || fingerprint.podman).unwrap_or(false) {
+        if fingerprint
+            .map(|fingerprint| fingerprint.docker || fingerprint.podman)
+            .unwrap_or(false)
+        {
             services.push(TwinService {
                 name: "container_runtime".to_string(),
                 kind: "container".to_string(),
@@ -858,24 +1205,90 @@ impl AppContext {
         Ok(())
     }
 
+    async fn start_episode(&self, run_id: &str, phase: &str, goal: &str) -> Result<String> {
+        let episode_id = format!("{}-{}", phase, Uuid::new_v4());
+        sqlx::query(
+            r#"
+            INSERT INTO episodes (episode_id, run_id, phase, goal, started_at)
+            VALUES (?1, ?2, ?3, ?4, ?5)
+            "#,
+        )
+        .bind(&episode_id)
+        .bind(run_id)
+        .bind(phase)
+        .bind(goal)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(episode_id)
+    }
+
+    async fn finish_episode(
+        &self,
+        episode_id: &str,
+        outcome: &str,
+        confidence: Option<f64>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE episodes
+            SET outcome = ?2, confidence = ?3, ended_at = ?4
+            WHERE episode_id = ?1
+            "#,
+        )
+        .bind(episode_id)
+        .bind(outcome)
+        .bind(confidence)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn link_events(
+        &self,
+        from_event: i64,
+        to_event: i64,
+        link_type: &str,
+        confidence: f64,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO causal_links (link_id, from_event, to_event, link_type, confidence, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(from_event)
+        .bind(to_event)
+        .bind(link_type)
+        .bind(confidence)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
     async fn record_event(
         &self,
         run_id: &str,
+        episode_id: Option<&str>,
         phase: &str,
         agent: &str,
         status: &str,
         message: &str,
         log_path: &Path,
-    ) -> Result<()> {
+    ) -> Result<RunEvent> {
         let created_at = Utc::now();
-        sqlx::query(
+        let result = sqlx::query(
             r#"
-            INSERT INTO run_events (run_id, phase, agent, status, message, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO run_events (run_id, phase, episode_id, agent, status, message, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
             "#,
         )
         .bind(run_id)
         .bind(phase)
+        .bind(episode_id)
         .bind(agent)
         .bind(status)
         .bind(message)
@@ -898,7 +1311,17 @@ impl AppContext {
             message
         );
         file.write_all(line.as_bytes()).await?;
-        Ok(())
+
+        Ok(RunEvent {
+            event_id: result.last_insert_rowid(),
+            run_id: run_id.to_string(),
+            episode_id: episode_id.map(|value| value.to_string()),
+            phase: phase.to_string(),
+            agent: agent.to_string(),
+            status: status.to_string(),
+            message: message.to_string(),
+            created_at,
+        })
     }
 
     async fn write_json_file<T: Serialize>(&self, path: &Path, value: &T) -> Result<()> {
@@ -907,6 +1330,64 @@ impl AppContext {
             .await
             .with_context(|| format!("writing json file {}", path.display()))?;
         Ok(())
+    }
+
+    async fn sync_blackboard(&self, board: &BlackboardState, run_dir: Option<&Path>) -> Result<()> {
+        {
+            let mut guard = self.blackboard.write().await;
+            *guard = board.clone();
+        }
+        if let Some(run_dir) = run_dir {
+            self.write_json_file(&run_dir.join("blackboard.json"), board).await?;
+        }
+        Ok(())
+    }
+
+    async fn finalize_blackboard(&self, final_status: &str, run_dir: &Path) -> Result<()> {
+        let mut board = self.blackboard.write().await;
+        board.current_phase = "complete".to_string();
+        board.active_goal = format!("Run finished with status {final_status}");
+        board.agent_claims.clear();
+        let snapshot = board.clone();
+        drop(board);
+        self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
+            .await?;
+        Ok(())
+    }
+
+    async fn mark_blackboard_failed(&self, message: &str, run_dir: &Path) -> Result<()> {
+        let mut board = self.blackboard.write().await;
+        board.current_phase = "failed".to_string();
+        board.active_goal = "Run failed".to_string();
+        push_unique(&mut board.open_blockers, message);
+        board.agent_claims.clear();
+        let snapshot = board.clone();
+        drop(board);
+        if run_dir.exists() {
+            self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
+                .await?;
+        }
+        Ok(())
+    }
+
+    async fn attach_lessons_to_blackboard(&self, run_dir: &Path, lessons: &[LessonRecord]) -> Result<()> {
+        if lessons.is_empty() {
+            return Ok(());
+        }
+        let mut board = self.blackboard.write().await;
+        for lesson in lessons {
+            push_unique(&mut board.lesson_refs, &lesson.lesson_id);
+        }
+        let snapshot = board.clone();
+        drop(board);
+        self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
+            .await?;
+        self.write_json_file(&run_dir.join("lessons.json"), &lessons).await?;
+        Ok(())
+    }
+
+    pub async fn blackboard_view(&self, role: &str) -> BlackboardState {
+        self.blackboard.read().await.role_view(role)
     }
 
     fn run_log_path(&self, run_id: &str) -> PathBuf {
@@ -923,7 +1404,7 @@ impl AppContext {
 
     pub async fn get_run(&self, run_id: &str) -> Result<Option<RunRecord>> {
         let row = sqlx::query(
-            "SELECT run_id, spec_id, product, status, created_at, updated_at FROM runs WHERE run_id = ?"
+            "SELECT run_id, spec_id, product, status, created_at, updated_at FROM runs WHERE run_id = ?",
         )
         .bind(run_id)
         .fetch_optional(&self.pool)
@@ -953,7 +1434,7 @@ impl AppContext {
 
     pub async fn list_runs(&self, limit: i64) -> Result<Vec<RunRecord>> {
         let rows = sqlx::query(
-            "SELECT run_id, spec_id, product, status, created_at, updated_at FROM runs ORDER BY created_at DESC LIMIT ?"
+            "SELECT run_id, spec_id, product, status, created_at, updated_at FROM runs ORDER BY created_at DESC LIMIT ?",
         )
         .bind(limit)
         .fetch_all(&self.pool)
@@ -981,7 +1462,7 @@ impl AppContext {
 
     pub async fn list_run_events(&self, run_id: &str) -> Result<Vec<RunEvent>> {
         let rows = sqlx::query(
-            "SELECT event_id, run_id, phase, agent, status, message, created_at FROM run_events WHERE run_id = ? ORDER BY event_id ASC"
+            "SELECT event_id, run_id, episode_id, phase, agent, status, message, created_at FROM run_events WHERE run_id = ? ORDER BY event_id ASC",
         )
         .bind(run_id)
         .fetch_all(&self.pool)
@@ -992,6 +1473,7 @@ impl AppContext {
             events.push(RunEvent {
                 event_id: row.get::<i64, _>("event_id"),
                 run_id: row.get::<String, _>("run_id"),
+                episode_id: row.get::<Option<String>, _>("episode_id"),
                 phase: row.get::<String, _>("phase"),
                 agent: row.get::<String, _>("agent"),
                 status: row.get::<String, _>("status"),
@@ -1003,6 +1485,233 @@ impl AppContext {
             });
         }
         Ok(events)
+    }
+
+    pub async fn list_run_episodes(&self, run_id: &str) -> Result<Vec<EpisodeRecord>> {
+        let rows = sqlx::query(
+            "SELECT episode_id, run_id, phase, goal, outcome, confidence, started_at, ended_at FROM episodes WHERE run_id = ? ORDER BY started_at ASC",
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut episodes = Vec::new();
+        for row in rows {
+            episodes.push(EpisodeRecord {
+                episode_id: row.get::<String, _>("episode_id"),
+                run_id: row.get::<String, _>("run_id"),
+                phase: row.get::<String, _>("phase"),
+                goal: row.get::<String, _>("goal"),
+                outcome: row.get::<Option<String>, _>("outcome"),
+                confidence: row.get::<Option<f64>, _>("confidence"),
+                started_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("started_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+                ended_at: row
+                    .get::<Option<String>, _>("ended_at")
+                    .map(|value| chrono::DateTime::parse_from_rfc3339(&value))
+                    .transpose()?
+                    .map(|value| value.with_timezone(&Utc)),
+            });
+        }
+        Ok(episodes)
+    }
+
+    pub async fn list_events_for_episode(&self, episode_id: &str) -> Result<Vec<RunEvent>> {
+        let rows = sqlx::query(
+            "SELECT event_id, run_id, episode_id, phase, agent, status, message, created_at FROM run_events WHERE episode_id = ? ORDER BY event_id ASC",
+        )
+        .bind(episode_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut events = Vec::new();
+        for row in rows {
+            events.push(RunEvent {
+                event_id: row.get::<i64, _>("event_id"),
+                run_id: row.get::<String, _>("run_id"),
+                episode_id: row.get::<Option<String>, _>("episode_id"),
+                phase: row.get::<String, _>("phase"),
+                agent: row.get::<String, _>("agent"),
+                status: row.get::<String, _>("status"),
+                message: row.get::<String, _>("message"),
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+        Ok(events)
+    }
+
+    pub async fn list_lessons(&self) -> Result<Vec<LessonRecord>> {
+        let rows = sqlx::query(
+            "SELECT lesson_id, source_episode, pattern, intervention, tags, strength, recall_count, last_recalled, created_at FROM lessons ORDER BY created_at ASC",
+        )
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut lessons = Vec::new();
+        for row in rows {
+            lessons.push(LessonRecord {
+                lesson_id: row.get::<String, _>("lesson_id"),
+                source_episode: row.get::<Option<String>, _>("source_episode"),
+                pattern: row.get::<String, _>("pattern"),
+                intervention: row.get::<Option<String>, _>("intervention"),
+                tags: row
+                    .get::<String, _>("tags")
+                    .split(',')
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty())
+                    .collect(),
+                strength: row.get::<f64, _>("strength"),
+                recall_count: row.get::<i64, _>("recall_count"),
+                last_recalled: row
+                    .get::<Option<String>, _>("last_recalled")
+                    .map(|value| chrono::DateTime::parse_from_rfc3339(&value))
+                    .transpose()?
+                    .map(|value| value.with_timezone(&Utc)),
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+        Ok(lessons)
+    }
+
+    async fn consolidate_run(&self, run_id: &str) -> Result<Vec<LessonRecord>> {
+        let episodes = self.list_run_episodes(run_id).await?;
+        let prior_lessons = self.list_lessons().await?;
+        let mut new_lessons = Vec::new();
+
+        for episode in episodes {
+            let outcome = episode.outcome.as_deref().unwrap_or("unknown");
+            if outcome != "failure" && outcome != "blocked" {
+                continue;
+            }
+            let events = self.list_events_for_episode(&episode.episode_id).await?;
+            if events.is_empty() {
+                continue;
+            }
+            let pattern = build_episode_pattern(&episode.phase, &events);
+            let prior_count = self
+                .count_prior_matching_failed_episodes(run_id, &episode.phase, &pattern)
+                .await?;
+            if prior_count < 3 {
+                continue;
+            }
+
+            let lesson_id = format!("lesson-{}", episode.episode_id);
+            if prior_lessons.iter().any(|lesson| lesson.lesson_id == lesson_id) {
+                continue;
+            }
+
+            let lesson = LessonRecord {
+                lesson_id: lesson_id.clone(),
+                source_episode: Some(episode.episode_id.clone()),
+                pattern: format!(
+                    "Repeated failure pattern in {}: {}",
+                    episode.phase, pattern
+                ),
+                intervention: infer_intervention(&events),
+                tags: vec![
+                    "lesson".to_string(),
+                    "causal".to_string(),
+                    episode.phase.clone(),
+                    events
+                        .last()
+                        .map(|event| event.agent.clone())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                ],
+                strength: 1.0,
+                recall_count: 0,
+                last_recalled: None,
+                created_at: Utc::now(),
+            };
+            self.insert_lesson(&lesson).await?;
+            self.memory_store
+                .store(
+                    &lesson.lesson_id,
+                    lesson.tags.clone(),
+                    &lesson.pattern,
+                    &format!(
+                        "Source episode: {}\nPhase: {}\nIntervention: {}\nObserved pattern: {}",
+                        episode.episode_id,
+                        episode.phase,
+                        lesson
+                            .intervention
+                            .clone()
+                            .unwrap_or_else(|| "No intervention recorded yet".to_string()),
+                        pattern
+                    ),
+                )
+                .await?;
+            new_lessons.push(lesson);
+        }
+
+        Ok(new_lessons)
+    }
+
+    async fn count_prior_matching_failed_episodes(
+        &self,
+        current_run_id: &str,
+        phase: &str,
+        pattern: &str,
+    ) -> Result<usize> {
+        let rows = sqlx::query(
+            "SELECT episode_id FROM episodes WHERE run_id != ? AND phase = ? AND outcome IN ('failure', 'blocked')",
+        )
+        .bind(current_run_id)
+        .bind(phase)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut count = 0;
+        for row in rows {
+            let episode_id = row.get::<String, _>("episode_id");
+            let events = self.list_events_for_episode(&episode_id).await?;
+            if events.is_empty() {
+                continue;
+            }
+            let candidate = build_episode_pattern(phase, &events);
+            if candidate == pattern {
+                count += 1;
+            }
+        }
+        Ok(count)
+    }
+
+    async fn insert_lesson(&self, lesson: &LessonRecord) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO lessons (
+                lesson_id,
+                source_episode,
+                pattern,
+                intervention,
+                tags,
+                strength,
+                recall_count,
+                last_recalled,
+                created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+        )
+        .bind(&lesson.lesson_id)
+        .bind(&lesson.source_episode)
+        .bind(&lesson.pattern)
+        .bind(&lesson.intervention)
+        .bind(lesson.tags.join(","))
+        .bind(lesson.strength)
+        .bind(lesson.recall_count)
+        .bind(lesson.last_recalled.map(|value| value.to_rfc3339()))
+        .bind(lesson.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
     }
 
     pub async fn package_artifacts(&self, run_id: &str) -> Result<PathBuf> {
@@ -1033,11 +1742,8 @@ impl AppContext {
         let staged_product = self.workspace_root(run_id).join("product");
         if staged_product.exists() {
             let manifest = list_relative_files(&staged_product, &staged_product)?;
-            tokio::fs::write(
-                bundle_dir.join("workspace_manifest.txt"),
-                manifest.join("\n"),
-            )
-            .await?;
+            tokio::fs::write(bundle_dir.join("workspace_manifest.txt"), manifest.join("\n"))
+                .await?;
         }
 
         Ok(bundle_dir)
@@ -1128,9 +1834,7 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 
 fn list_relative_files(root: &Path, current: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(current)
-        .with_context(|| format!("reading {}", current.display()))?
-    {
+    for entry in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
@@ -1154,9 +1858,7 @@ fn list_run_directory(run_dir: &Path) -> Result<Vec<String>> {
 }
 
 fn copy_tree_contents(source_root: &Path, current: &Path, destination_root: &Path) -> Result<()> {
-    for entry in std::fs::read_dir(current)
-        .with_context(|| format!("reading {}", current.display()))?
-    {
+    for entry in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
@@ -1173,9 +1875,8 @@ fn copy_tree_contents(source_root: &Path, current: &Path, destination_root: &Pat
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("creating {}", parent.display()))?;
             }
-            std::fs::copy(&path, &destination).with_context(|| {
-                format!("copying {} -> {}", path.display(), destination.display())
-            })?;
+            std::fs::copy(&path, &destination)
+                .with_context(|| format!("copying {} -> {}", path.display(), destination.display()))?;
         }
     }
     Ok(())
@@ -1208,4 +1909,63 @@ fn render_bundle_summary(run: &RunRecord, events: &[RunEvent]) -> String {
     }
 
     lines.join("\n") + "\n"
+}
+
+fn push_unique(list: &mut Vec<String>, value: &str) {
+    if !list.iter().any(|existing| existing == value) {
+        list.push(value.to_string());
+    }
+}
+
+fn remove_blocker(board: &mut BlackboardState, blocker: &str) {
+    board.open_blockers.retain(|existing| existing != blocker);
+}
+
+fn claim_agent(board: &mut BlackboardState, agent: &str, ownership: &str) {
+    board
+        .agent_claims
+        .insert(agent.to_string(), ownership.to_string());
+}
+
+fn release_agent(board: &mut BlackboardState, agent: &str) {
+    board.agent_claims.remove(agent);
+}
+
+fn normalize_message_pattern(message: &str) -> String {
+    let mut tokens = Vec::new();
+    let mut current = String::new();
+    for ch in message.chars() {
+        if ch.is_ascii_alphabetic() {
+            current.push(ch.to_ascii_lowercase());
+        } else if !current.is_empty() {
+            tokens.push(current.clone());
+            current.clear();
+        }
+    }
+    if !current.is_empty() {
+        tokens.push(current);
+    }
+    tokens.into_iter().take(10).collect::<Vec<_>>().join(" ")
+}
+
+fn build_episode_pattern(phase: &str, events: &[RunEvent]) -> String {
+    let last_meaningful = events
+        .iter()
+        .rev()
+        .find(|event| event.status != "running")
+        .unwrap_or_else(|| events.last().expect("events non-empty"));
+    format!(
+        "{}:{}:{}",
+        phase,
+        last_meaningful.agent,
+        normalize_message_pattern(&last_meaningful.message)
+    )
+}
+
+fn infer_intervention(events: &[RunEvent]) -> Option<String> {
+    events
+        .iter()
+        .rev()
+        .find(|event| event.status == "complete")
+        .map(|event| format!("{} completed: {}", event.agent, event.message))
 }

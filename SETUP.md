@@ -110,6 +110,31 @@ The generated machine file records:
 
 That fingerprint is there to make setup files inspectable and easier to support across different environments.
 
+## Exporting a Claude Labrador pack to another project
+
+Once your setup is working, you can stamp a separate repo with a Claude-only Harkonnen pack:
+
+```bash
+cargo run -- setup claude-pack \
+  --target-path ../SPO \
+  --project-name SPO \
+  --project-type winccoa \
+  --domain "Siemens WinCC OA / industrial automation" \
+  --summary "SPO is a WinCC OA based Siemens product operated through a Claude-only Labrador pack." \
+  --winccoa
+```
+
+This writes:
+
+- project-level Claude subagents under `.claude/agents/`
+- a local `.harkonnen/` context and memory bundle
+- a merged `.claude/settings.local.json` MCP block
+- a root `CLAUDE.md` block that tells Claude how to use the pack
+
+That gives the work laptop a project-local Claude surface for Scout, Mason, Piper, Bramble, Sable, Ash, Flint, Coobie, and Keeper without depending on Gemini or Codex.
+
+For a generic codebase, drop `--winccoa` and leave `--project-type` as `generic`.
+
 
 ## Optional local memory services
 

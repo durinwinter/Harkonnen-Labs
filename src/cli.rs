@@ -7,6 +7,7 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::config::Paths;
+use crate::claude_pack::{export_claude_pack, ClaudePackRequest};
 use crate::orchestrator::{AppContext, FailureHarness, RunRequest};
 use crate::reporting;
 use crate::setup::{
@@ -140,6 +141,7 @@ pub struct MemoryImportArgs {
 pub enum SetupCommands {
     Check,
     Init(SetupInitArgs),
+    ClaudePack(SetupClaudePackArgs),
 }
 
 #[derive(Args, Debug)]
@@ -158,6 +160,28 @@ pub struct SetupInitArgs {
     pub force: bool,
     #[arg(long, default_value_t = false)]
     pub non_interactive: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct SetupClaudePackArgs {
+    #[arg(long)]
+    pub target_path: String,
+    #[arg(long)]
+    pub project_name: Option<String>,
+    #[arg(long)]
+    pub project_slug: Option<String>,
+    #[arg(long, default_value = "generic")]
+    pub project_type: String,
+    #[arg(long)]
+    pub domain: Option<String>,
+    #[arg(long)]
+    pub summary: Option<String>,
+    #[arg(long, value_delimiter = ',')]
+    pub constraints: Vec<String>,
+    #[arg(long, default_value_t = false)]
+    pub winccoa: bool,
+    #[arg(long, default_value_t = false)]
+    pub no_settings: bool,
 }
 
 #[derive(Args, Debug)]
@@ -340,6 +364,7 @@ pub async fn handle_setup(command: SetupCommands, paths: &Paths) -> Result<()> {
     match command {
         SetupCommands::Check => handle_setup_check(paths),
         SetupCommands::Init(args) => handle_setup_init(paths, args),
+        SetupCommands::ClaudePack(args) => handle_setup_claude_pack(paths, args),
     }
 }
 
@@ -584,6 +609,42 @@ fn handle_setup_init(paths: &Paths, args: SetupInitArgs) -> Result<()> {
         }
     }
 
+    Ok(())
+}
+
+fn handle_setup_claude_pack(paths: &Paths, args: SetupClaudePackArgs) -> Result<()> {
+    let summary = export_claude_pack(
+        paths,
+        ClaudePackRequest {
+            target_path: args.target_path,
+            project_name: args.project_name,
+            project_slug: args.project_slug,
+            project_type: args.project_type,
+            domain: args.domain,
+            summary: args.summary,
+            constraints: args.constraints,
+            include_winccoa: args.winccoa,
+            write_settings: !args.no_settings,
+        },
+    )?;
+
+    println!("Claude Labrador pack ready for {}", summary.project_name);
+    println!("Target:      {}", summary.target_root.display());
+    println!("Pack root:   {}", summary.pack_root.display());
+    println!("CLAUDE.md:   {}", summary.claude_md_path.display());
+    println!("Agents:      {}", summary.agents_written);
+    if let Some(settings_path) = summary.settings_path {
+        println!("Settings:    {}", settings_path.display());
+    } else {
+        println!("Settings:    skipped (--no-settings)");
+    }
+    println!("MCP servers: {}", summary.mcp_servers.join(", "));
+    println!();
+    println!("Next steps:");
+    println!("  1. Open the target repo in Claude Code and restart it if settings changed.");
+    println!("  2. Run /agents to confirm the Labradors are available.");
+    println!("  3. Ask Scout to draft the first Harkonnen spec for the target project.");
+    println!("  4. Use Keeper before any risky WinCC OA or environment-facing action.");
     Ok(())
 }
 

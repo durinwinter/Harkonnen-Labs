@@ -1,5 +1,6 @@
 mod api;
 mod agents;
+mod claude_pack;
 mod coobie;
 mod cli;
 mod config;

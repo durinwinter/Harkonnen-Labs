@@ -2,6 +2,23 @@
   "managed_by": "keeper",
   "policy_mode": "exclusive_file_claims",
   "stale_after_seconds": 600,
-  "active": {},
-  "updated_at": "2026-03-31T16:24:08.231230306+00:00"
+  "active": {
+    "codex": {
+      "agent": "codex",
+      "task": "organize lamdet example as harkonnen run pattern",
+      "files": [
+        "src/models.rs",
+        "src/spec.rs",
+        "src/orchestrator.rs",
+        "src/scenarios.rs",
+        "factory/specs",
+        "factory/context",
+        "factory/memory"
+      ],
+      "claimed_at": "2026-04-01T00:14:29.237977040+00:00",
+      "last_heartbeat_at": "2026-04-01T00:14:29.237977040+00:00",
+      "status": "active"
+    }
+  },
+  "updated_at": "2026-04-01T00:14:29.237977040+00:00"
 }

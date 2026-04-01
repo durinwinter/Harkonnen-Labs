@@ -14,4 +14,4 @@ allowed_tools:
   - mcp:filesystem
 disallowed_tools:
   - production_access
-personality_file: ../personality/labrador.md
+personality_file: ../personality/ash.md

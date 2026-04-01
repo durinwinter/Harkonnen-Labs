@@ -315,5 +315,99 @@
     "files": [],
     "message": "Keeper recorded release for claude",
     "created_at": "2026-03-31T16:24:08.231246816+00:00"
+  },
+  {
+    "event_id": "0fa4fcae-1167-47bf-86f3-55c9f43c784e",
+    "managed_by": "keeper",
+    "event_type": "claim_granted",
+    "status": "granted",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "products/ceres-station/examples",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/tests",
+      "products/ceres-station/ceres-station/scripts",
+      "factory/specs"
+    ],
+    "message": "Keeper granted claim for codex",
+    "created_at": "2026-03-31T22:07:57.939063261+00:00"
+  },
+  {
+    "event_id": "fee53360-e1c8-4b97-9ad9-1b9b47a29c3a",
+    "managed_by": "keeper",
+    "event_type": "claim_stale",
+    "status": "stale",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "products/ceres-station/examples",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/tests",
+      "products/ceres-station/ceres-station/scripts",
+      "factory/specs"
+    ],
+    "message": "Keeper marked claim for codex as stale after 600 seconds without a heartbeat",
+    "created_at": "2026-03-31T22:17:59.579429385+00:00"
+  },
+  {
+    "event_id": "2aad3e2a-5412-42e0-bbfe-8bd58bba9508",
+    "managed_by": "keeper",
+    "event_type": "claim_released",
+    "status": "released",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [],
+    "message": "Keeper recorded release for codex",
+    "created_at": "2026-03-31T22:20:45.912860237+00:00"
+  },
+  {
+    "event_id": "d3be5e7c-0d7f-40ac-a90c-d3223c8767ae",
+    "managed_by": "keeper",
+    "event_type": "claim_granted",
+    "status": "granted",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "products/ceres-station/ceres-station/crates/ceres-core/src/lib.rs",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/tests",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/examples",
+      "factory/specs"
+    ],
+    "message": "Keeper granted claim for codex",
+    "created_at": "2026-03-31T23:47:20.859115656+00:00"
+  },
+  {
+    "event_id": "d8297b91-a3c8-454a-8668-34f09efeb577",
+    "managed_by": "keeper",
+    "event_type": "claim_stale",
+    "status": "stale",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "products/ceres-station/ceres-station/crates/ceres-core/src/lib.rs",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/tests",
+      "products/ceres-station/ceres-station/crates/ceres-pipeline/examples",
+      "factory/specs"
+    ],
+    "message": "Keeper marked claim for codex as stale after 600 seconds without a heartbeat",
+    "created_at": "2026-03-31T23:57:20.940974554+00:00"
+  },
+  {
+    "event_id": "daabf255-aac8-4d70-90b2-71b09aa35120",
+    "managed_by": "keeper",
+    "event_type": "claim_granted",
+    "status": "granted",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "src/models.rs",
+      "src/spec.rs",
+      "src/orchestrator.rs",
+      "src/scenarios.rs",
+      "factory/specs",
+      "factory/context",
+      "factory/memory"
+    ],
+    "message": "Keeper granted claim for codex",
+    "created_at": "2026-04-01T00:14:29.237977040+00:00"
   }
 ]

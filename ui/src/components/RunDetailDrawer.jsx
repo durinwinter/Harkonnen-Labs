@@ -1,6 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import CausalReportPanel from './CausalReportPanel';
 import ValidationPanel from './ValidationPanel';
+import CoobieSignalPanel from './CoobieSignalPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
@@ -69,6 +70,7 @@ export default function RunDetailDrawer({ runId, onClose }) {
   const blackboard = state?.blackboard;
   const lessons = state?.lessons || [];
   const executions = state?.agent_executions || [];
+  const coobieTranslations = state?.coobie_translations || [];
 
   const validation = blackboard?.artifact_refs?.includes('validation.json') ? null : null;
   const TABS = ['overview', 'timeline', 'agents', 'causal', 'lessons'];
@@ -199,7 +201,10 @@ export default function RunDetailDrawer({ runId, onClose }) {
           )}
 
           {tab === 'causal' && (
-            <CausalReportPanel runId={runId} />
+            <div className="agents-list">
+              <CoobieSignalPanel translations={coobieTranslations} />
+              <CausalReportPanel runId={runId} />
+            </div>
           )}
 
           {tab === 'lessons' && (

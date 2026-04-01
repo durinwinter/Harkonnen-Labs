@@ -1740,6 +1740,10 @@ VALIDATION RESULTS (passed={}):
         briefing: &CoobieBriefing,
     ) -> Option<String> {
         let provider = llm::build_provider("ash", "default", &self.paths.setup)?;
+        let ash_addendum = std::fs::read_to_string(
+            self.paths.factory.join("agents").join("personality").join("ash.md"),
+        )
+        .unwrap_or_default();
 
         let services = twin.services.iter()
             .map(|s| format!("- {} [{}] status={} — {}", s.name, s.kind, s.status, s.details))
@@ -1750,7 +1754,10 @@ VALIDATION RESULTS (passed={}):
         let req = LlmRequest::simple(
             "You are Ash, a digital twin specialist for a software factory.              You have just provisioned a local twin environment for a run.              Produce a brief Markdown narrative: what was provisioned, what each service              provides to this run, and any gaps or warnings relevant to the spec.              Two to four short paragraphs. No filler.",
             format!(
-                "SPEC: {} — {}
+                "ASH ADDENDUM:
+{}
+
+SPEC: {} — {}
 DEPENDENCIES: {}
 COOBIE ENVIRONMENT RISKS: {}
 COOBIE REQUIRED CHECKS: {}
@@ -1758,7 +1765,8 @@ COOBIE REQUIRED CHECKS: {}
 TWIN SERVICES:
 {services}
 
-                 Write the twin environment narrative and identify any simulation gaps against Coobie's environment risks.",
+                 Write the twin environment narrative and identify any simulation gaps against Coobie's environment risks. Be explicit about which twin facts came from Harkonnen versus any product runtime assumptions.",
+                if ash_addendum.trim().is_empty() { "none" } else { ash_addendum.trim() },
                 spec_obj.id,
                 spec_obj.title,
                 if spec_obj.dependencies.is_empty() { "none".to_string() } else { spec_obj.dependencies.join(", ") },

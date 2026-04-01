@@ -96,6 +96,20 @@
       "created_at": "2026-03-30T20:34:46.750562846+00:00"
     },
     {
+      "id": "lamdet-middle-peak-sling-note",
+      "tags": [
+        "lamdet",
+        "parity",
+        "ceres-station",
+        "sling",
+        "laminate",
+        "peak-detection"
+      ],
+      "summary": "Middle laminate peak near the LamDet mid-band may be a sling-like anomaly rather than a true laminate peak.",
+      "content": "During LamDet parity work against the Ceres Station example corpus, a recurring mismatch pattern appeared where Rust detected a middle laminate peak around the LamDet mid band while the LamDet Python reference did not.\n\nWorking note for Coobie:\n- A detected middle laminate peak in the 100-120 region may in fact be a sling-like anomaly or related false-positive thermal structure rather than a valid laminate-mid peak.\n- Treat repeated Rust-only middle-band detections as a causal investigation target during parity tuning.\n- When reviewing SHIM/TAB disagreements, check whether the middle-band peak should be classified as sling behavior before assuming it is a valid laminate line.\n",
+      "created_at": "2026-03-31T23:53:21.985598535+00:00"
+    },
+    {
       "id": "lesson-hidden-scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c",
       "tags": [
         "lesson",

@@ -17,6 +17,7 @@ use crate::{
     coobie::CausalReport,
     models::{AgentExecution, BlackboardState, CoobieBriefing, LessonRecord, RunEvent, RunRecord},
     orchestrator::AppContext,
+    pidgin::{self, PidginTranslation},
 };
 
 #[derive(Debug, Serialize)]
@@ -30,6 +31,7 @@ struct RunStateResponse {
     causal_report: Option<CausalReport>,
     coobie_preflight_response: Option<String>,
     coobie_report_response: Option<String>,
+    coobie_translations: Vec<PidginTranslation>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -116,6 +118,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id/state", get(get_run_state))
         .route("/api/runs/:id/coobie-briefing", get(get_coobie_briefing))
         .route("/api/runs/:id/coobie-response", get(get_coobie_response))
+        .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
         .route("/api/coordination/assignments", get(get_assignments))
         .route("/api/coordination/policy-events", get(get_coordination_policy_events))
@@ -262,6 +265,23 @@ async fn get_coobie_response(
     }
 }
 
+async fn get_coobie_signals(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => {
+            let run_dir = app.paths.workspaces.join(&id).join("run");
+            match load_coobie_translations(&run_dir).await {
+                Ok(translations) => (StatusCode::OK, Json(translations)).into_response(),
+                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+            }
+        }
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
 async fn get_causal_report(
     Path(id): Path<String>,
     State(app): State<AppContext>,
@@ -298,6 +318,7 @@ async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<Ru
     let causal_report = read_optional_json::<CausalReport>(&run_dir.join("causal_report.json")).await?;
     let coobie_preflight_response = read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
     let coobie_report_response = read_optional_text(&run_dir.join("coobie_report_response.md")).await?;
+    let coobie_translations = load_coobie_translations(&run_dir).await?;
 
     Ok(Some(RunStateResponse {
         run,
@@ -309,6 +330,7 @@ async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<Ru
         causal_report,
         coobie_preflight_response,
         coobie_report_response,
+        coobie_translations,
     }))
 }
 
@@ -325,6 +347,26 @@ async fn read_optional_text(path: &FsPath) -> anyhow::Result<Option<String>> {
         return Ok(None);
     }
     Ok(Some(tokio::fs::read_to_string(path).await?))
+}
+
+async fn load_coobie_translations(run_dir: &FsPath) -> anyhow::Result<Vec<PidginTranslation>> {
+    let mut translations = Vec::new();
+
+    if let Some(text) = read_optional_text(&run_dir.join("coobie_preflight_response.md")).await? {
+        let translation = pidgin::translate_pidgin_text("preflight", &text);
+        if !translation.signals.is_empty() || !translation.raw.trim().is_empty() {
+            translations.push(translation);
+        }
+    }
+
+    if let Some(text) = read_optional_text(&run_dir.join("coobie_report_response.md")).await? {
+        let translation = pidgin::translate_pidgin_text("report", &text);
+        if !translation.signals.is_empty() || !translation.raw.trim().is_empty() {
+            translations.push(translation);
+        }
+    }
+
+    Ok(translations)
 }
 
 fn default_assignment_status() -> String {

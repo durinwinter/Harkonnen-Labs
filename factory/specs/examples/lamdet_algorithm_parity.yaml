@@ -1,0 +1,51 @@
+id: lamdet-algorithm-parity
+title: LamDet Algorithm Parity
+purpose: >
+  Compare the converted LamDet Python reference against the Ceres Rust pipeline
+  on the example CSV corpus so Harkonnen can verify algorithmic parity without
+  requiring the Windows-only camera stack.
+scope:
+  - run the LamDet Python oracle against the raw CSV corpus
+  - export frame-by-frame Ceres Rust pipeline results from the same CSV corpus
+  - compare zone classification, pass/fail, sling detection, peak counts, and matched labels
+  - write a parity report that Coobie can reason over
+constraints:
+  - no USB camera or live hardware required
+  - use the example CSV corpus as the source of truth for this parity pass
+  - do not modify the example CSV files during validation
+  - keep the parity harness inside the ceres-station workspace boundary
+inputs:
+  - "corpus directory: products/ceres-station/examples/csv_files-20260223T192449Z-1-001/csv_files/"
+  - "python reference package: products/ceres-station/examples/lamdet_reference_py/"
+  - "ceres pipeline workspace: products/ceres-station/ceres-station/"
+outputs:
+  - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_python_reference.jsonl
+  - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_rust_reference.jsonl
+  - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+  - causal_summary.md from Coobie describing parity failures or confirmation
+test_commands:
+  - python3 products/ceres-station/ceres-station/scripts/lamdet_parity.py --output-dir products/ceres-station/ceres-station/tmp/lamdet-parity
+acceptance_criteria:
+  - frame alignment rate == 100%
+  - zone match rate == 100%
+  - pass/fail match rate == 100%
+  - sling match rate == 100%
+  - peak count match rate == 100%
+  - matched label rate == 100%
+  - parity script exits 0
+forbidden_behaviors:
+  - using live camera acquisition in place of corpus replay
+  - changing threshold values solely to hide parity gaps
+  - modifying the CSV corpus contents
+rollback_requirements:
+  - generated parity artifacts may be deleted without affecting source state
+dependencies:
+  - python3 with numpy and scipy available
+  - rust toolchain with cargo available
+  - ceres-pipeline example builds successfully
+performance_expectations:
+  - limited-file debug runs should complete quickly enough for iterative tuning
+  - full corpus parity should remain suitable for factory validation runs
+security_expectations:
+  - no credentials or hardware serial numbers in parity outputs
+  - corpus data remains local to the workspace

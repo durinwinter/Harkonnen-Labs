@@ -2,6 +2,42 @@ use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectComponent {
+    pub name: String,
+    #[serde(default)]
+    pub role: String,
+    #[serde(default)]
+    pub kind: String,
+    pub path: String,
+    #[serde(default)]
+    pub owner: String,
+    #[serde(default)]
+    pub notes: Vec<String>,
+    #[serde(default)]
+    pub interfaces: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ScenarioBlueprint {
+    #[serde(default)]
+    pub pattern: String,
+    #[serde(default)]
+    pub objective: String,
+    #[serde(default)]
+    pub code_under_test: Vec<String>,
+    #[serde(default)]
+    pub hidden_oracles: Vec<String>,
+    #[serde(default)]
+    pub datasets: Vec<String>,
+    #[serde(default)]
+    pub runtime_surfaces: Vec<String>,
+    #[serde(default)]
+    pub coobie_memory_topics: Vec<String>,
+    #[serde(default)]
+    pub required_artifacts: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct Spec {
     pub id: String,
@@ -17,6 +53,10 @@ pub struct Spec {
     pub dependencies: Vec<String>,
     pub performance_expectations: Vec<String>,
     pub security_expectations: Vec<String>,
+    #[serde(default)]
+    pub project_components: Vec<ProjectComponent>,
+    #[serde(default)]
+    pub scenario_blueprint: Option<ScenarioBlueprint>,
     #[serde(default)]
     pub test_commands: Vec<String>,
 }
@@ -90,6 +130,8 @@ pub struct CoobieBriefing {
     pub memory_hits: Vec<String>,
     pub relevant_lessons: Vec<LessonRecord>,
     pub prior_causes: Vec<PriorCauseSignal>,
+    pub project_components: Vec<ProjectComponent>,
+    pub scenario_blueprint: Option<ScenarioBlueprint>,
     pub application_risks: Vec<String>,
     pub environment_risks: Vec<String>,
     pub regulatory_considerations: Vec<String>,

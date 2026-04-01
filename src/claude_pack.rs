@@ -717,6 +717,7 @@ fn build_agent_markdown(
     let machine_scope = current_machine_scope(paths);
     let engine_rel = machine_routing_rel(&machine_scope);
     let state_rel = machine_state_rel(&machine_scope);
+    let personality_addendum = load_agent_personality_addendum(profile, paths).unwrap_or_default();
     let winccoa_note = if project.include_winccoa {
         "
 WinCC OA note:
@@ -744,7 +745,7 @@ Shared Labrador personality:
 - non-destructive and boundary-aware
 - clear in summaries and next steps
 
-Non-negotiable rules:
+{personality_addendum}Non-negotiable rules:
 - return something useful every time
 - do not fail silently
 - do not bluff
@@ -798,7 +799,27 @@ When you finish, leave the main thread with:
         winccoa_note = winccoa_note,
         engine_rel = engine_rel,
         state_rel = state_rel,
+        personality_addendum = personality_addendum,
     )
+}
+
+fn load_agent_personality_addendum(profile: &AgentProfile, paths: &Paths) -> Result<String> {
+    if profile.personality_file.ends_with("labrador.md") {
+        return Ok(String::new());
+    }
+
+    let profile_dir = paths.factory.join("agents").join("profiles");
+    let personality_path = profile_dir.join(&profile.personality_file);
+    let raw = fs::read_to_string(&personality_path)
+        .with_context(|| format!("reading agent personality {}", personality_path.display()))?;
+    Ok(if raw.trim().is_empty() {
+        String::new()
+    } else {
+        format!("Agent-specific addendum:
+{}
+
+", raw.trim())
+    })
 }
 
 fn agent_description(agent_name: &str, project_name: &str) -> String {
@@ -875,6 +896,9 @@ fn agent_role_rules(agent_name: &str, include_winccoa: bool) -> String {
                 "design safe local twins, stubs, and dependency simulations".to_string(),
                 "use Coobie's environment risks to decide what the twin must simulate versus what can remain a stub".to_string(),
                 "be explicit about what is simulated versus real".to_string(),
+                "read product-runtime state from the active product API when twin facts are needed, while leaving pack coordination state on the Harkonnen API".to_string(),
+                "treat product or project APIs as read-first until Keeper or the human approves writes".to_string(),
+                "start by confirming runtime base URL, protocol, environment, and whether the endpoint is mock, simulator, lab, staging, or production".to_string(),
             ];
             if include_winccoa {
                 rules.push(

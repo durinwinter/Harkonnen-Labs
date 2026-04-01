@@ -1,7 +1,27 @@
+use serde::{Deserialize, Serialize};
+
 use crate::{
     coobie::CausalReport,
     models::{CoobieBriefing, FactoryEvent},
 };
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PidginSignal {
+    pub line_index: usize,
+    pub phrase: String,
+    pub normalized: String,
+    pub kind: String,
+    pub severity: String,
+    pub meaning: String,
+    pub agent: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PidginTranslation {
+    pub source: String,
+    pub raw: String,
+    pub signals: Vec<PidginSignal>,
+}
 
 pub fn prepend_pidgin(pidgin: &str, detail: &str) -> String {
     let pidgin = pidgin.trim();
@@ -10,7 +30,8 @@ pub fn prepend_pidgin(pidgin: &str, detail: &str) -> String {
         (true, true) => String::new(),
         (false, true) => pidgin.to_string(),
         (true, false) => detail.to_string(),
-        (false, false) => format!("{}\n{}", pidgin, detail),
+        (false, false) => format!("{}
+{}", pidgin, detail),
     }
 }
 
@@ -120,11 +141,15 @@ pub fn pidgin_summary(event: &FactoryEvent) -> String {
 
 pub fn pidgin_for_agent_result(agent_name: &str, summary: &str, output: &str) -> String {
     let mut phrases = Vec::new();
-    let lower = format!("{}\n{}", summary, output).to_lowercase();
+    let lower = format!("{}
+{}", summary, output).to_lowercase();
 
     if contains_any(&lower, &["failed", "failure", "missing", "warning", "blocked"]) {
         phrases.push("thasnotgrate");
-    } else if contains_any(&lower, &["prepared", "captured", "ready", "provisioned", "stored", "packaged", "passed"]) {
+    } else if contains_any(
+        &lower,
+        &["prepared", "captured", "ready", "provisioned", "stored", "packaged", "passed"],
+    ) {
         phrases.push("thassgrate");
     }
 
@@ -146,20 +171,16 @@ pub fn pidgin_for_agent_result(agent_name: &str, summary: &str, output: &str) ->
                 phrases.push("scout is a real geed dawg");
             }
         }
-        "mason" => {
-            phrases.push(if contains_any(&lower, &["failed", "blocked", "warning"]) {
-                "mason is not a geed dawg"
-            } else {
-                "mason is a real geed dawg"
-            });
-        }
-        "bramble" => {
-            phrases.push(if contains_any(&lower, &["failed", "warning"]) {
-                "still not grrrate"
-            } else {
-                "gonna try agin"
-            });
-        }
+        "mason" => phrases.push(if contains_any(&lower, &["failed", "blocked", "warning"]) {
+            "mason is not a geed dawg"
+        } else {
+            "mason is a real geed dawg"
+        }),
+        "bramble" => phrases.push(if contains_any(&lower, &["failed", "warning"]) {
+            "still not grrrate"
+        } else {
+            "gonna try agin"
+        }),
         "sable" => phrases.push("thasrealnotgrate"),
         "ash" => phrases.push(if contains_any(&lower, &["gap", "missing", "stub"]) {
             "field is weird"
@@ -217,6 +238,317 @@ pub fn coobie_report_pidgin(report: &CausalReport) -> String {
     dedupe_join(&phrases)
 }
 
+pub fn translate_pidgin_text(source: &str, raw: &str) -> PidginTranslation {
+    let signals = raw
+        .lines()
+        .enumerate()
+        .filter_map(|(index, line)| translate_pidgin_line(line, index))
+        .collect::<Vec<_>>();
+
+    PidginTranslation {
+        source: source.to_string(),
+        raw: raw.to_string(),
+        signals,
+    }
+}
+
+fn translate_pidgin_line(line: &str, line_index: usize) -> Option<PidginSignal> {
+    let phrase = line.trim();
+    if phrase.is_empty() {
+        return None;
+    }
+
+    let normalized = normalize_phrase(phrase);
+    let mut signal = match normalized.as_str() {
+        "thassgrate" | "thassgrate jerry" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "success",
+            "ok",
+            "Operation succeeded or the current state looks healthy.",
+            None,
+        ),
+        "thassrealgrate" | "thassrealgrate jerry" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "success",
+            "high",
+            "Operation succeeded with high confidence.",
+            None,
+        ),
+        "thasskinda-grate" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "success",
+            "medium",
+            "Partial success or a mixed-good outcome.",
+            None,
+        ),
+        "thasnotgrate" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "failure",
+            "medium",
+            "The operation failed or the current state is not acceptable.",
+            None,
+        ),
+        "thasrealnotgrate" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "failure",
+            "high",
+            "A major failure or severe mismatch was detected.",
+            None,
+        ),
+        "thasconfusin jerry" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "ambiguity",
+            "medium",
+            "The request, spec, or evidence is unclear and needs clarification.",
+            None,
+        ),
+        "coobie is confuzd" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "ambiguity",
+            "medium",
+            "Coobie cannot reason cleanly from the current context.",
+            Some("coobie"),
+        ),
+        "keeper says no" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "policy",
+            "high",
+            "Keeper flagged a safety or policy violation.",
+            Some("keeper"),
+        ),
+        "coobie smells somethin" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "reasoning",
+            "medium",
+            "Coobie detected a causal clue worth investigating.",
+            Some("coobie"),
+        ),
+        "coobie found the trail" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "reasoning",
+            "high",
+            "Coobie found a plausible causal chain.",
+            Some("coobie"),
+        ),
+        "coobie lost the trail" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "reasoning",
+            "medium",
+            "Coobie could not sustain the causal chain to a clean explanation.",
+            Some("coobie"),
+        ),
+        "coobie thinks this is why" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "reasoning",
+            "high",
+            "Coobie is stating a causal hypothesis.",
+            Some("coobie"),
+        ),
+        "coobie would try this jerry" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "intervention",
+            "medium",
+            "Coobie is recommending an intervention or next action.",
+            Some("coobie"),
+        ),
+        "gonna try agin" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "iteration",
+            "low",
+            "The system is retrying or attempting another pass.",
+            None,
+        ),
+        "need different stick" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "iteration",
+            "medium",
+            "The current approach is wrong and needs to change.",
+            None,
+        ),
+        "this stick better" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "iteration",
+            "low",
+            "A revised approach looks better than the previous one.",
+            None,
+        ),
+        "still not grrrate" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "failure",
+            "medium",
+            "The problem persists after another attempt.",
+            None,
+        ),
+        "pack is workin" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "state",
+            "low",
+            "Agents appear aligned and coordination looks healthy.",
+            None,
+        ),
+        "pack is messy" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "state",
+            "medium",
+            "Coordination is degraded or conflicting.",
+            None,
+        ),
+        "too many smells" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "state",
+            "medium",
+            "The system is dealing with too much complexity or too many simultaneous concerns.",
+            None,
+        ),
+        "field is clean" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "environment",
+            "low",
+            "The simulated or operational environment looks ready and coherent.",
+            None,
+        ),
+        "field is weird" => build_signal(
+            line_index,
+            phrase,
+            &normalized,
+            "environment",
+            "medium",
+            "The environment looks inconsistent, incomplete, or risky.",
+            None,
+        ),
+        _ => {
+            if let Some(agent) = normalized.strip_suffix(" is not a geed dawg") {
+                build_signal(
+                    line_index,
+                    phrase,
+                    &normalized,
+                    "behavior",
+                    "high",
+                    "The agent violated expectations or failed its role.",
+                    Some(agent),
+                )
+            } else if let Some(agent) = normalized.strip_suffix(" tryin to be a geed dawg") {
+                build_signal(
+                    line_index,
+                    phrase,
+                    &normalized,
+                    "behavior",
+                    "low",
+                    "The agent is partially complying but has not fully met expectations yet.",
+                    Some(agent),
+                )
+            } else if let Some(agent) = normalized.strip_suffix(" is a real geed dawg") {
+                build_signal(
+                    line_index,
+                    phrase,
+                    &normalized,
+                    "behavior",
+                    "low",
+                    "The agent is behaving correctly and fulfilling its role well.",
+                    Some(agent),
+                )
+            } else if normalized.starts_with("thass") && normalized.contains("grate") {
+                build_signal(
+                    line_index,
+                    phrase,
+                    &normalized,
+                    "success",
+                    "medium",
+                    "A positive success signal was emitted.",
+                    None,
+                )
+            } else if normalized.starts_with("thas") && normalized.contains("notgrate") {
+                build_signal(
+                    line_index,
+                    phrase,
+                    &normalized,
+                    "failure",
+                    "medium",
+                    "A negative failure signal was emitted.",
+                    None,
+                )
+            } else {
+                return None;
+            }
+        }
+    };
+
+    if signal.agent.is_none() && signal.kind == "behavior" {
+        signal.agent = Some(phrase.split_whitespace().next().unwrap_or_default().to_lowercase());
+    }
+
+    Some(signal)
+}
+
+fn build_signal(
+    line_index: usize,
+    phrase: &str,
+    normalized: &str,
+    kind: &str,
+    severity: &str,
+    meaning: &str,
+    agent: Option<&str>,
+) -> PidginSignal {
+    PidginSignal {
+        line_index,
+        phrase: phrase.to_string(),
+        normalized: normalized.to_string(),
+        kind: kind.to_string(),
+        severity: severity.to_string(),
+        meaning: meaning.to_string(),
+        agent: agent.map(|value| value.to_string()),
+    }
+}
+
+fn normalize_phrase(phrase: &str) -> String {
+    phrase
+        .trim()
+        .trim_matches(|ch: char| matches!(ch, '!' | '.' | ',' | ':' | ';'))
+        .to_lowercase()
+}
+
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
     needles.iter().any(|needle| haystack.contains(needle))
 }
@@ -228,5 +560,6 @@ fn dedupe_join(phrases: &[&str]) -> String {
             out.push((*phrase).to_string());
         }
     }
-    out.join("\n")
+    out.join("
+")
 }

@@ -1,5 +1,6 @@
 import React, { useEffect, useState } from 'react';
 import AgentCard from './components/AgentCard';
+import CoobieSignalPanel from './components/CoobieSignalPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
@@ -230,6 +231,7 @@ function App() {
   const blackboard = runState?.blackboard || null;
   const lessons = runState?.lessons || [];
   const agentExecutions = runState?.agent_executions || [];
+  const coobieTranslations = runState?.coobie_translations || [];
   const agents = deriveAgents(events, blackboard, agentExecutions);
   const planningAgents = agents.filter((agent) => agent.group === 'planning');
   const actionAgents = agents.filter((agent) => agent.group === 'action');
@@ -368,8 +370,12 @@ function App() {
               <div className="info-row"><span>Lesson refs</span><strong>{blackboard?.lesson_refs?.length || 0}</strong></div>
               <div className="info-row"><span>Promoted lessons</span><strong>{lessons.length}</strong></div>
               <div className="info-row"><span>Recent recalls</span><strong>{agentExecutions.length}</strong></div>
+              <div className="info-row"><span>Live pidgin signals</span><strong>{coobieTranslations.reduce((sum, item) => sum + (item.signals?.length || 0), 0)}</strong></div>
             </div>
-            <div className="list-block">
+            <div className="top-gap">
+              <CoobieSignalPanel translations={coobieTranslations} compact />
+            </div>
+            <div className="list-block top-gap">
               {(lessons || []).length === 0 ? (
                 <div className="empty-state">No lessons promoted for this run yet.</div>
               ) : (

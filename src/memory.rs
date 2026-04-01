@@ -32,6 +32,12 @@ pub struct MemoryProvenance {
     #[serde(default)]
     pub stale_when: Vec<String>,
     #[serde(default)]
+    pub observed_paths: Vec<String>,
+    #[serde(default)]
+    pub code_under_test_paths: Vec<String>,
+    #[serde(default)]
+    pub observed_surfaces: Vec<String>,
+    #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
     pub superseded_by: Option<String>,
@@ -744,6 +750,9 @@ fn parse_frontmatter(raw: &str) -> ParsedFrontmatter {
             git_remote: extract_optional_frontmatter_scalar(front, "git_remote"),
             evidence_run_ids: extract_frontmatter_list(front, "evidence_run_ids"),
             stale_when: extract_frontmatter_list(front, "stale_when"),
+            observed_paths: extract_frontmatter_list(front, "observed_paths"),
+            code_under_test_paths: extract_frontmatter_list(front, "code_under_test_paths"),
+            observed_surfaces: extract_frontmatter_list(front, "observed_surfaces"),
             status: extract_optional_frontmatter_scalar(front, "status"),
             superseded_by: extract_optional_frontmatter_scalar(front, "superseded_by"),
             challenged_by: extract_frontmatter_list(front, "challenged_by"),
@@ -803,6 +812,9 @@ fn render_memory_document(
     push_frontmatter_scalar(&mut frontmatter, "git_remote", provenance.git_remote.as_deref());
     push_frontmatter_list(&mut frontmatter, "evidence_run_ids", &provenance.evidence_run_ids);
     push_frontmatter_list(&mut frontmatter, "stale_when", &provenance.stale_when);
+    push_frontmatter_list(&mut frontmatter, "observed_paths", &provenance.observed_paths);
+    push_frontmatter_list(&mut frontmatter, "code_under_test_paths", &provenance.code_under_test_paths);
+    push_frontmatter_list(&mut frontmatter, "observed_surfaces", &provenance.observed_surfaces);
     push_frontmatter_scalar(&mut frontmatter, "status", provenance.status.as_deref());
     push_frontmatter_scalar(&mut frontmatter, "superseded_by", provenance.superseded_by.as_deref());
     push_frontmatter_list(&mut frontmatter, "challenged_by", &provenance.challenged_by);

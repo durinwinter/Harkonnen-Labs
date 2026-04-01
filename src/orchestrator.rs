@@ -60,6 +60,8 @@ struct TargetGitMetadata {
     commit: Option<String>,
     remote_origin: Option<String>,
     clean: Option<bool>,
+    #[serde(default)]
+    changed_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -85,6 +87,7 @@ struct ExecutionOutput {
     hidden_scenarios: HiddenScenarioSummary,
     run_dir: PathBuf,
     memory_context: MemoryContextBundle,
+    briefing: CoobieBriefing,
 }
 
 #[derive(Debug, Clone)]
@@ -178,6 +181,34 @@ struct ProjectResumePacket {
     stale_memory: Vec<ProjectResumeRisk>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StaleMemoryMitigationStatusEntry {
+    memory_id: String,
+    severity: String,
+    severity_score: i32,
+    mitigation_steps: Vec<String>,
+    related_checks: Vec<String>,
+    status: String,
+    evidence: Vec<String>,
+    previous_severity_score: Option<i32>,
+    risk_reduced_from_previous: Option<bool>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct StaleMemoryMitigationStatusArtifact {
+    run_id: String,
+    spec_id: String,
+    product: String,
+    generated_at: String,
+    entries: Vec<StaleMemoryMitigationStatusEntry>,
+    resolved_since_previous: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct StaleMemoryMitigationHistory {
+    records: Vec<StaleMemoryMitigationStatusArtifact>,
+}
+
 impl AppContext {
     pub async fn bootstrap() -> Result<Self> {
         let paths = Paths::discover()?;
@@ -255,7 +286,7 @@ impl AppContext {
                         .await;
                 }
 
-                let lessons = match self.consolidate_run(&run_id).await {
+                let lessons = match self.consolidate_run(&run_id, &spec_obj).await {
                     Ok(lessons) => lessons,
                     Err(error) => {
                         let _ = self
@@ -274,6 +305,30 @@ impl AppContext {
                 };
                 self.attach_lessons_to_blackboard(&output.run_dir, &lessons)
                     .await?;
+                if let Err(error) = self
+                    .record_stale_memory_mitigation_outcomes(
+                        &run_id,
+                        &spec_obj,
+                        &target_source,
+                        &output.briefing,
+                        &output.validation,
+                        &output.hidden_scenarios,
+                        &output.run_dir,
+                    )
+                    .await
+                {
+                    let _ = self
+                        .record_event(
+                            &run_id,
+                            None,
+                            "memory",
+                            "coobie",
+                            "warning",
+                            &format!("Stale-memory mitigation tracking skipped: {error}"),
+                            &log_path,
+                        )
+                        .await;
+                }
 
                 let _ = self
                     .record_event(
@@ -309,7 +364,7 @@ impl AppContext {
                     .await?;
                 let run_dir = self.run_dir(&run_id);
                 self.mark_blackboard_failed(&message, &run_dir).await?;
-                let lessons = match self.consolidate_run(&run_id).await {
+                let lessons = match self.consolidate_run(&run_id, &spec_obj).await {
                     Ok(lessons) => lessons,
                     Err(consolidation_error) => {
                         let _ = self
@@ -328,6 +383,40 @@ impl AppContext {
                 };
                 if run_dir.exists() {
                     self.attach_lessons_to_blackboard(&run_dir, &lessons).await?;
+                    if let Ok(Some(briefing)) = self.load_run_briefing(&run_id).await {
+                        let fallback_validation = ValidationSummary {
+                            passed: false,
+                            results: Vec::new(),
+                        };
+                        let fallback_hidden = HiddenScenarioSummary {
+                            passed: false,
+                            results: Vec::new(),
+                        };
+                        if let Err(tracking_error) = self
+                            .record_stale_memory_mitigation_outcomes(
+                                &run_id,
+                                &spec_obj,
+                                &target_source,
+                                &briefing,
+                                &fallback_validation,
+                                &fallback_hidden,
+                                &run_dir,
+                            )
+                            .await
+                        {
+                            let _ = self
+                                .record_event(
+                                    &run_id,
+                                    None,
+                                    "memory",
+                                    "coobie",
+                                    "warning",
+                                    &format!("Stale-memory mitigation tracking skipped: {tracking_error}"),
+                                    &log_path,
+                                )
+                                .await;
+                        }
+                    }
                 }
                 let _ = self.package_artifacts(&run_id).await;
             }
@@ -1006,6 +1095,9 @@ Top memory hits:
                     "git commit or branch changes for the target repo".to_string(),
                     "hidden scenario oracle, dataset, or runtime assumptions change".to_string(),
                 ],
+                collect_spec_provenance_paths(spec_obj),
+                collect_spec_code_under_test_paths(spec_obj),
+                collect_spec_provenance_surfaces(spec_obj),
             ),
         )
         .await?;
@@ -1145,6 +1237,7 @@ Top memory hits:
             hidden_scenarios,
             run_dir,
             memory_context,
+            briefing,
         })
     }
 
@@ -1171,6 +1264,9 @@ Top memory hits:
         }
         if let Some(memory_status_hit) = self.read_project_memory_status_hit(target_source).await? {
             project_memory.hits.insert(project_memory.hits.len().min(4), memory_status_hit);
+        }
+        if let Some(mitigation_history_hit) = self.read_project_stale_memory_history_hit(target_source).await? {
+            project_memory.hits.insert(project_memory.hits.len().min(5), mitigation_history_hit);
         }
 
         let mut core_memory = self
@@ -1291,6 +1387,7 @@ Top memory hits:
 - Resume packet: {}
 - Strategy register: {}
 - Memory status: {}
+- Stale memory history: {}
 
 ## Coobie Memory Split
 - Put repo-specific lessons, runtime facts, ports, protocols, datasets, oracle semantics, and commissioning notes in `.harkonnen/project-memory/`.
@@ -1305,6 +1402,7 @@ Top memory hits:
                 harkonnen_dir.join("resume-packet.md").display(),
                 harkonnen_dir.join("strategy-register.md").display(),
                 harkonnen_dir.join("memory-status.md").display(),
+                harkonnen_dir.join("stale-memory-history.md").display(),
             );
             tokio::fs::write(&project_context_path, context).await?;
         }
@@ -1340,6 +1438,15 @@ Top memory hits:
             tokio::fs::write(
                 &memory_status_md,
                 "# Memory Status\n\n- No project-memory contradictions or supersessions have been recorded yet.\n",
+            )
+            .await?;
+        }
+
+        let stale_memory_history_md = harkonnen_dir.join("stale-memory-history.md");
+        if !stale_memory_history_md.exists() {
+            tokio::fs::write(
+                &stale_memory_history_md,
+                "# Stale Memory History\n\n- No stale-memory mitigation history has been recorded yet.\n",
             )
             .await?;
         }
@@ -1420,6 +1527,22 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         Ok(Some(format!("[memory status] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
     }
 
+    async fn read_project_stale_memory_history_hit(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<String>> {
+        let path = self.project_harkonnen_dir(target_source).join("stale-memory-history.md");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(format!("[stale memory history] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+    }
+
     async fn read_project_scan_hit(
         &self,
         target_source: &TargetSourceMetadata,
@@ -1447,6 +1570,18 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
     ) -> Result<ProjectResumePacket> {
         let store = MemoryStore::new(self.project_harkonnen_dir(target_source).join("project-memory"));
         self.refresh_project_resume_packet(target_source, &store).await
+    }
+
+    async fn load_project_stale_memory_history(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<StaleMemoryMitigationHistory> {
+        let path = self.project_harkonnen_dir(target_source).join("stale-memory-history.json");
+        if !path.exists() {
+            return Ok(StaleMemoryMitigationHistory::default());
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        Ok(serde_json::from_str(&raw).unwrap_or_default())
     }
 
     async fn read_project_context_hit(
@@ -1491,6 +1626,15 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
 
     async fn target_source_for_run(&self, run_id: &str) -> Result<Option<TargetSourceMetadata>> {
         let path = self.run_dir(run_id).join("target_source.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        Ok(Some(serde_json::from_str(&raw)?))
+    }
+
+    async fn load_run_briefing(&self, run_id: &str) -> Result<Option<CoobieBriefing>> {
+        let path = self.run_dir(run_id).join("coobie_briefing.json");
         if !path.exists() {
             return Ok(None);
         }
@@ -1814,20 +1958,27 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         let application_risks = build_application_risks(spec_obj, domain_signals, &memory_context.memory_hits, &prior_causes);
         let environment_risks = build_environment_risks(spec_obj, domain_signals);
         let regulatory_considerations = build_regulatory_considerations(spec_obj, domain_signals);
-        let recommended_guardrails = build_recommended_guardrails(
+        let stale_memory_mitigation_plan = build_stale_memory_mitigation_plan(&resume_packet.stale_memory);
+        let mut recommended_guardrails = build_recommended_guardrails(
             spec_obj,
             domain_signals,
             &memory_context.memory_hits,
             &prior_causes,
             &relevant_lessons,
         );
-        let required_checks = build_required_checks(
+        let mut required_checks = build_required_checks(
             spec_obj,
             domain_signals,
             &regulatory_considerations,
             &relevant_lessons,
         );
-        let open_questions = build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
+        let mut open_questions = build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
+        apply_stale_memory_mitigations(
+            &resume_packet.stale_memory,
+            &mut recommended_guardrails,
+            &mut required_checks,
+            &mut open_questions,
+        );
 
         let mut briefing = CoobieBriefing {
             spec_id: spec_obj.id.clone(),
@@ -1840,6 +1991,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             project_memory_hits: memory_context.project_memory_hits.clone(),
             resume_packet_summary: resume_packet.summary.clone(),
             resume_packet_risks: resume_packet.stale_memory.clone(),
+            stale_memory_mitigation_plan,
             exploration_citations,
             strategy_register_citations,
             relevant_lessons,
@@ -2643,18 +2795,25 @@ TWIN SERVICES:
             .filter(|outcome| outcome.success)
             .map(|outcome| outcome.stdout.trim().to_string())
             .filter(|value| !value.is_empty());
-        let clean = self
+        let status_outcome = self
             .run_command_capture("git", &["status", "--porcelain"], source)
             .await
             .ok()
-            .filter(|outcome| outcome.success)
+            .filter(|outcome| outcome.success);
+        let clean = status_outcome
+            .as_ref()
             .map(|outcome| outcome.stdout.trim().is_empty());
+        let changed_paths = status_outcome
+            .as_ref()
+            .map(|outcome| parse_git_status_paths(&outcome.stdout))
+            .unwrap_or_default();
 
         Ok(Some(TargetGitMetadata {
             branch,
             commit,
             remote_origin,
             clean,
+            changed_paths,
         }))
     }
 
@@ -3040,10 +3199,18 @@ TWIN SERVICES:
         store: &MemoryStore,
     ) -> Result<ProjectResumePacket> {
         let entries = store.list_entries().await?;
-        let stale_memory = entries
-            .iter()
-            .filter_map(|entry| build_resume_risk(entry, target_source))
-            .collect::<Vec<_>>();
+        let mut stale_memory = Vec::new();
+        for entry in &entries {
+            if let Some(risk) = self.build_resume_risk(entry, target_source).await? {
+                stale_memory.push(risk);
+            }
+        }
+        stale_memory.sort_by(|left, right| {
+            right
+                .severity_score
+                .cmp(&left.severity_score)
+                .then_with(|| left.memory_id.cmp(&right.memory_id))
+        });
         let status_count = entries
             .iter()
             .filter(|entry| entry.provenance.status.is_some())
@@ -3057,8 +3224,26 @@ TWIN SERVICES:
         if status_count > 0 {
             summary.push(format!("Entries already marked challenged/superseded: {}", status_count));
         }
-        if target_source.git.as_ref().and_then(|git| git.clean).is_some_and(|clean| !clean) {
-            summary.push("Working tree is dirty; provenance checks may need fresh review before trusting older lessons.".to_string());
+        if !stale_memory.is_empty() {
+            let critical = stale_memory.iter().filter(|risk| risk.severity == "critical").count();
+            let high = stale_memory.iter().filter(|risk| risk.severity == "high").count();
+            let medium = stale_memory.iter().filter(|risk| risk.severity == "medium").count();
+            let low = stale_memory.iter().filter(|risk| risk.severity == "low").count();
+            summary.push(format!(
+                "Risk mix: critical={} high={} medium={} low={}",
+                critical, high, medium, low
+            ));
+        }
+        if let Some(git) = target_source.git.as_ref() {
+            if !git.changed_paths.is_empty() {
+                summary.push(format!(
+                    "Working tree changed paths: {}",
+                    git.changed_paths.iter().take(8).cloned().collect::<Vec<_>>().join(", ")
+                ));
+            }
+            if git.clean.is_some_and(|clean| !clean) {
+                summary.push("Working tree is dirty; provenance checks may need fresh review before trusting older lessons.".to_string());
+            }
         }
 
         let packet = ProjectResumePacket {
@@ -3080,6 +3265,186 @@ TWIN SERVICES:
         Ok(packet)
     }
 
+    async fn build_resume_risk(
+        &self,
+        entry: &MemoryEntry,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<ProjectResumeRisk>> {
+        let mut reasons = Vec::new();
+        let mut affected_paths = Vec::new();
+        let mut severity_score = 0;
+        let current_git = target_source.git.as_ref();
+        let observed_paths = entry
+            .provenance
+            .observed_paths
+            .iter()
+            .map(|path| normalize_project_path(path))
+            .filter(|path| !path.is_empty())
+            .collect::<Vec<_>>();
+        let code_under_test_paths = entry
+            .provenance
+            .code_under_test_paths
+            .iter()
+            .map(|path| normalize_project_path(path))
+            .filter(|path| !path.is_empty())
+            .collect::<Vec<_>>();
+
+        if let (Some(stored), Some(current)) = (
+            entry.provenance.git_commit.as_deref(),
+            current_git.and_then(|git| git.commit.as_deref()),
+        ) {
+            if stored != current {
+                if observed_paths.is_empty() {
+                    reasons.push(format!("stored commit {} differs from current commit {}", stored, current));
+                    severity_score = severity_score.max(25);
+                } else {
+                    let changed = self
+                        .git_paths_changed_since(
+                            Path::new(&target_source.source_path),
+                            stored,
+                            current,
+                            &observed_paths,
+                        )
+                        .await
+                        .unwrap_or_default();
+                    if !changed.is_empty() {
+                        reasons.push(format!(
+                            "recorded paths changed since memory commit: {}",
+                            changed.join(", ")
+                        ));
+                        severity_score = severity_score.max(max_path_impact_score(&changed));
+                        affected_paths.extend(changed);
+                    } else {
+                        severity_score = severity_score.max(15);
+                    }
+                }
+            }
+        }
+        if let (Some(stored), Some(current)) = (
+            entry.provenance.git_branch.as_deref(),
+            current_git.and_then(|git| git.branch.as_deref()),
+        ) {
+            if stored != current {
+                reasons.push(format!("stored branch {} differs from current branch {}", stored, current));
+                severity_score = severity_score.max(30);
+            }
+        }
+        if let Some(stored_path) = entry.provenance.source_path.as_deref() {
+            if stored_path != target_source.source_path {
+                reasons.push("memory was recorded against a different source path".to_string());
+                severity_score = severity_score.max(40);
+            }
+        }
+        if let Some(git) = current_git {
+            let overlapping_dirty = intersect_project_paths(&git.changed_paths, &observed_paths);
+            if !overlapping_dirty.is_empty() {
+                reasons.push(format!(
+                    "working tree changes overlap recorded paths: {}",
+                    overlapping_dirty.join(", ")
+                ));
+                severity_score = severity_score.max(max_path_impact_score(&overlapping_dirty));
+                affected_paths.extend(overlapping_dirty);
+            } else if git.clean.is_some_and(|clean| !clean)
+                && observed_paths.is_empty()
+                && !entry.provenance.stale_when.is_empty()
+            {
+                reasons.push(format!(
+                    "stale_when conditions: {}",
+                    entry.provenance.stale_when.join(" | ")
+                ));
+                severity_score = severity_score.max(35);
+            }
+        }
+        if let Some(status) = entry.provenance.status.as_deref() {
+            reasons.push(format!("memory status is {}", status));
+            severity_score = severity_score.max(status_severity_score(status));
+        }
+        if let Some(superseded_by) = entry.provenance.superseded_by.as_deref() {
+            reasons.push(format!("superseded by {}", superseded_by));
+            severity_score = severity_score.max(95);
+        }
+        if !entry.provenance.challenged_by.is_empty() {
+            reasons.push(format!(
+                "challenged by {}",
+                entry.provenance.challenged_by.join(", ")
+            ));
+            severity_score = severity_score.max(70);
+        }
+        let affected_code_paths = intersect_project_paths(&affected_paths, &code_under_test_paths);
+        if !affected_code_paths.is_empty() {
+            reasons.push(format!(
+                "explicit code_under_test paths changed: {}",
+                affected_code_paths.join(", ")
+            ));
+            severity_score = severity_score.max(95);
+        }
+        if !entry.provenance.observed_surfaces.is_empty() && !affected_paths.is_empty() {
+            reasons.push(format!(
+                "memory covers surfaces: {}",
+                entry.provenance.observed_surfaces.join(", ")
+            ));
+            severity_score = (severity_score + 10).min(100);
+        }
+
+        affected_paths.sort();
+        affected_paths.dedup();
+        if !affected_paths.is_empty() {
+            reasons.push(format!("affected paths: {}", affected_paths.join(", ")));
+        }
+
+        if reasons.is_empty() {
+            Ok(None)
+        } else {
+            Ok(Some(ProjectResumeRisk {
+                memory_id: entry.id.clone(),
+                summary: entry.summary.clone(),
+                status: entry.provenance.status.clone(),
+                severity: resume_risk_severity(severity_score).to_string(),
+                severity_score,
+                reasons,
+            }))
+        }
+    }
+
+    async fn git_paths_changed_since(
+        &self,
+        repo_root: &Path,
+        from_commit: &str,
+        to_commit: &str,
+        observed_paths: &[String],
+    ) -> Result<Vec<String>> {
+        if !command_available("git") || observed_paths.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let mut command = Command::new("git");
+        command.current_dir(repo_root);
+        command.arg("diff");
+        command.arg("--name-only");
+        command.arg(format!("{}..{}", from_commit, to_commit));
+        command.arg("--");
+        for path in observed_paths {
+            command.arg(path);
+        }
+
+        let output = command
+            .output()
+            .await
+            .with_context(|| format!("running git diff in {}", repo_root.display()))?;
+        if !output.status.success() {
+            return Ok(Vec::new());
+        }
+
+        let mut changed = String::from_utf8_lossy(&output.stdout)
+            .lines()
+            .map(normalize_project_path)
+            .filter(|path| !path.is_empty())
+            .collect::<Vec<_>>();
+        changed.sort();
+        changed.dedup();
+        Ok(changed)
+    }
+
     async fn sync_project_strategy_register(
         &self,
         target_source: &TargetSourceMetadata,
@@ -3098,6 +3463,139 @@ TWIN SERVICES:
         tokio::fs::write(
             harkonnen_dir.join("strategy-register.md"),
             render_project_strategy_register_markdown(target_source, &relevant),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn record_stale_memory_mitigation_outcomes(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+        validation: &ValidationSummary,
+        hidden_scenarios: &HiddenScenarioSummary,
+        run_dir: &Path,
+    ) -> Result<()> {
+        let mut history = self.load_project_stale_memory_history(target_source).await?;
+        let previous_record = history.records.last().cloned();
+        let mut previous_scores = HashMap::new();
+        if let Some(record) = &previous_record {
+            for entry in &record.entries {
+                previous_scores.insert(entry.memory_id.clone(), entry.severity_score);
+            }
+        }
+
+        let exploration_exists = run_dir.join("exploration_log.json").exists();
+        let current_ids = briefing
+            .resume_packet_risks
+            .iter()
+            .map(|risk| risk.memory_id.clone())
+            .collect::<HashSet<_>>();
+        let mut entries = Vec::new();
+        for risk in &briefing.resume_packet_risks {
+            let mitigation_steps = briefing
+                .stale_memory_mitigation_plan
+                .iter()
+                .filter(|step| step.contains(&risk.memory_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let related_checks = briefing
+                .required_checks
+                .iter()
+                .filter(|check| check.contains(&risk.memory_id))
+                .cloned()
+                .collect::<Vec<_>>();
+            let status = derive_stale_memory_mitigation_status(
+                risk,
+                validation,
+                hidden_scenarios,
+                exploration_exists,
+            );
+            let mut evidence = Vec::new();
+            if exploration_exists {
+                evidence.push("exploration_log.json present".to_string());
+            }
+            if validation.passed {
+                evidence.push("visible validation passed".to_string());
+            }
+            if hidden_scenarios.passed {
+                evidence.push("hidden scenarios passed".to_string());
+            }
+            if !mitigation_steps.is_empty() {
+                evidence.push(format!("{} mitigation step(s) generated", mitigation_steps.len()));
+            }
+            if !related_checks.is_empty() {
+                evidence.push(format!("{} mitigation check(s) generated", related_checks.len()));
+            }
+            let previous_severity_score = previous_scores.get(&risk.memory_id).copied();
+            let risk_reduced_from_previous = previous_severity_score.map(|previous| risk.severity_score < previous);
+            entries.push(StaleMemoryMitigationStatusEntry {
+                memory_id: risk.memory_id.clone(),
+                severity: risk.severity.clone(),
+                severity_score: risk.severity_score,
+                mitigation_steps,
+                related_checks,
+                status,
+                evidence,
+                previous_severity_score,
+                risk_reduced_from_previous,
+            });
+        }
+
+        let resolved_since_previous = previous_record
+            .as_ref()
+            .map(|record| {
+                record
+                    .entries
+                    .iter()
+                    .filter(|entry| !current_ids.contains(&entry.memory_id))
+                    .map(|entry| format!(
+                        "{} dropped from the stale-risk list after prior status {}",
+                        entry.memory_id, entry.status
+                    ))
+                    .collect::<Vec<_>>()
+            })
+            .unwrap_or_default();
+
+        let artifact = StaleMemoryMitigationStatusArtifact {
+            run_id: run_id.to_string(),
+            spec_id: spec_obj.id.clone(),
+            product: target_source.label.clone(),
+            generated_at: Utc::now().to_rfc3339(),
+            entries,
+            resolved_since_previous,
+        };
+        self.write_json_file(&run_dir.join("stale_memory_mitigation_status.json"), &artifact)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("stale_memory_mitigation_status.md"),
+            render_stale_memory_mitigation_status_markdown(&artifact),
+        )
+        .await?;
+
+        history.records.push(artifact);
+        if history.records.len() > 50 {
+            let drain = history.records.len() - 50;
+            history.records.drain(0..drain);
+        }
+        self.sync_project_stale_memory_history(target_source, &history).await?;
+        Ok(())
+    }
+
+    async fn sync_project_stale_memory_history(
+        &self,
+        target_source: &TargetSourceMetadata,
+        history: &StaleMemoryMitigationHistory,
+    ) -> Result<()> {
+        let harkonnen_dir = self.project_harkonnen_dir(target_source);
+        tokio::fs::create_dir_all(&harkonnen_dir).await?;
+        self.write_json_file(&harkonnen_dir.join("stale-memory-history.json"), history)
+            .await?;
+        tokio::fs::write(
+            harkonnen_dir.join("stale-memory-history.md"),
+            render_stale_memory_history_markdown(target_source, history),
         )
         .await?;
         Ok(())
@@ -3375,7 +3873,7 @@ TWIN SERVICES:
         Ok(lessons)
     }
 
-    async fn consolidate_run(&self, run_id: &str) -> Result<Vec<LessonRecord>> {
+    async fn consolidate_run(&self, run_id: &str, spec_obj: &Spec) -> Result<Vec<LessonRecord>> {
         let episodes = self.list_run_episodes(run_id).await?;
         let prior_lessons = self.list_lessons().await?;
         let target_source = self.target_source_for_run(run_id).await?;
@@ -3447,6 +3945,7 @@ Observed pattern: {}",
                 lesson,
                 lesson_body,
                 target_source.as_ref(),
+                Some(spec_obj),
                 &mut known_lesson_ids,
                 &mut new_lessons,
             )
@@ -3470,6 +3969,7 @@ Observed pattern: {}",
 
         self.consolidate_exploration_artifacts(
             run_id,
+            spec_obj,
             target_source.as_ref(),
             &mut known_lesson_ids,
             &mut new_lessons,
@@ -3484,6 +3984,7 @@ Observed pattern: {}",
         lesson: LessonRecord,
         lesson_body: String,
         target_source: Option<&TargetSourceMetadata>,
+        spec_obj: Option<&Spec>,
         known_lesson_ids: &mut HashSet<String>,
         new_lessons: &mut Vec<LessonRecord>,
     ) -> Result<()> {
@@ -3501,6 +4002,9 @@ Observed pattern: {}",
                 vec![
                     "implementation behavior, oracle semantics, or runtime assumptions change".to_string(),
                 ],
+                spec_obj.map(collect_spec_provenance_paths).unwrap_or_default(),
+                spec_obj.map(collect_spec_code_under_test_paths).unwrap_or_default(),
+                spec_obj.map(collect_spec_provenance_surfaces).unwrap_or_default(),
             );
             self.store_project_memory_entry(
                 target_source,
@@ -3535,6 +4039,9 @@ Observed pattern: {}",
                         vec![
                             "cross-project applicability or external-system assumptions are contradicted".to_string(),
                         ],
+                        spec_obj.map(collect_spec_provenance_paths).unwrap_or_default(),
+                        spec_obj.map(collect_spec_code_under_test_paths).unwrap_or_default(),
+                        spec_obj.map(collect_spec_provenance_surfaces).unwrap_or_default(),
                     )
                 })
                 .unwrap_or_default();
@@ -3620,6 +4127,7 @@ Observed pattern: {}",
     async fn consolidate_exploration_artifacts(
         &self,
         run_id: &str,
+        spec_obj: &Spec,
         target_source: Option<&TargetSourceMetadata>,
         known_lesson_ids: &mut HashSet<String>,
         new_lessons: &mut Vec<LessonRecord>,
@@ -3675,6 +4183,7 @@ Open questions: {}",
                         lesson,
                         lesson_body,
                         target_source,
+                        Some(spec_obj),
                         known_lesson_ids,
                         new_lessons,
                     )
@@ -3747,6 +4256,7 @@ Run ids: {}",
                 lesson,
                 lesson_body,
                 target_source,
+                Some(spec_obj),
                 known_lesson_ids,
                 new_lessons,
             )
@@ -4394,6 +4904,116 @@ fn build_required_checks(
     checks
 }
 
+fn build_stale_memory_mitigation_plan(risks: &[ProjectResumeRisk]) -> Vec<String> {
+    let priority = risks
+        .iter()
+        .filter(|risk| matches!(risk.severity.as_str(), "critical" | "high"))
+        .collect::<Vec<_>>();
+    if priority.is_empty() {
+        return Vec::new();
+    }
+
+    let mut steps = Vec::new();
+    for risk in priority.into_iter().take(5) {
+        steps.push(format!(
+            "Revalidate memory {} before relying on it because severity={} score={}.",
+            risk.memory_id, risk.severity, risk.severity_score
+        ));
+        if risk
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("explicit code_under_test paths changed"))
+        {
+            steps.push(format!(
+                "Run targeted checks against the changed code-under-test paths linked to memory {}.",
+                risk.memory_id
+            ));
+        } else if risk.reasons.iter().any(|reason| {
+            reason.contains("recorded paths changed since memory commit")
+                || reason.contains("working tree changes overlap recorded paths")
+        }) {
+            steps.push(format!(
+                "Compare current behavior on the changed paths against the assumption captured in memory {}.",
+                risk.memory_id
+            ));
+        }
+        if risk.status.as_deref().is_some_and(|status| matches!(status, "superseded" | "challenged")) {
+            steps.push(format!(
+                "Find the newer evidence that replaces or challenges memory {} before planning continues.",
+                risk.memory_id
+            ));
+        }
+    }
+    steps.dedup();
+    steps
+}
+
+fn apply_stale_memory_mitigations(
+    risks: &[ProjectResumeRisk],
+    recommended_guardrails: &mut Vec<String>,
+    required_checks: &mut Vec<String>,
+    open_questions: &mut Vec<String>,
+) {
+    let priority = risks
+        .iter()
+        .filter(|risk| matches!(risk.severity.as_str(), "critical" | "high"))
+        .collect::<Vec<_>>();
+    if priority.is_empty() {
+        return;
+    }
+
+    recommended_guardrails.push(
+        "Treat high-risk stale project memories as provisional until Coobie’s mitigation steps are satisfied.".to_string(),
+    );
+
+    for risk in priority.into_iter().take(4) {
+        required_checks.push(format!(
+            "Revalidate stale memory {} before relying on it; severity={} score={}.",
+            risk.memory_id, risk.severity, risk.severity_score
+        ));
+        if risk
+            .reasons
+            .iter()
+            .any(|reason| reason.contains("explicit code_under_test paths changed"))
+        {
+            required_checks.push(format!(
+                "Run targeted validation against the changed code_under_test paths for memory {} before Mason, Ash, or Bramble reuses it.",
+                risk.memory_id
+            ));
+            open_questions.push(format!(
+                "Does memory {} still hold after the explicit code_under_test changes named in the resume packet?",
+                risk.memory_id
+            ));
+        } else if risk.reasons.iter().any(|reason| {
+            reason.contains("recorded paths changed since memory commit")
+                || reason.contains("working tree changes overlap recorded paths")
+        }) {
+            required_checks.push(format!(
+                "Compare current behavior on the changed paths to the assumption captured in memory {} before using it as guidance.",
+                risk.memory_id
+            ));
+            open_questions.push(format!(
+                "Which part of memory {} is now at risk because the underlying paths changed?",
+                risk.memory_id
+            ));
+        }
+        if risk.status.as_deref().is_some_and(|status| matches!(status, "superseded" | "challenged")) {
+            recommended_guardrails.push(format!(
+                "Do not rely on memory {} as settled truth until the newer contradicting evidence is reviewed.",
+                risk.memory_id
+            ));
+            open_questions.push(format!(
+                "Which newer evidence should replace or qualify memory {} before planning proceeds?",
+                risk.memory_id
+            ));
+        }
+    }
+
+    recommended_guardrails.dedup();
+    required_checks.dedup();
+    open_questions.dedup();
+}
+
 fn build_coobie_open_questions(
     spec_obj: &Spec,
     domain_signals: &[String],
@@ -4446,56 +5066,14 @@ fn build_coobie_open_questions(
 fn render_target_git_summary(git: Option<&TargetGitMetadata>) -> String {
     match git {
         Some(git) => format!(
-            "branch={} commit={} remote={} clean={}",
+            "branch={} commit={} remote={} clean={} changed_paths={}",
             git.branch.as_deref().unwrap_or("unknown"),
             git.commit.as_deref().unwrap_or("unknown"),
             git.remote_origin.as_deref().unwrap_or("unknown"),
             git.clean.map(|value| if value { "true" } else { "false" }).unwrap_or("unknown"),
+            git.changed_paths.len(),
         ),
         None => "git metadata unavailable".to_string(),
-    }
-}
-
-fn build_resume_risk(entry: &MemoryEntry, target_source: &TargetSourceMetadata) -> Option<ProjectResumeRisk> {
-    let mut reasons = Vec::new();
-    let current_git = target_source.git.as_ref();
-    if let (Some(stored), Some(current)) = (entry.provenance.git_commit.as_deref(), current_git.and_then(|git| git.commit.as_deref())) {
-        if stored != current {
-            reasons.push(format!("stored commit {} differs from current commit {}", stored, current));
-        }
-    }
-    if let (Some(stored), Some(current)) = (entry.provenance.git_branch.as_deref(), current_git.and_then(|git| git.branch.as_deref())) {
-        if stored != current {
-            reasons.push(format!("stored branch {} differs from current branch {}", stored, current));
-        }
-    }
-    if let Some(stored_path) = entry.provenance.source_path.as_deref() {
-        if stored_path != target_source.source_path {
-            reasons.push("memory was recorded against a different source path".to_string());
-        }
-    }
-    if let Some(status) = entry.provenance.status.as_deref() {
-        reasons.push(format!("memory status is {}", status));
-    }
-    if let Some(superseded_by) = entry.provenance.superseded_by.as_deref() {
-        reasons.push(format!("superseded by {}", superseded_by));
-    }
-    if !entry.provenance.challenged_by.is_empty() {
-        reasons.push(format!("challenged by {}", entry.provenance.challenged_by.join(", ") ));
-    }
-    if current_git.and_then(|git| git.clean).is_some_and(|clean| !clean) && !entry.provenance.stale_when.is_empty() {
-        reasons.push(format!("stale_when conditions: {}", entry.provenance.stale_when.join(" | ")));
-    }
-
-    if reasons.is_empty() {
-        None
-    } else {
-        Some(ProjectResumeRisk {
-            memory_id: entry.id.clone(),
-            summary: entry.summary.clone(),
-            status: entry.provenance.status.clone(),
-            reasons,
-        })
     }
 }
 
@@ -4507,9 +5085,11 @@ fn render_project_resume_packet_markdown(packet: &ProjectResumePacket) -> String
             .stale_memory
             .iter()
             .map(|risk| format!(
-                "- {} [{}] {}",
+                "- {} [{} | severity={} score={}] {}",
                 risk.memory_id,
                 risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                risk.severity,
+                risk.severity_score,
                 if risk.reasons.is_empty() { "no reasons recorded".to_string() } else { risk.reasons.join(" | ") }
             ))
             .collect::<Vec<_>>()
@@ -4532,6 +5112,9 @@ fn project_memory_provenance(
     source_spec_id: Option<&str>,
     evidence_run_ids: Vec<String>,
     stale_when: Vec<String>,
+    observed_paths: Vec<String>,
+    code_under_test_paths: Vec<String>,
+    observed_surfaces: Vec<String>,
 ) -> MemoryProvenance {
     MemoryProvenance {
         source_label: Some(target_source.label.clone()),
@@ -4544,10 +5127,214 @@ fn project_memory_provenance(
         git_remote: target_source.git.as_ref().and_then(|git| git.remote_origin.clone()),
         evidence_run_ids,
         stale_when,
+        observed_paths,
+        code_under_test_paths,
+        observed_surfaces,
         status: None,
         superseded_by: None,
         challenged_by: Vec::new(),
     }
+}
+
+fn normalize_project_path(path: &str) -> String {
+    path.trim()
+        .replace('\\', "/")
+        .trim_start_matches("./")
+        .trim_start_matches('/')
+        .to_string()
+}
+
+fn parse_git_status_paths(status: &str) -> Vec<String> {
+    let mut paths = Vec::new();
+    for line in status.lines() {
+        let trimmed = line.trim();
+        if trimmed.len() <= 3 {
+            continue;
+        }
+        let raw_path = trimmed[3..].trim();
+        let path = raw_path
+            .split(" -> ")
+            .last()
+            .map(normalize_project_path)
+            .unwrap_or_default();
+        if !path.is_empty() && !paths.iter().any(|existing| existing == &path) {
+            paths.push(path);
+        }
+    }
+    paths
+}
+
+fn project_paths_overlap(left: &str, right: &str) -> bool {
+    let left = normalize_project_path(left);
+    let right = normalize_project_path(right);
+    left == right
+        || left.ends_with(&format!("/{}", right))
+        || right.ends_with(&format!("/{}", left))
+}
+
+fn intersect_project_paths(left: &[String], right: &[String]) -> Vec<String> {
+    let mut matches = Vec::new();
+    for candidate in left {
+        if right.iter().any(|observed| project_paths_overlap(candidate, observed)) {
+            let normalized = normalize_project_path(candidate);
+            if !normalized.is_empty() && !matches.iter().any(|existing| existing == &normalized) {
+                matches.push(normalized);
+            }
+        }
+    }
+    matches
+}
+
+fn status_severity_score(status: &str) -> i32 {
+    match status {
+        "superseded" => 95,
+        "challenged" => 70,
+        "stale" => 60,
+        _ => 45,
+    }
+}
+
+fn resume_risk_severity(score: i32) -> &'static str {
+    match score {
+        90..=i32::MAX => "critical",
+        65..=89 => "high",
+        35..=64 => "medium",
+        _ => "low",
+    }
+}
+
+fn path_impact_score(path: &str) -> i32 {
+    let path = normalize_project_path(path).to_ascii_lowercase();
+    if path.is_empty() {
+        return 0;
+    }
+    if path.starts_with("src/")
+        || path.starts_with("crates/")
+        || path.starts_with("backend/")
+        || path.starts_with("frontend/")
+        || path.starts_with("ui/src/")
+        || path.starts_with("apps/")
+        || path.starts_with("services/")
+        || ["rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "cs", "cpp", "c", "h", "hpp"]
+            .iter()
+            .any(|ext| path.ends_with(&format!(".{}", ext)))
+    {
+        return 80;
+    }
+    if path.ends_with("cargo.toml")
+        || path.ends_with("package.json")
+        || path.ends_with("package-lock.json")
+        || path.ends_with("pnpm-lock.yaml")
+        || path.ends_with("pyproject.toml")
+        || path.ends_with("requirements.txt")
+        || path.contains("config")
+        || path.contains("schema")
+        || path.contains("migration")
+    {
+        return 60;
+    }
+    if path.contains("dataset")
+        || path.contains("fixtures")
+        || ["csv", "jsonl", "parquet", "ndjson"]
+            .iter()
+            .any(|ext| path.ends_with(&format!(".{}", ext)))
+    {
+        return 50;
+    }
+    if path.starts_with("examples/")
+        || path.starts_with("docs/")
+        || path.ends_with("readme.md")
+        || path.ends_with(".md")
+        || path.ends_with(".txt")
+    {
+        return 20;
+    }
+    35
+}
+
+fn max_path_impact_score(paths: &[String]) -> i32 {
+    paths.iter().map(|path| path_impact_score(path)).max().unwrap_or(0)
+}
+
+fn looks_like_project_path(value: &str) -> bool {
+    let trimmed = value.trim();
+    !trimmed.is_empty()
+        && !trimmed.contains("://")
+        && (trimmed.contains('/')
+            || trimmed.contains('.')
+            || trimmed.starts_with("src")
+            || trimmed.starts_with("crates"))
+}
+
+fn collect_spec_code_under_test_paths(spec_obj: &Spec) -> Vec<String> {
+    let mut paths = Vec::new();
+    for component in &spec_obj.project_components {
+        if component.role.eq_ignore_ascii_case("code_under_test") && looks_like_project_path(&component.path) {
+            let normalized = normalize_project_path(&component.path);
+            if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
+                paths.push(normalized);
+            }
+        }
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        for value in &blueprint.code_under_test {
+            if looks_like_project_path(value) {
+                let normalized = normalize_project_path(value);
+                if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
+                    paths.push(normalized);
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn collect_spec_provenance_paths(spec_obj: &Spec) -> Vec<String> {
+    let mut paths = Vec::new();
+    for component in &spec_obj.project_components {
+        if looks_like_project_path(&component.path) {
+            let normalized = normalize_project_path(&component.path);
+            if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
+                paths.push(normalized);
+            }
+        }
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        for value in blueprint
+            .code_under_test
+            .iter()
+            .chain(blueprint.datasets.iter())
+        {
+            if looks_like_project_path(value) {
+                let normalized = normalize_project_path(value);
+                if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
+                    paths.push(normalized);
+                }
+            }
+        }
+    }
+    paths
+}
+
+fn collect_spec_provenance_surfaces(spec_obj: &Spec) -> Vec<String> {
+    let mut surfaces = Vec::new();
+    for component in &spec_obj.project_components {
+        for interface in &component.interfaces {
+            let trimmed = interface.trim();
+            if !trimmed.is_empty() && !surfaces.iter().any(|existing| existing == trimmed) {
+                surfaces.push(trimmed.to_string());
+            }
+        }
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        for surface in &blueprint.runtime_surfaces {
+            let trimmed = surface.trim();
+            if !trimmed.is_empty() && !surfaces.iter().any(|existing| existing == trimmed) {
+                surfaces.push(trimmed.to_string());
+            }
+        }
+    }
+    surfaces
 }
 
 fn build_project_scan_manifest(
@@ -4712,6 +5499,197 @@ fn render_project_memory_status_markdown(entries: &[MemoryEntry]) -> String {
         .join("\n");
 
     format!("# Memory Status\n\n{}\n", lines)
+}
+
+
+fn derive_stale_memory_mitigation_status(
+    risk: &ProjectResumeRisk,
+    validation: &ValidationSummary,
+    hidden_scenarios: &HiddenScenarioSummary,
+    exploration_exists: bool,
+) -> String {
+    let evidence_count = usize::from(validation.passed)
+        + usize::from(hidden_scenarios.passed)
+        + usize::from(exploration_exists);
+
+    if validation.passed && hidden_scenarios.passed && exploration_exists {
+        return "satisfied".to_string();
+    }
+    if validation.passed
+        && hidden_scenarios.passed
+        && !matches!(risk.severity.as_str(), "critical")
+    {
+        return "satisfied".to_string();
+    }
+    if evidence_count >= 2 {
+        return "partially_satisfied".to_string();
+    }
+    if evidence_count == 1 && matches!(risk.severity.as_str(), "low" | "medium") {
+        return "partially_satisfied".to_string();
+    }
+    "unresolved".to_string()
+}
+
+fn render_stale_memory_mitigation_status_markdown(
+    artifact: &StaleMemoryMitigationStatusArtifact,
+) -> String {
+    let satisfied = artifact
+        .entries
+        .iter()
+        .filter(|entry| entry.status == "satisfied")
+        .count();
+    let partial = artifact
+        .entries
+        .iter()
+        .filter(|entry| entry.status == "partially_satisfied")
+        .count();
+    let unresolved = artifact
+        .entries
+        .iter()
+        .filter(|entry| entry.status == "unresolved")
+        .count();
+
+    let entry_lines = if artifact.entries.is_empty() {
+        "- No stale-memory risks were active for this run.".to_string()
+    } else {
+        artifact
+            .entries
+            .iter()
+            .map(|entry| {
+                format!(
+                    "- {} [status={} severity={} score={} previous_score={} reduced={}] mitigation_steps={} related_checks={} evidence={} ",
+                    entry.memory_id,
+                    entry.status,
+                    entry.severity,
+                    entry.severity_score,
+                    entry
+                        .previous_severity_score
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "none".to_string()),
+                    entry
+                        .risk_reduced_from_previous
+                        .map(|value| if value { "true" } else { "false" }.to_string())
+                        .unwrap_or_else(|| "unknown".to_string()),
+                    if entry.mitigation_steps.is_empty() {
+                        "none".to_string()
+                    } else {
+                        entry.mitigation_steps.join(" | ")
+                    },
+                    if entry.related_checks.is_empty() {
+                        "none".to_string()
+                    } else {
+                        entry.related_checks.join(" | ")
+                    },
+                    if entry.evidence.is_empty() {
+                        "none".to_string()
+                    } else {
+                        entry.evidence.join(" | ")
+                    },
+                )
+                .trim_end()
+                .to_string()
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "# Stale Memory Mitigation Status\n\n- Run: {}\n- Spec: {}\n- Product: {}\n- Generated at: {}\n- Entries: {}\n- Status mix: satisfied={} partially_satisfied={} unresolved={}\n\n## Current Risk Status\n{}\n\n## Resolved Since Previous Run\n{}\n",
+        artifact.run_id,
+        artifact.spec_id,
+        artifact.product,
+        artifact.generated_at,
+        artifact.entries.len(),
+        satisfied,
+        partial,
+        unresolved,
+        entry_lines,
+        render_list(
+            &artifact.resolved_since_previous,
+            "No stale-memory items dropped out of the risk list since the previous recorded run.",
+        ),
+    )
+}
+
+fn render_stale_memory_history_markdown(
+    target_source: &TargetSourceMetadata,
+    history: &StaleMemoryMitigationHistory,
+) -> String {
+    if history.records.is_empty() {
+        return format!(
+            "# Stale Memory History\n\n- Project: {}\n- No stale-memory mitigation history has been recorded yet.\n",
+            target_source.label
+        );
+    }
+
+    let recent_records = history
+        .records
+        .iter()
+        .rev()
+        .take(5)
+        .map(|record| {
+            let satisfied = record
+                .entries
+                .iter()
+                .filter(|entry| entry.status == "satisfied")
+                .count();
+            let partial = record
+                .entries
+                .iter()
+                .filter(|entry| entry.status == "partially_satisfied")
+                .count();
+            let unresolved = record
+                .entries
+                .iter()
+                .filter(|entry| entry.status == "unresolved")
+                .count();
+            format!(
+                "- run={} spec={} generated={} entries={} satisfied={} partially_satisfied={} unresolved={} resolved_since_previous={}",
+                record.run_id,
+                record.spec_id,
+                record.generated_at,
+                record.entries.len(),
+                satisfied,
+                partial,
+                unresolved,
+                record.resolved_since_previous.len(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let latest_summary = history.records.last().map(|record| {
+        if record.entries.is_empty() {
+            "- Latest record had no active stale-memory risks.".to_string()
+        } else {
+            record
+                .entries
+                .iter()
+                .take(8)
+                .map(|entry| {
+                    format!(
+                        "- {} status={} severity={} score={} reduced_from_previous={}",
+                        entry.memory_id,
+                        entry.status,
+                        entry.severity,
+                        entry.severity_score,
+                        entry
+                            .risk_reduced_from_previous
+                            .map(|value| if value { "true" } else { "false" }.to_string())
+                            .unwrap_or_else(|| "unknown".to_string())
+                    )
+                })
+                .collect::<Vec<_>>()
+                .join("\n")
+        }
+    }).unwrap_or_else(|| "- No latest record available.".to_string());
+
+    format!(
+        "# Stale Memory History\n\n- Project: {}\n- Records retained: {}\n\n## Recent Runs\n{}\n\n## Latest Risk Snapshot\n{}\n",
+        target_source.label,
+        history.records.len(),
+        render_list(&recent_records, "No recent stale-memory records available."),
+        latest_summary,
+    )
 }
 
 fn detect_runtime_hints(

@@ -18,6 +18,7 @@ use crate::{
     models::{AgentExecution, BlackboardState, CoobieBriefing, LessonRecord, RunEvent, RunRecord},
     orchestrator::AppContext,
     pidgin::{self, PidginTranslation},
+    tesseract,
 };
 
 #[derive(Debug, Serialize)]
@@ -121,6 +122,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
         .route("/api/capacity", get(get_capacity))
+        .route("/api/tesseract/scene", get(get_tesseract_scene))
         .route("/api/runs/:id/artifacts/:name", get(get_run_artifact))
         .route("/api/coordination/assignments", get(get_assignments))
         .route("/api/coordination/policy-events", get(get_coordination_policy_events))
@@ -842,6 +844,26 @@ async fn release_task(
         Ok(()) => (StatusCode::OK, Json(state)).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+async fn get_tesseract_scene(State(app): State<AppContext>) -> impl IntoResponse {
+    let runs = match app.list_runs(30).await {
+        Ok(r) => r,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    let mut run_reports: Vec<(RunRecord, Option<CausalReport>)> = Vec::new();
+    for run in runs {
+        let report_path = app.paths.workspaces
+            .join(&run.run_id)
+            .join("run")
+            .join("causal_report.json");
+        let report = read_optional_json::<CausalReport>(&report_path).await.unwrap_or(None);
+        run_reports.push((run, report));
+    }
+
+    let scene = tesseract::build_scene(run_reports);
+    (StatusCode::OK, Json(scene)).into_response()
 }
 
 async fn get_capacity(State(app): State<AppContext>) -> impl IntoResponse {

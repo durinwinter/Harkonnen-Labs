@@ -22,6 +22,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -55,6 +58,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -89,6 +95,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -126,6 +135,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -160,6 +172,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -195,6 +210,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -231,6 +249,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -267,6 +288,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -301,6 +325,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -332,6 +359,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -366,6 +396,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -398,6 +431,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -430,6 +466,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -462,6 +501,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -494,6 +536,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -527,6 +572,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -561,6 +609,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -593,6 +644,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -625,6 +679,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -657,6 +714,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -689,6 +749,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -721,6 +784,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -753,6 +819,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -785,6 +854,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -817,6 +889,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -849,6 +924,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -881,6 +959,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []
@@ -913,6 +994,9 @@
         "git_remote": null,
         "evidence_run_ids": [],
         "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
         "status": null,
         "superseded_by": null,
         "challenged_by": []

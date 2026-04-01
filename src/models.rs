@@ -130,6 +130,10 @@ pub struct ProjectResumeRisk {
     #[serde(default)]
     pub status: Option<String>,
     #[serde(default)]
+    pub severity: String,
+    #[serde(default)]
+    pub severity_score: i32,
+    #[serde(default)]
     pub reasons: Vec<String>,
 }
 
@@ -159,6 +163,8 @@ pub struct CoobieBriefing {
     pub resume_packet_summary: Vec<String>,
     #[serde(default)]
     pub resume_packet_risks: Vec<ProjectResumeRisk>,
+    #[serde(default)]
+    pub stale_memory_mitigation_plan: Vec<String>,
     #[serde(default)]
     pub exploration_citations: Vec<CoobieEvidenceCitation>,
     #[serde(default)]

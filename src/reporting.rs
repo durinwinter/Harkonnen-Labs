@@ -32,9 +32,11 @@ fn render_resume_risk_lines(risks: &[ProjectResumeRisk]) -> Vec<String> {
         .iter()
         .map(|risk| {
             format!(
-                "{} [{}] reasons={}",
+                "{} [{} | severity={} score={}] reasons={}",
                 risk.memory_id,
                 risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                risk.severity,
+                risk.severity_score,
                 if risk.reasons.is_empty() {
                     "none".to_string()
                 } else {
@@ -369,6 +371,15 @@ Coobie Preflight
                 "none".to_string()
             } else {
                 render_resume_risk_lines(&briefing.resume_packet_risks).join(" | ")
+            }
+        ));
+        report.push_str(&format!(
+            "Stale memory mitigation plan: {}
+",
+            if briefing.stale_memory_mitigation_plan.is_empty() {
+                "none".to_string()
+            } else {
+                briefing.stale_memory_mitigation_plan.join(" | ")
             }
         ));
         report.push_str(&format!(

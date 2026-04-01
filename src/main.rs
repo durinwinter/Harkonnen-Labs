@@ -16,6 +16,7 @@ mod reporting;
 mod scenarios;
 mod setup;
 mod spec;
+mod tesseract;
 mod workspace;
 
 use anyhow::Result;

@@ -557,9 +557,11 @@ fn render_resume_risks(risks: &[ProjectResumeRisk]) -> String {
         .iter()
         .map(|risk| {
             format!(
-                "- {} [{}]\n  reasons: {}",
+                "- {} [{} | severity={} score={}]\n  reasons: {}",
                 risk.memory_id,
                 risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                risk.severity,
+                risk.severity_score,
                 if risk.reasons.is_empty() {
                     "no explicit reasons recorded".to_string()
                 } else {
@@ -638,6 +640,9 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 ## Project Memory At Risk
 {}
 
+## Stale Memory Mitigation Plan
+{}
+
 ## Project Memory Context
 {}
 
@@ -694,6 +699,10 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             "No resume packet summary was generated yet.",
         ),
         render_resume_risks(&briefing.resume_packet_risks),
+        render_bullet_lines(
+            &briefing.stale_memory_mitigation_plan,
+            "No stale-memory mitigation steps were generated.",
+        ),
         render_bullet_lines(
             &briefing.project_memory_hits,
             "No project-local memory hits were retrieved yet.",

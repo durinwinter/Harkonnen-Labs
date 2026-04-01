@@ -1,0 +1,26 @@
+id: launch-test-draft-2354d6e0
+title: Launch Test
+purpose: >
+  Create a reviewed draft and launch against an external repo path.
+scope:
+  - launch-test
+constraints:
+  - remain within the launch-test workspace boundary
+  - do not modify files outside the target product
+inputs:
+  - "product directory: /tmp/harkonnen-run-launch-test"
+outputs:
+  - implementation artifacts in the run workspace
+  - validation.json with pass/fail verdict
+acceptance_criteria:
+  - Confirm the run starts successfully.
+forbidden_behaviors:
+  - deleting unrelated files
+  - reaching outside the workspace boundary
+rollback_requirements:
+  - retain prior artifacts unless explicitly cleaned up
+dependencies: []
+performance_expectations:
+  - commands should complete in a reasonable time
+security_expectations:
+  - secrets must not appear in logs or artifact bundles

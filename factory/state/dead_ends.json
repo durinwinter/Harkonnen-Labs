@@ -25,6 +25,19 @@
       "surviving_structure": "none",
       "reformulation": "hidden_scenarios phase failed; preserve surviving structure and change strategy on retry",
       "created_at": "2026-04-01T19:17:34.983223616+00:00"
+    },
+    {
+      "registry_id": "de4c0a86-a5e4-441e-9498-d22531fff2ad:hidden_scenarios-942bb356-9621-40b6-8447-1611ff64dfd3",
+      "run_id": "de4c0a86-a5e4-441e-9498-d22531fff2ad",
+      "spec_id": "launch-test-draft-2354d6e0",
+      "product": "harkonnen-run-launch-test",
+      "phase": "hidden_scenarios",
+      "agent": "sable",
+      "strategy": "sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios",
+      "failure_constraint": "thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)",
+      "surviving_structure": "none",
+      "reformulation": "hidden_scenarios phase failed; preserve surviving structure and change strategy on retry",
+      "created_at": "2026-04-01T21:28:44.571190469+00:00"
     }
   ]
 }

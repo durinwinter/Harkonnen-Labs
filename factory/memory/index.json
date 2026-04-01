@@ -142,11 +142,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
+      "recall_count": 7,
+      "last_recalled": "2026-04-01T21:28:43.647599002+00:00",
+      "loaded_for_run_count": 7,
       "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "contributed_to_failure_count": 3
     },
     {
       "id": "04-spec-format",
@@ -179,11 +179,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
+      "recall_count": 7,
+      "last_recalled": "2026-04-01T21:28:43.647599002+00:00",
+      "loaded_for_run_count": 7,
       "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "contributed_to_failure_count": 3
     },
     {
       "id": "coobie-causaloid-roadmap",
@@ -256,11 +256,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
+      "recall_count": 7,
+      "last_recalled": "2026-04-01T21:28:43.647599002+00:00",
+      "loaded_for_run_count": 7,
       "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "contributed_to_failure_count": 3
     },
     {
       "id": "coobie-residue-roadmap",
@@ -295,11 +295,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
+      "recall_count": 7,
+      "last_recalled": "2026-04-01T21:28:43.647599002+00:00",
+      "loaded_for_run_count": 7,
       "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "contributed_to_failure_count": 3
     },
     {
       "id": "coobie-solitaire-agents-roadmap",
@@ -405,11 +405,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
+      "recall_count": 7,
+      "last_recalled": "2026-04-01T21:28:43.647599002+00:00",
+      "loaded_for_run_count": 7,
       "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "contributed_to_failure_count": 3
     },
     {
       "id": "lamdet-middle-peak-sling-note",

@@ -8,6 +8,7 @@ use axum::{
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
+use std::fs;
 use std::net::SocketAddr;
 use std::path::{Path as FsPath, PathBuf};
 use tower_http::cors::{Any, CorsLayer};
@@ -15,7 +16,7 @@ use tracing::info;
 
 use crate::{
     coobie::CausalReport,
-    models::{AgentExecution, BlackboardState, CoobieBriefing, EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchReport, EvidenceSource, LessonRecord, RunEvent, RunRecord},
+    models::{AgentExecution, BlackboardState, CoobieBriefing, EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchReport, EvidenceSource, LessonRecord, RunEvent, RunRecord, Spec},
     orchestrator::{AppContext, RunRequest},
     pidgin::{self, PidginTranslation},
     tesseract,
@@ -84,6 +85,24 @@ struct CoordinationConflictResponse {
     conflicting_agent: String,
     conflicting_files: Vec<String>,
     message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DirectoryEntry {
+    name: String,
+    path: String,
+}
+
+#[derive(Debug, Serialize)]
+struct DirectoryBrowseResponse {
+    current_path: String,
+    parent_path: Option<String>,
+    directories: Vec<DirectoryEntry>,
+}
+
+#[derive(Debug, Deserialize)]
+struct DirectoryBrowseQuery {
+    path: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -265,6 +284,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/evidence/annotations/review", post(post_evidence_annotation_review))
         .route("/api/evidence/similar", get(get_similar_evidence_windows))
         .route("/api/evidence/match-report", post(post_evidence_match_report))
+        .route("/api/fs/directories", get(get_directory_browser))
         .route("/api/capacity", get(get_capacity))
         .route("/api/tesseract/scene", get(get_tesseract_scene))
         .route("/api/runs/start", post(start_run))
@@ -302,6 +322,65 @@ async fn get_run(Path(id): Path<String>, State(app): State<AppContext>) -> impl 
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+async fn get_directory_browser(
+    State(app): State<AppContext>,
+    Query(query): Query<DirectoryBrowseQuery>,
+) -> impl IntoResponse {
+    let requested = query.path.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let current = match requested {
+        Some(path) => {
+            let candidate = PathBuf::from(path);
+            if candidate.is_absolute() {
+                candidate
+            } else {
+                app.paths.root.join(candidate)
+            }
+        }
+        None => app.paths.products.clone(),
+    };
+
+    let current = match current.canonicalize() {
+        Ok(path) => path,
+        Err(error) => return (StatusCode::BAD_REQUEST, error.to_string()).into_response(),
+    };
+
+    if !current.is_dir() {
+        return (StatusCode::BAD_REQUEST, "directory path is not a folder").into_response();
+    }
+
+    let mut directories = Vec::new();
+    let read_dir = match fs::read_dir(&current) {
+        Ok(iter) => iter,
+        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    };
+
+    for entry in read_dir.flatten() {
+        let path = entry.path();
+        if !path.is_dir() {
+            continue;
+        }
+        let name = entry
+            .file_name()
+            .to_str()
+            .map(|value| value.to_string())
+            .unwrap_or_else(|| path.display().to_string());
+        directories.push(DirectoryEntry {
+            name,
+            path: path.display().to_string(),
+        });
+    }
+
+    directories.sort_by(|a, b| a.name.to_lowercase().cmp(&b.name.to_lowercase()));
+
+    let response = DirectoryBrowseResponse {
+        current_path: current.display().to_string(),
+        parent_path: current.parent().map(|value| value.display().to_string()),
+        directories,
+    };
+
+    (StatusCode::OK, Json(response)).into_response()
 }
 
 async fn get_run_events(Path(id): Path<String>, State(app): State<AppContext>) -> impl IntoResponse {
@@ -1286,6 +1365,8 @@ async fn release_task(
 struct ScoutDraftRequest {
     intent: String,
     product: String,
+    #[serde(default)]
+    product_path: Option<String>,
 }
 
 #[derive(Debug, Serialize)]
@@ -1301,8 +1382,14 @@ async fn scout_draft(
     State(app): State<AppContext>,
     Json(req): Json<ScoutDraftRequest>,
 ) -> impl IntoResponse {
-    let intent   = req.intent.trim().to_string();
-    let product  = req.product.trim().to_string();
+    let intent = req.intent.trim().to_string();
+    let product = req.product.trim().to_string();
+    let product_path = req
+        .product_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
 
     if intent.is_empty() || product.is_empty() {
         return (StatusCode::BAD_REQUEST, "intent and product are required").into_response();
@@ -1326,6 +1413,11 @@ async fn scout_draft(
         criteria.join("\n")
     };
 
+    let product_input = product_path
+        .as_ref()
+        .map(|path| format!("  - \"product directory: {path}\""))
+        .unwrap_or_else(|| format!("  - \"product directory: products/{product}/\""));
+
     let spec_yaml = format!(
 r#"id: {spec_id}
 title: {title}
@@ -1337,7 +1429,7 @@ constraints:
   - remain within the {product} workspace boundary
   - do not modify files outside the target product
 inputs:
-  - product directory: products/{product}/
+{product_input}
 outputs:
   - implementation artifacts in the run workspace
   - validation.json with pass/fail verdict
@@ -1355,9 +1447,10 @@ security_expectations:
   - secrets must not appear in logs or artifact bundles
 "#,
         spec_id = spec_id,
-        title   = title_case(&product),
+        title = title_case(&product),
         purpose = purpose,
         product = product,
+        product_input = product_input,
         criteria_block = criteria_block,
     );
 
@@ -1411,31 +1504,85 @@ fn title_case(s: &str) -> String {
 
 #[derive(Debug, Deserialize)]
 struct StartRunRequest {
-    spec: String,   // path (relative to repo root) or spec_id for a draft
-    product: String,
+    spec: String,
+    #[serde(default)]
+    product: Option<String>,
+    #[serde(default)]
+    product_path: Option<String>,
+    #[serde(default)]
+    spec_yaml: Option<String>,
 }
 
 async fn start_run(
     State(app): State<AppContext>,
     Json(req): Json<StartRunRequest>,
 ) -> impl IntoResponse {
-    if req.spec.is_empty() || req.product.is_empty() {
-        return (StatusCode::BAD_REQUEST, "spec and product are required").into_response();
+    let spec_ref = req.spec.trim();
+    let product = req
+        .product
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let product_path = req
+        .product_path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+    let spec_yaml = req
+        .spec_yaml
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .map(str::to_string);
+
+    if spec_ref.is_empty() {
+        return (StatusCode::BAD_REQUEST, "spec is required").into_response();
+    }
+    if product.is_none() && product_path.is_none() {
+        return (StatusCode::BAD_REQUEST, "product or product_path is required").into_response();
     }
 
-    // Resolve the spec path: accept absolute, relative-to-root, or relative-to-factory/specs
-    let spec_path = resolve_spec_path(&app, &req.spec);
+    let spec_path = resolve_spec_path(&app, spec_ref);
+
+    if let Some(spec_yaml) = spec_yaml {
+        if let Err(e) = serde_yaml::from_str::<Spec>(&spec_yaml) {
+            return (
+                StatusCode::BAD_REQUEST,
+                format!("draft spec yaml is invalid: {e}"),
+            )
+                .into_response();
+        }
+
+        let spec_path_buf = PathBuf::from(&spec_path);
+        let spec_path_abs = if spec_path_buf.is_absolute() {
+            spec_path_buf
+        } else {
+            app.paths.root.join(spec_path_buf)
+        };
+
+        if let Some(parent) = spec_path_abs.parent() {
+            if let Err(e) = tokio::fs::create_dir_all(parent).await {
+                return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+            }
+        }
+
+        if let Err(e) = tokio::fs::write(&spec_path_abs, spec_yaml.as_bytes()).await {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    }
 
     let run_req = RunRequest {
         spec_path,
-        product: Some(req.product),
-        product_path: None,
+        product: if product_path.is_some() { None } else { product },
+        product_path,
         failure_harness: None,
     };
 
     match app.start_run(run_req).await {
         Ok(run) => (StatusCode::OK, Json(run)).into_response(),
-        Err(e)  => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 

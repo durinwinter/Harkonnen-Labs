@@ -1,6 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import AgentCard from './components/AgentCard';
 import CoobieSignalPanel from './components/CoobieSignalPanel';
+import CausalTesseract from './visualization/tesseract/CausalTesseract';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
 
@@ -101,6 +102,8 @@ function App() {
   const [roleBoard, setRoleBoard] = useState(null);
   const [coordination, setCoordination] = useState(null);
   const [policyEvents, setPolicyEvents] = useState([]);
+  const [capacity, setCapacity] = useState(null);
+  const [showTesseract, setShowTesseract] = useState(false);
   const [error, setError] = useState('');
 
   useEffect(() => {
@@ -226,6 +229,24 @@ function App() {
     };
   }, []);
 
+  useEffect(() => {
+    let cancelled = false;
+
+    const loadCapacity = async () => {
+      try {
+        const data = await fetchJson(`${API_BASE}/capacity`);
+        if (!cancelled) setCapacity(data);
+      } catch { /* capacity.json optional */ }
+    };
+
+    loadCapacity();
+    const interval = setInterval(loadCapacity, 5000);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+    };
+  }, []);
+
   const run = runState?.run || null;
   const events = runState?.events || [];
   const blackboard = runState?.blackboard || null;
@@ -277,8 +298,17 @@ function App() {
           <div className={`status-pill status-${run?.status || 'idle'}`}>
             {run?.status || 'idle'}
           </div>
+          <button
+            className="tesseract-toggle"
+            onClick={() => setShowTesseract(true)}
+            title="Open Coobie Causal Tesseract"
+          >
+            Tesseract
+          </button>
         </div>
       </header>
+
+      {showTesseract && <CausalTesseract onClose={() => setShowTesseract(false)} />}
 
       {error ? <div className="error-banner">API error: {error}</div> : null}
 
@@ -401,6 +431,35 @@ function App() {
                 ))
               )}
             </div>
+          </Panel>
+
+          <Panel title="Provider Capacity" compact>
+            {!capacity ? (
+              <div className="empty-state">capacity.json not loaded</div>
+            ) : (
+              <>
+                <div className="capacity-chain">
+                  {(capacity.fallback_chain || []).map((name, idx) => {
+                    const p = capacity.providers?.[name] || {};
+                    const statusColor = p.available === false ? '#c7684c' : p.status === 'near_limit' ? '#c4922a' : '#8fae7c';
+                    return (
+                      <div key={name} className="capacity-row">
+                        <div className="capacity-rank">#{idx + 1}</div>
+                        <div className="capacity-name">{name}</div>
+                        <div className="capacity-chip" style={{ color: statusColor, borderColor: `${statusColor}55` }}>
+                          <span className="status-dot" style={{ backgroundColor: statusColor }}></span>
+                          {p.status || 'ok'}
+                        </div>
+                        {p.note && <div className="capacity-note">{p.note}</div>}
+                      </div>
+                    );
+                  })}
+                </div>
+                <div className="capacity-updated">
+                  updated {capacity.updated_at ? new Date(capacity.updated_at).toLocaleString() : '—'}
+                </div>
+              </>
+            )}
           </Panel>
 
           <Panel title="Keeper Policy Board" compact>
@@ -765,6 +824,92 @@ function App() {
 
         .mono {
           font-family: var(--font-mono);
+        }
+
+        .status-dot {
+          width: 0.45rem;
+          height: 0.45rem;
+          border-radius: 999px;
+          flex-shrink: 0;
+          display: inline-block;
+        }
+
+        .capacity-chain {
+          display: flex;
+          flex-direction: column;
+          gap: 0.45rem;
+        }
+
+        .capacity-row {
+          display: grid;
+          grid-template-columns: 1.5rem 1fr auto;
+          grid-template-rows: auto auto;
+          gap: 0.2rem 0.6rem;
+          align-items: center;
+          border: 1px solid rgba(255, 255, 255, 0.05);
+          background: rgba(255, 255, 255, 0.03);
+          border-radius: 10px;
+          padding: 0.55rem 0.7rem;
+        }
+
+        .capacity-rank {
+          font-size: 0.65rem;
+          font-weight: 800;
+          color: var(--text-secondary);
+          font-family: var(--font-mono);
+        }
+
+        .capacity-name {
+          font-size: 0.84rem;
+          font-weight: 700;
+          text-transform: capitalize;
+        }
+
+        .capacity-chip {
+          display: inline-flex;
+          align-items: center;
+          gap: 0.35rem;
+          border: 1px solid;
+          border-radius: 999px;
+          padding: 0.18rem 0.5rem;
+          font-size: 0.66rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          white-space: nowrap;
+        }
+
+        .capacity-note {
+          grid-column: 2 / -1;
+          font-size: 0.72rem;
+          color: var(--text-secondary);
+          line-height: 1.4;
+        }
+
+        .capacity-updated {
+          margin-top: 0.55rem;
+          font-size: 0.68rem;
+          color: var(--text-secondary);
+          font-family: var(--font-mono);
+        }
+
+        .tesseract-toggle {
+          padding: 0.4rem 0.9rem;
+          background: rgba(194, 163, 114, 0.08);
+          border: 1px solid rgba(194, 163, 114, 0.35);
+          border-radius: 999px;
+          color: var(--accent-gold);
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          cursor: pointer;
+          transition: background 0.15s, border-color 0.15s;
+        }
+
+        .tesseract-toggle:hover {
+          background: rgba(194, 163, 114, 0.15);
+          border-color: rgba(194, 163, 114, 0.6);
         }
 
         .timeline-list {

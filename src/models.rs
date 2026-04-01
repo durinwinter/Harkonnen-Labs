@@ -111,6 +111,29 @@ pub struct LessonRecord {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CoobieEvidenceCitation {
+    pub citation_id: String,
+    pub source_type: String,
+    pub run_id: String,
+    #[serde(default)]
+    pub episode_id: Option<String>,
+    pub phase: String,
+    pub agent: String,
+    pub summary: String,
+    pub evidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ProjectResumeRisk {
+    pub memory_id: String,
+    pub summary: String,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub reasons: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct PriorCauseSignal {
     pub cause_id: String,
     pub description: String,
@@ -132,6 +155,14 @@ pub struct CoobieBriefing {
     pub core_memory_hits: Vec<String>,
     #[serde(default)]
     pub project_memory_hits: Vec<String>,
+    #[serde(default)]
+    pub resume_packet_summary: Vec<String>,
+    #[serde(default)]
+    pub resume_packet_risks: Vec<ProjectResumeRisk>,
+    #[serde(default)]
+    pub exploration_citations: Vec<CoobieEvidenceCitation>,
+    #[serde(default)]
+    pub strategy_register_citations: Vec<CoobieEvidenceCitation>,
     pub relevant_lessons: Vec<LessonRecord>,
     pub prior_causes: Vec<PriorCauseSignal>,
     pub project_components: Vec<ProjectComponent>,

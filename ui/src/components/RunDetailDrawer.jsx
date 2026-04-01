@@ -11,6 +11,28 @@ async function fetchJson(url) {
   return r.json();
 }
 
+// Parse Residue-style exploration_log.md into structured episode objects
+function parseExplorationLog(text) {
+  const episodes = [];
+  const blocks = text.split(/^##\s+Episode/m).slice(1);
+  for (const block of blocks) {
+    const ep = {};
+    const phaseMatch = block.match(/^[^\n]*/);
+    ep.phase = phaseMatch ? phaseMatch[0].replace(/^\d+\s*[-–·]?\s*/, '').trim() : '';
+    const fields = ['strategy', 'outcome', 'failure_constraint', 'surviving_structure', 'reformulation'];
+    for (const field of fields) {
+      const re = new RegExp(`\\*\\*${field.replace('_', '[_ ]')}\\*\\*[:\\s]+([^\\n]+)`, 'i');
+      const m = block.match(re);
+      if (m) ep[field] = m[1].trim();
+    }
+    const outcome = (ep.outcome || '').toLowerCase();
+    ep.outcomeKind = outcome.includes('pass') || outcome.includes('success') ? 'pass'
+      : outcome.includes('fail') || outcome.includes('error') ? 'fail' : 'neutral';
+    episodes.push(ep);
+  }
+  return episodes;
+}
+
 function titleCase(value) {
   if (!value) return 'idle';
   return value
@@ -25,6 +47,9 @@ export default function RunDetailDrawer({ runId, onClose }) {
   const [state, setState] = useState(null);
   const [tab, setTab] = useState('overview');
   const [error, setError] = useState('');
+  const [explorationLog, setExplorationLog] = useState(null);
+  const [corpusResults, setCorpusResults] = useState(null);
+  const [artifactError, setArtifactError] = useState('');
   const drawerRef = useRef(null);
 
   useEffect(() => {
@@ -44,6 +69,33 @@ export default function RunDetailDrawer({ runId, onClose }) {
     const interval = setInterval(load, 3000);
     return () => { cancelled = true; clearInterval(interval); };
   }, [runId]);
+
+  useEffect(() => {
+    if (!runId || (tab !== 'explore' && tab !== 'corpus')) return;
+    let cancelled = false;
+    setArtifactError('');
+
+    const load = async () => {
+      try {
+        if (tab === 'explore') {
+          const r = await fetch(`${API_BASE}/runs/${runId}/artifacts/exploration_log.md`);
+          if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+          const text = await r.text();
+          if (!cancelled) setExplorationLog(text);
+        } else {
+          const r = await fetch(`${API_BASE}/runs/${runId}/artifacts/corpus_results.json`);
+          if (!r.ok) throw new Error(`${r.status} ${r.statusText}`);
+          const json = await r.json();
+          if (!cancelled) setCorpusResults(json);
+        }
+      } catch (err) {
+        if (!cancelled) setArtifactError(err.message);
+      }
+    };
+
+    load();
+    return () => { cancelled = true; };
+  }, [runId, tab]);
 
   // Close on outside click
   useEffect(() => {
@@ -72,8 +124,9 @@ export default function RunDetailDrawer({ runId, onClose }) {
   const executions = state?.agent_executions || [];
   const coobieTranslations = state?.coobie_translations || [];
 
-  const validation = blackboard?.artifact_refs?.includes('validation.json') ? null : null;
-  const TABS = ['overview', 'timeline', 'agents', 'causal', 'lessons'];
+  const hasExploreLog = blackboard?.artifact_refs?.includes('exploration_log.md');
+  const hasCorpusResults = blackboard?.artifact_refs?.includes('corpus_results.json');
+  const TABS = ['overview', 'timeline', 'agents', 'causal', 'lessons', 'explore', 'corpus'];
 
   return (
     <div className="drawer-overlay">
@@ -96,15 +149,18 @@ export default function RunDetailDrawer({ runId, onClose }) {
         {error && <div className="drawer-error">Error: {error}</div>}
 
         <div className="drawer-tabs">
-          {TABS.map((t) => (
-            <button
-              key={t}
-              className={`drawer-tab ${tab === t ? 'active' : ''}`}
-              onClick={() => setTab(t)}
-            >
-              {t}
-            </button>
-          ))}
+          {TABS.map((t) => {
+            const hasData = (t === 'explore' && hasExploreLog) || (t === 'corpus' && hasCorpusResults);
+            return (
+              <button
+                key={t}
+                className={`drawer-tab ${tab === t ? 'active' : ''} ${hasData ? 'has-data' : ''}`}
+                onClick={() => setTab(t)}
+              >
+                {t}{hasData ? ' ·' : ''}
+              </button>
+            );
+          })}
         </div>
 
         <div className="drawer-body">
@@ -204,6 +260,74 @@ export default function RunDetailDrawer({ runId, onClose }) {
             <div className="agents-list">
               <CoobieSignalPanel translations={coobieTranslations} />
               <CausalReportPanel runId={runId} />
+            </div>
+          )}
+
+          {tab === 'explore' && (
+            <div className="explore-panel">
+              {artifactError ? (
+                <div className="drawer-error">Could not load exploration_log.md: {artifactError}</div>
+              ) : !explorationLog ? (
+                <div className="drawer-empty">
+                  {hasExploreLog ? 'Loading...' : 'exploration_log.md not in artifact refs yet.'}
+                </div>
+              ) : (
+                <div className="explore-episodes">
+                  {parseExplorationLog(explorationLog).map((ep, i) => (
+                    <div key={i} className="episode-card">
+                      <div className="ep-header">
+                        <span className="ep-phase">{ep.phase || `Episode ${i + 1}`}</span>
+                        <span className={`ep-outcome-chip outcome-${ep.outcomeKind}`}>{ep.outcome || '—'}</span>
+                      </div>
+                      {ep.strategy && (
+                        <div className="ep-field"><span className="ep-field-label">Strategy</span><span>{ep.strategy}</span></div>
+                      )}
+                      {ep.failure_constraint && (
+                        <div className="ep-field"><span className="ep-field-label">Failure constraint</span><span className="ep-failure">{ep.failure_constraint}</span></div>
+                      )}
+                      {ep.surviving_structure && (
+                        <div className="ep-field"><span className="ep-field-label">Surviving structure</span><span>{ep.surviving_structure}</span></div>
+                      )}
+                      {ep.reformulation && (
+                        <div className="ep-field"><span className="ep-field-label">Reformulation</span><span className="ep-reform">{ep.reformulation}</span></div>
+                      )}
+                    </div>
+                  ))}
+                  {parseExplorationLog(explorationLog).length === 0 && (
+                    <pre className="explore-raw">{explorationLog}</pre>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {tab === 'corpus' && (
+            <div className="corpus-panel">
+              {artifactError ? (
+                <div className="drawer-error">Could not load corpus_results.json: {artifactError}</div>
+              ) : !corpusResults ? (
+                <div className="drawer-empty">
+                  {hasCorpusResults ? 'Loading...' : 'corpus_results.json not in artifact refs yet.'}
+                </div>
+              ) : (
+                <>
+                  <div className={`corpus-summary ${corpusResults.all_passed ? 'passed' : 'failed'}`}>
+                    {corpusResults.all_passed ? 'All corpus tests passed' : 'One or more corpus tests failed'}
+                  </div>
+                  <div className="corpus-commands">
+                    {(corpusResults.commands || []).map((cmd, i) => (
+                      <div key={i} className={`corpus-cmd ${cmd.passed ? 'passed' : 'failed'}`}>
+                        <div className="cmd-header">
+                          <span className="cmd-label">{cmd.label || `Command ${i + 1}`}</span>
+                          <span className={`cmd-badge ${cmd.passed ? 'passed' : 'failed'}`}>
+                            {cmd.passed ? 'PASS' : `FAIL (exit ${cmd.exit_code})`}
+                          </span>
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                </>
+              )}
             </div>
           )}
 
@@ -462,6 +586,52 @@ export default function RunDetailDrawer({ runId, onClose }) {
           border: 1px solid rgba(194, 163, 114, 0.25);
           color: var(--accent-gold);
         }
+        .drawer-tab.has-data { color: var(--text-primary); }
+        .explore-panel, .corpus-panel { display: flex; flex-direction: column; gap: 0.75rem; }
+        .explore-episodes { display: flex; flex-direction: column; gap: 0.75rem; }
+        .episode-card {
+          border: 1px solid rgba(255,255,255,0.07);
+          background: rgba(0,0,0,0.18);
+          border-radius: 12px;
+          padding: 0.85rem;
+          display: flex;
+          flex-direction: column;
+          gap: 0.5rem;
+        }
+        .ep-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; margin-bottom: 0.2rem; }
+        .ep-phase { font-size: 0.72rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; color: var(--accent-gold); }
+        .ep-outcome-chip {
+          font-size: 0.68rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em;
+          border: 1px solid; border-radius: 999px; padding: 0.18rem 0.5rem;
+        }
+        .ep-outcome-chip.outcome-pass { color: #8fae7c; border-color: rgba(143,174,124,0.4); }
+        .ep-outcome-chip.outcome-fail { color: #c7684c; border-color: rgba(199,104,76,0.4); }
+        .ep-outcome-chip.outcome-neutral { color: var(--text-secondary); border-color: rgba(255,255,255,0.12); }
+        .ep-field { display: flex; flex-direction: column; gap: 0.15rem; }
+        .ep-field-label { font-size: 0.62rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.1em; color: var(--accent-gold); }
+        .ep-failure { color: #c7684c; font-size: 0.82rem; }
+        .ep-reform { color: #8fae7c; font-size: 0.82rem; }
+        .explore-raw { font-family: var(--font-mono); font-size: 0.74rem; color: var(--text-secondary); white-space: pre-wrap; overflow-x: auto; }
+        .corpus-summary {
+          border-radius: 12px; padding: 0.75rem 1rem;
+          font-size: 0.88rem; font-weight: 700; text-align: center;
+        }
+        .corpus-summary.passed { background: rgba(143,174,124,0.12); border: 1px solid rgba(143,174,124,0.35); color: #8fae7c; }
+        .corpus-summary.failed { background: rgba(120,39,30,0.18); border: 1px solid rgba(199,104,76,0.4); color: #c7684c; }
+        .corpus-commands { display: flex; flex-direction: column; gap: 0.5rem; }
+        .corpus-cmd {
+          border: 1px solid rgba(255,255,255,0.06);
+          background: rgba(0,0,0,0.18);
+          border-radius: 10px;
+          padding: 0.65rem 0.85rem;
+        }
+        .corpus-cmd.passed { border-color: rgba(143,174,124,0.25); }
+        .corpus-cmd.failed { border-color: rgba(199,104,76,0.35); background: rgba(120,39,30,0.1); }
+        .cmd-header { display: flex; justify-content: space-between; align-items: center; gap: 0.5rem; }
+        .cmd-label { font-family: var(--font-mono); font-size: 0.78rem; }
+        .cmd-badge { font-size: 0.66rem; font-weight: 800; text-transform: uppercase; letter-spacing: 0.08em; border-radius: 999px; padding: 0.18rem 0.55rem; border: 1px solid; }
+        .cmd-badge.passed { color: #8fae7c; border-color: rgba(143,174,124,0.4); }
+        .cmd-badge.failed { color: #c7684c; border-color: rgba(199,104,76,0.4); }
       `}</style>
     </div>
   );

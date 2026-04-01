@@ -120,6 +120,8 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id/coobie-response", get(get_coobie_response))
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
+        .route("/api/capacity", get(get_capacity))
+        .route("/api/runs/:id/artifacts/:name", get(get_run_artifact))
         .route("/api/coordination/assignments", get(get_assignments))
         .route("/api/coordination/policy-events", get(get_coordination_policy_events))
         .route("/api/coordination/claim", post(claim_task))
@@ -839,5 +841,42 @@ async fn release_task(
     match save_assignments(&app, &state).await {
         Ok(()) => (StatusCode::OK, Json(state)).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_capacity(State(app): State<AppContext>) -> impl IntoResponse {
+    let path = app.paths.factory.join("state").join("capacity.json");
+    match tokio::fs::read_to_string(&path).await {
+        Ok(raw) => match serde_json::from_str::<serde_json::Value>(&raw) {
+            Ok(json) => (StatusCode::OK, Json(json)).into_response(),
+            Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+        },
+        Err(_) => (StatusCode::NOT_FOUND, "capacity.json not found").into_response(),
+    }
+}
+
+async fn get_run_artifact(
+    Path((run_id, name)): Path<(String, String)>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    if name.contains('/') || name.contains("..") {
+        return (StatusCode::BAD_REQUEST, "invalid artifact name").into_response();
+    }
+    let path = app.paths.workspaces.join(&run_id).join("run").join(&name);
+    match tokio::fs::read_to_string(&path).await {
+        Ok(content) => {
+            let content_type = if name.ends_with(".json") {
+                "application/json"
+            } else {
+                "text/plain; charset=utf-8"
+            };
+            (
+                StatusCode::OK,
+                [(axum::http::header::CONTENT_TYPE, content_type)],
+                content,
+            )
+                .into_response()
+        }
+        Err(_) => (StatusCode::NOT_FOUND, "artifact not found").into_response(),
     }
 }

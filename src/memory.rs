@@ -9,6 +9,36 @@ use crate::setup::SetupConfig;
 
 // ── Stored entry ──────────────────────────────────────────────────────────────
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryProvenance {
+    #[serde(default)]
+    pub source_label: Option<String>,
+    #[serde(default)]
+    pub source_kind: Option<String>,
+    #[serde(default)]
+    pub source_path: Option<String>,
+    #[serde(default)]
+    pub source_run_id: Option<String>,
+    #[serde(default)]
+    pub source_spec_id: Option<String>,
+    #[serde(default)]
+    pub git_branch: Option<String>,
+    #[serde(default)]
+    pub git_commit: Option<String>,
+    #[serde(default)]
+    pub git_remote: Option<String>,
+    #[serde(default)]
+    pub evidence_run_ids: Vec<String>,
+    #[serde(default)]
+    pub stale_when: Vec<String>,
+    #[serde(default)]
+    pub status: Option<String>,
+    #[serde(default)]
+    pub superseded_by: Option<String>,
+    #[serde(default)]
+    pub challenged_by: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct MemoryEntry {
     pub id: String,
@@ -16,6 +46,8 @@ pub struct MemoryEntry {
     pub summary: String,
     pub content: String,
     pub created_at: String,
+    #[serde(default)]
+    pub provenance: MemoryProvenance,
     #[serde(default)]
     pub recall_count: i64,
     #[serde(default)]
@@ -164,19 +196,50 @@ impl MemoryStore {
         summary: &str,
         content: &str,
     ) -> Result<()> {
-        let filename = format!("{}.md", sanitize_memory_id(id));
-        let doc = format!(
-            "---
-tags: [{}]
-summary: {}
----
+        self.store_with_metadata(id, tags, summary, content, MemoryProvenance::default())
+            .await
+    }
 
-{}",
-            tags.join(", "),
-            summary,
-            content
-        );
+    pub async fn store_with_metadata(
+        &self,
+        id: &str,
+        tags: Vec<String>,
+        summary: &str,
+        content: &str,
+        provenance: MemoryProvenance,
+    ) -> Result<()> {
+        let filename = format!("{}.md", sanitize_memory_id(id));
+        let doc = render_memory_document(&tags, summary, content, &provenance);
         tokio::fs::write(self.root.join(filename), doc).await?;
+        self.reindex().await?;
+        Ok(())
+    }
+
+    pub async fn list_entries(&self) -> Result<Vec<MemoryEntry>> {
+        self.ensure_fresh_index().await?;
+        let index_path = self.root.join("index.json");
+        if !index_path.exists() {
+            return Ok(Vec::new());
+        }
+        Ok(read_memory_index(&index_path).await?.entries)
+    }
+
+    pub async fn annotate_entry_status(
+        &self,
+        id: &str,
+        status: &str,
+        related_id: Option<&str>,
+    ) -> Result<()> {
+        let path = self.root.join(format!("{}.md", sanitize_memory_id(id)));
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let mut parsed = parse_frontmatter(&raw);
+        annotate_memory_provenance_status(&mut parsed.provenance, status, related_id);
+        let doc = render_memory_document(&parsed.tags, &parsed.summary, &parsed.body, &parsed.provenance);
+        tokio::fs::write(&path, doc).await?;
         self.reindex().await?;
         Ok(())
     }
@@ -330,16 +393,11 @@ summary: {}
                 .filter(|value| !value.is_empty())
                 .unwrap_or("Imported without additional notes.")
         );
-        let note_doc = format!(
-            "---
-tags: [{}]
-summary: {}
----
-
-{}",
-            merged_tags.join(", "),
-            summary,
-            note_body
+        let note_doc = render_memory_document(
+            &merged_tags,
+            &summary,
+            &note_body,
+            &MemoryProvenance::default(),
         );
         tokio::fs::write(&note_path, note_doc).await?;
         self.reindex().await?;
@@ -471,13 +529,14 @@ fn collect_entries(root: &Path, current: &Path, entries: &mut Vec<MemoryEntry>) 
         if path.extension().and_then(|value| value.to_str()) == Some("md") {
             let raw = std::fs::read_to_string(&path)
                 .with_context(|| format!("reading {}", path.display()))?;
-            let (tags, summary, body) = parse_frontmatter(&raw);
+            let parsed = parse_frontmatter(&raw);
             entries.push(MemoryEntry {
                 id: relative_entry_id(relative),
-                tags,
-                summary,
-                content: body,
+                tags: parsed.tags,
+                summary: parsed.summary,
+                content: parsed.body,
                 created_at: file_created_at(&path)?,
+                provenance: parsed.provenance,
                 recall_count: 0,
                 last_recalled: None,
                 loaded_for_run_count: 0,
@@ -506,6 +565,12 @@ This asset is available to Coobie as reference material and can be synced to Any
                 media_kind
             ),
             created_at: file_created_at(&path)?,
+            provenance: MemoryProvenance::default(),
+            recall_count: 0,
+            last_recalled: None,
+            loaded_for_run_count: 0,
+            contributed_to_success_count: 0,
+            contributed_to_failure_count: 0,
         });
     }
     Ok(())
@@ -632,25 +697,58 @@ fn sanitize_memory_id(value: &str) -> String {
 
 // ── Frontmatter parser ────────────────────────────────────────────────────────
 
-/// Extract (tags, summary, body) from an optional `---` YAML frontmatter block.
-/// Returns empty tags/summary and the full content if no frontmatter is present.
-fn parse_frontmatter(raw: &str) -> (Vec<String>, String, String) {
+#[derive(Debug, Clone, Default)]
+struct ParsedFrontmatter {
+    tags: Vec<String>,
+    summary: String,
+    body: String,
+    provenance: MemoryProvenance,
+}
+
+/// Extract frontmatter plus body from an optional `---` metadata block.
+fn parse_frontmatter(raw: &str) -> ParsedFrontmatter {
     if !raw.starts_with("---") {
-        return (vec![], String::new(), raw.to_string());
+        return ParsedFrontmatter {
+            tags: vec![],
+            summary: String::new(),
+            body: raw.to_string(),
+            provenance: MemoryProvenance::default(),
+        };
     }
 
     let rest = &raw[3..];
     let Some(end) = rest.find("\n---") else {
-        return (vec![], String::new(), raw.to_string());
+        return ParsedFrontmatter {
+            tags: vec![],
+            summary: String::new(),
+            body: raw.to_string(),
+            provenance: MemoryProvenance::default(),
+        };
     };
 
     let front = &rest[..end];
     let body = rest[end + 4..].trim_start_matches('\n').to_string();
 
-    let tags = extract_frontmatter_list(front, "tags");
-    let summary = extract_frontmatter_scalar(front, "summary");
-
-    (tags, summary, body)
+    ParsedFrontmatter {
+        tags: extract_frontmatter_list(front, "tags"),
+        summary: extract_frontmatter_scalar(front, "summary"),
+        body,
+        provenance: MemoryProvenance {
+            source_label: extract_optional_frontmatter_scalar(front, "source_label"),
+            source_kind: extract_optional_frontmatter_scalar(front, "source_kind"),
+            source_path: extract_optional_frontmatter_scalar(front, "source_path"),
+            source_run_id: extract_optional_frontmatter_scalar(front, "source_run_id"),
+            source_spec_id: extract_optional_frontmatter_scalar(front, "source_spec_id"),
+            git_branch: extract_optional_frontmatter_scalar(front, "git_branch"),
+            git_commit: extract_optional_frontmatter_scalar(front, "git_commit"),
+            git_remote: extract_optional_frontmatter_scalar(front, "git_remote"),
+            evidence_run_ids: extract_frontmatter_list(front, "evidence_run_ids"),
+            stale_when: extract_frontmatter_list(front, "stale_when"),
+            status: extract_optional_frontmatter_scalar(front, "status"),
+            superseded_by: extract_optional_frontmatter_scalar(front, "superseded_by"),
+            challenged_by: extract_frontmatter_list(front, "challenged_by"),
+        },
+    }
 }
 
 fn extract_frontmatter_list(front: &str, key: &str) -> Vec<String> {
@@ -668,12 +766,93 @@ fn extract_frontmatter_list(front: &str, key: &str) -> Vec<String> {
 }
 
 fn extract_frontmatter_scalar(front: &str, key: &str) -> String {
+    extract_optional_frontmatter_scalar(front, key).unwrap_or_default()
+}
+
+fn extract_optional_frontmatter_scalar(front: &str, key: &str) -> Option<String> {
     for line in front.lines() {
         if let Some(rest) = line.strip_prefix(&format!("{key}:")) {
-            return rest.trim().to_string();
+            let value = rest.trim();
+            if value.is_empty() {
+                return None;
+            }
+            return Some(value.to_string());
         }
     }
-    String::new()
+    None
+}
+
+fn render_memory_document(
+    tags: &[String],
+    summary: &str,
+    content: &str,
+    provenance: &MemoryProvenance,
+) -> String {
+    let mut frontmatter = vec![
+        format!("tags: [{}]", tags.join(", ")),
+        format!("summary: {}", summary),
+    ];
+
+    push_frontmatter_scalar(&mut frontmatter, "source_label", provenance.source_label.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "source_kind", provenance.source_kind.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "source_path", provenance.source_path.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "source_run_id", provenance.source_run_id.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "source_spec_id", provenance.source_spec_id.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "git_branch", provenance.git_branch.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "git_commit", provenance.git_commit.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "git_remote", provenance.git_remote.as_deref());
+    push_frontmatter_list(&mut frontmatter, "evidence_run_ids", &provenance.evidence_run_ids);
+    push_frontmatter_list(&mut frontmatter, "stale_when", &provenance.stale_when);
+    push_frontmatter_scalar(&mut frontmatter, "status", provenance.status.as_deref());
+    push_frontmatter_scalar(&mut frontmatter, "superseded_by", provenance.superseded_by.as_deref());
+    push_frontmatter_list(&mut frontmatter, "challenged_by", &provenance.challenged_by);
+
+    format!("---\n{}\n---\n\n{}", frontmatter.join("\n"), content)
+}
+
+fn annotate_memory_provenance_status(
+    provenance: &mut MemoryProvenance,
+    status: &str,
+    related_id: Option<&str>,
+) {
+    provenance.status = Some(status.to_string());
+    match status {
+        "superseded" => {
+            if let Some(related_id) = related_id {
+                provenance.superseded_by = Some(related_id.to_string());
+            }
+        }
+        "challenged" => {
+            if let Some(related_id) = related_id {
+                append_unique_string(&mut provenance.challenged_by, related_id.to_string());
+            }
+        }
+        _ => {}
+    }
+}
+
+fn append_unique_string(items: &mut Vec<String>, value: String) {
+    if !items.iter().any(|existing| existing == &value) {
+        items.push(value);
+    }
+}
+
+fn push_frontmatter_scalar(lines: &mut Vec<String>, key: &str, value: Option<&str>) {
+    let Some(value) = value else {
+        return;
+    };
+    let value = value.trim();
+    if value.is_empty() {
+        return;
+    }
+    lines.push(format!("{}: {}", key, value));
+}
+
+fn push_frontmatter_list(lines: &mut Vec<String>, key: &str, values: &[String]) {
+    if values.is_empty() {
+        return;
+    }
+    lines.push(format!("{}: [{}]", key, values.join(", ")));
 }
 
 // ── Seed document content ─────────────────────────────────────────────────────

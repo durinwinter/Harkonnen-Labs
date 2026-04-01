@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::{
     coobie::CausalReport,
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, HiddenScenarioSummary, LessonRecord, ProjectComponent,
-        ScenarioBlueprint, TwinEnvironment, ValidationSummary,
+        AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation, HiddenScenarioSummary,
+        LessonRecord, ProjectComponent, ProjectResumeRisk, ScenarioBlueprint, TwinEnvironment, ValidationSummary,
     },
     orchestrator::AppContext,
 };
@@ -25,6 +25,41 @@ struct TargetSourceMetadataReport {
     source_kind: String,
     source_path: String,
     git: Option<TargetGitMetadataReport>,
+}
+
+fn render_resume_risk_lines(risks: &[ProjectResumeRisk]) -> Vec<String> {
+    risks
+        .iter()
+        .map(|risk| {
+            format!(
+                "{} [{}] reasons={}",
+                risk.memory_id,
+                risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                if risk.reasons.is_empty() {
+                    "none".to_string()
+                } else {
+                    risk.reasons.join(" | ")
+                }
+            )
+        })
+        .collect()
+}
+
+fn render_citation_lines(citations: &[CoobieEvidenceCitation]) -> Vec<String> {
+    citations
+        .iter()
+        .map(|citation| {
+            format!(
+                "{} [{}] run={} phase={} agent={} evidence={}",
+                citation.citation_id,
+                citation.summary,
+                citation.run_id,
+                citation.phase,
+                citation.agent,
+                citation.evidence
+            )
+        })
+        .collect()
 }
 
 fn render_component_lines(components: &[ProjectComponent]) -> Vec<String> {
@@ -319,6 +354,24 @@ Coobie Preflight
             }
         ));
         report.push_str(&format!(
+            "Resume packet summary: {}
+",
+            if briefing.resume_packet_summary.is_empty() {
+                "none".to_string()
+            } else {
+                briefing.resume_packet_summary.join(" | ")
+            }
+        ));
+        report.push_str(&format!(
+            "Project memory at risk: {}
+",
+            if briefing.resume_packet_risks.is_empty() {
+                "none".to_string()
+            } else {
+                render_resume_risk_lines(&briefing.resume_packet_risks).join(" | ")
+            }
+        ));
+        report.push_str(&format!(
             "Core memory hits: {}
 ",
             if briefing.core_memory_hits.is_empty() {
@@ -343,6 +396,24 @@ Coobie Preflight
                 "none".to_string()
             } else {
                 briefing.required_checks.join(" | ")
+            }
+        ));
+        report.push_str(&format!(
+            "Exploration citations: {}
+",
+            if briefing.exploration_citations.is_empty() {
+                "none".to_string()
+            } else {
+                render_citation_lines(&briefing.exploration_citations).join(" | ")
+            }
+        ));
+        report.push_str(&format!(
+            "Strategy register citations: {}
+",
+            if briefing.strategy_register_citations.is_empty() {
+                "none".to_string()
+            } else {
+                render_citation_lines(&briefing.strategy_register_citations).join(" | ")
             }
         ));
         report.push_str(&format!(

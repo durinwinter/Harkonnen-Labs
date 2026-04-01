@@ -10,7 +10,27 @@
       ],
       "summary": "Harkonnen Labs system overview, purpose, and architecture",
       "content": "# Harkonnen Labs — System Context\n\n## What It Is\n\nA local-first, spec-driven AI software factory. Humans define intent in YAML specs.\nA pack of specialist agents (Scout, Mason, Piper, Bramble, Sable, Ash, Flint, Coobie, Keeper)\nperform the implementation work inside a constrained, observable factory.\n\n## Core Goals\n\n- Spec-first: precise intent precedes all implementation\n- Outcome-based: acceptance is driven by behavioral evidence, not code review\n- Local-first: all state (specs, runs, artifacts, memory) lives on disk\n- Role separation: each agent has bounded tools and responsibilities\n- Compound learning: each run makes future runs better via Coobie\n\n## Key Directories\n\n- factory/specs/        YAML spec files (the factory's input)\n- factory/scenarios/    Hidden behavioral scenarios (Sable only)\n- factory/workspaces/   Per-run isolated workspaces\n- factory/artifacts/    Output bundles after each run\n- factory/memory/       Coobie's memory store (this directory)\n- factory/coordination/ Multi-agent synchronization (assignments.json)\n- factory/logs/         Run logs\n- products/             Target product codebases\n- src/                  Rust source for the factory CLI\n- setups/               Named setup TOML files (one per environment)\n\n## CLI Entry Points\n\n    cargo run -- spec validate <file>\n    cargo run -- run start <spec> --product <name>\n    cargo run -- run status <run-id>\n    cargo run -- run report <run-id>\n    cargo run -- artifact package <run-id>\n    cargo run -- memory init\n    cargo run -- memory index\n    cargo run -- setup check\n    cargo run -- serve --port 3057 (Live API & Coordination Dashboard)\n\n## Current Status (Integrated Build)\n\nThe factory is now a fully observable \"Command Center\":\n- **Blackboard State**: Live tracking of goals, blockers, and agent claims.\n- **Episodic Memory**: Every run is normalized into searchable factory episodes.\n- **Causal Reasoning**: Coobie (Phase 1) is now reasoning about run failures via DeepCausality context.\n- **Multi-Agent Coordination**: Authority is maintained via the `/api/coordination` layer to ensure conflict-free file ownership between Gemini, Codex, and Claude.\n",
-      "created_at": "2026-03-31T14:33:24.536076420+00:00"
+      "created_at": "2026-03-31T14:33:24.536076420+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "01-agent-roster",
@@ -23,7 +43,27 @@
       ],
       "summary": "Full roster of the nine specialist agents with roles, tools, and provider assignments",
       "content": "# Agent Roster\n\nEach agent has a bounded role, explicit tool permissions, and a provider assignment.\nTrust-critical agents (Scout, Sable, Keeper) pin to Claude.\nImplementation agents use the setup's default provider and can be swapped.\n\n| Agent   | Role                | Provider  | Key Allowed Tools                            |\n|---------|---------------------|-----------|----------------------------------------------|\n| Scout   | Spec retriever      | claude    | filesystem_read, spec_loader, mcp:filesystem |\n| Mason   | Build retriever     | default   | workspace_write, filesystem_read, mcp:filesystem |\n| Piper   | Tool retriever      | default   | build_runner, filesystem_read, container_runner |\n| Bramble | Test retriever      | default   | build_runner, workspace_write, mcp:filesystem |\n| Sable   | Scenario retriever  | claude    | scenario_store, twin_runner, report_writer   |\n| Ash     | Twin retriever      | default   | container_runner, filesystem_read            |\n| Flint   | Artifact retriever  | default   | artifact_writer, filesystem_read             |\n| Coobie  | Causal Reasoner     | default   | deep_causality, memory_store, counterfactuals |\n| Keeper  | Coordination Auth   | claude    | policy_engine, assignments_auth, secrets     |\n\n## Orchestration Tier\n\nHarkonnen Labs operates with a three-node AI orchestration protocol:\n- **Gemini**: Lead UI & Memory Architect (Specializing in Blackboard & Causal Engine).\n- **Codex**: Core Engine & Infrastructure (Specializing in Rust, Cargo, and Build systems).\n- **Claude**: Logic & Agent Orchestration (Specializing in LLM routing and Phase logic).\n\n## Key Invariants\n\n- Mason cannot read scenario_store (prevents test gaming)\n- Sable cannot write implementation code\n- Keeper alone holds policy_engine access\n- All agents share the labrador personality: loyal, persistent, honest, non-bluffing\n\n## Profile Files\n\nfactory/agents/profiles/<name>.yaml — one file per agent\nfactory/agents/personality/labrador.md — shared personality\n",
-      "created_at": "2026-03-31T14:35:03.497565868+00:00"
+      "created_at": "2026-03-31T14:35:03.497565868+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "02-setup-guide",
@@ -37,7 +77,27 @@
       ],
       "summary": "How to switch between setup environments and what each provides",
       "content": "# Setup Guide\n\n## Setup Files\n\n| File                      | Environment            | Providers           | Docker? |\n|---------------------------|------------------------|---------------------|---------|\n| harkonnen.toml            | Home Linux (default)   | Claude+Gemini+Codex | Yes     |\n| setups/home-linux.toml    | Home Linux (explicit)  | Claude+Gemini+Codex | Yes     |\n| setups/work-windows.toml  | Work Windows           | Claude only         | No      |\n| setups/ci.toml            | CI / GitHub Actions    | Claude Haiku only   | No      |\n\n## Switching Setups\n\nLinux/Mac:\n    export HARKONNEN_SETUP=work-windows\n    cargo run -- setup check\n\nWindows (PowerShell):\n    $env:HARKONNEN_SETUP = \"work-windows\"\n    cargo run -- setup check\n\n## Provider Routing\n\nAgents with `provider: default` use whichever provider is named in `[providers] default`.\nAgents with `provider: claude` always use Claude regardless of setup.\nChange the default by editing `[providers] default = \"gemini\"` in the active TOML.\n\n## Work Windows — No Docker Needed\n\nAnythingLLM and OpenClaw are replaced by:\n- @modelcontextprotocol/server-memory  (Coobie's memory/RAG)\n- @modelcontextprotocol/server-filesystem (file access for all agents)\n- Claude's 200K context (large-context retrieval without chunking)\n- Claude Code's native MCP support\n\nPrerequisites: Node.js, Rust/cargo, ANTHROPIC_API_KEY.\n\nBootstrap:\n    .\\scripts\\bootstrap-windows.ps1\n    # edit .env: set ANTHROPIC_API_KEY and HARKONNEN_SETUP=work-windows\n    cargo run -- memory init\n    cargo run -- setup check\n    cargo run -- serve --port 3057\n\n## Multi-AI Coordination\n\nWhen working in a shared environment (e.g. Gemini + Codex + Claude):\n1. **Autorun the API**: `cargo run -- serve --port 3057`\n2. **Claim Files**: Post active tasks to `POST /api/coordination/claim`.\n3. **Respect Ownership**: Never modify files claimed by another node in `assignments.json`.\n",
-      "created_at": "2026-03-31T14:37:02.307616807+00:00"
+      "created_at": "2026-03-31T14:37:02.307616807+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "03-mcp-tools",
@@ -54,7 +114,27 @@
       ],
       "summary": "MCP server registry — which servers back which abstract tool aliases",
       "content": "# MCP Tools Registry\n\nMCP servers are configured in the active setup TOML under [[mcp.servers]].\nEach server declares tool_aliases that match the allowed_tools entries in agent profiles.\n\n## Available Servers\n\n### filesystem\nPackage: @modelcontextprotocol/server-filesystem\nTool aliases: filesystem_read, workspace_write, artifact_writer\nPurpose: Read/write access to ./products, ./factory/workspaces, ./factory/artifacts\nPlatform: all\n\n### memory\nPackage: @modelcontextprotocol/server-memory\nTool aliases: memory_store, metadata_query\nPurpose: Persistent key-value memory for Coobie. Replaces AnythingLLM on work-windows.\nPlatform: all\nNote: Set MEMORY_FILE_PATH=./factory/memory/store.json for cross-session persistence.\n\n### sqlite\nPackage: @modelcontextprotocol/server-sqlite\nTool aliases: metadata_query, db_read\nPurpose: Agent-level read access to factory/state.db (run metadata, history)\nPlatform: all\n\n### github\nPackage: @modelcontextprotocol/server-github\nTool aliases: fetch_docs, github_read\nPurpose: Repo search, file reads, issue/PR access for Piper and Scout\nRequires: GITHUB_TOKEN env var\nPlatform: all\n\n### multi-ai-coordination\nPackage: internal (axum /api/coordination)\nTool aliases: assignments_claim, assignments_release\nPurpose: Authorization and file-locking across Gemini, Codex, and Claude.\nPlatform: all\n\n### deep-causality\nPackage: @harkonnen-labs/server-deep-causality (internal)\nTool aliases: causality_reason, counterfactual_simulate, context_builder\nPurpose: Causal reasoning and intervention discovery for Coobie.\nPlatform: linux\n\n## Adding a New MCP Server\n\n1. Add [[mcp.servers]] entry to the active setup TOML\n2. Create factory/mcp/<name>.yaml with the server's documentation\n3. Add tool_aliases that agents can reference in their allowed_tools list\n4. Run: cargo run -- setup check  (verifies the command is on PATH)\n",
-      "created_at": "2026-03-31T14:38:23.783444850+00:00"
+      "created_at": "2026-03-31T14:38:23.783444850+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "04-spec-format",
@@ -68,7 +148,134 @@
       ],
       "summary": "YAML spec format — required fields, optional fields, and a complete example",
       "content": "# Spec Format\n\nSpecs are YAML files in factory/specs/. They are the factory's primary input.\nScout reads and validates them. All fields below are required.\n\n## Fields\n\n```yaml\nid:     string   # unique identifier, snake_case\ntitle:  string   # human-readable name\npurpose: string  # one-sentence intent\nscope:\n  - string       # things in scope\nconstraints:\n  - string       # things that must not happen\ninputs:\n  - string       # what the factory receives\noutputs:\n  - string       # what the factory produces\nacceptance_criteria:\n  - string       # visible pass/fail conditions (Bramble validates)\nforbidden_behaviors:\n  - string       # things that must never occur (Keeper enforces)\nrollback_requirements:\n  - string       # what must survive if the run fails\ndependencies:\n  - string       # external packages, services, or tools required\nperformance_expectations:\n  - string       # timing or throughput targets\nsecurity_expectations:\n  - string       # auth, secrets, isolation requirements\n# Optional: causal_metadata (used by Coobie to tune counterfactuals)\n# causal_metadata:\n#   - string\n```\n\n## Complete Example\n\n```yaml\nid: user-auth-feature\ntitle: User Authentication\npurpose: Add JWT-based login and session management to the API\nscope:\n  - login endpoint\n  - token validation middleware\n  - logout endpoint\nconstraints:\n  - no changes to existing user data schema\n  - must not break existing API contracts\ninputs:\n  - yaml spec\n  - product: sample-app\noutputs:\n  - implemented auth endpoints\n  - visible test suite\n  - artifact bundle\nacceptance_criteria:\n  - POST /login returns 200 with valid JWT on correct credentials\n  - invalid credentials return 401\n  - protected routes reject requests without valid token\nforbidden_behaviors:\n  - storing plaintext passwords\n  - logging JWT tokens\n  - path escape from workspace\nrollback_requirements:\n  - prior artifacts retained unless explicitly cleaned\ndependencies:\n  - jsonwebtoken\n  - bcrypt\nperformance_expectations:\n  - login endpoint responds within 200ms\nsecurity_expectations:\n  - JWT secret loaded from env var, never hardcoded\n  - bcrypt cost factor >= 10\n```\n\n## Running a Spec\n\n    cargo run -- spec validate factory/specs/my-spec.yaml\n    cargo run -- run start factory/specs/my-spec.yaml --product my-app\n",
-      "created_at": "2026-03-31T14:41:05.340103882+00:00"
+      "created_at": "2026-03-31T14:41:05.340103882+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
+    },
+    {
+      "id": "coobie-causaloid-roadmap",
+      "tags": [
+        "coobie",
+        "roadmap",
+        "causaloid",
+        "deep-causality",
+        "universal",
+        "cross-project",
+        "factory"
+      ],
+      "summary": "Coobie roadmap for causaloid-driven reasoning across application and environment layers",
+      "content": "# Coobie Causaloid Roadmap\n\nPurpose: move Coobie from heuristic after-action diagnosis toward reusable causal reasoning that spans application behavior, runtime environment, and regulatory context.\n\nPriority items:\n- Model application-level and environment-level causes together instead of treating them as separate stories.\n- Add industrial signals for timing, burst data loss, PLC acknowledgement drift, historian lag, SCADA alarm semantics, simulator fidelity, and degraded-mode transitions.\n- Treat regulatory constraints such as GMP, GxP, audit trails, and validation evidence as first-class causal factors rather than late reporting concerns.\n- Promote active causaloids into preflight guardrails so Coobie affects planning before Scout, Mason, Ash, Bramble, and Sable act.\n- Evolve from simple scalar thresholds toward richer contextual hypergraphs and policy-aware propagation when the domain requires it.\n\nExpected outcome:\n- Coobie can explain not only what failed, but which environmental conditions and policy constraints made the failure likely and which intervention should be tried next.\n",
+      "created_at": "2026-04-01T01:40:02.878387676+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
+    },
+    {
+      "id": "coobie-residue-roadmap",
+      "tags": [
+        "coobie",
+        "roadmap",
+        "residue",
+        "exploration-log",
+        "strategy-register",
+        "universal",
+        "cross-project",
+        "factory"
+      ],
+      "summary": "Coobie roadmap for Residue-style exploration discipline and dead-end retention",
+      "content": "# Coobie Residue Roadmap\n\nPurpose: preserve structural learning from failed attempts so the pack stops rediscovering the same constraints.\n\nPriority items:\n- Treat `exploration_log.json` and `exploration_log.md` as first-class evidence artifacts for every substantive run.\n- Preserve each attempt as strategy, outcome, failure constraint, surviving structure, reformulation, artifacts, parameters, and open questions.\n- Maintain a machine-readable strategy register in `factory/state/dead_ends.json` so routing and retries can respect prior dead ends.\n- Synthesize exploration patterns into lessons during consolidation instead of leaving them as inert logs.\n- Require retries to declare what changed relative to the previous failed strategy before claiming progress.\n\nExpected outcome:\n- Harkonnen learns from structure, not just outcomes, and Coobie can steer the pack away from known dead ends on the next run.\n",
+      "created_at": "2026-04-01T01:40:02.878435396+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
+    },
+    {
+      "id": "coobie-solitaire-agents-roadmap",
+      "tags": [
+        "coobie",
+        "roadmap",
+        "solitaire",
+        "memory-manifest",
+        "preload",
+        "universal",
+        "cross-project",
+        "factory"
+      ],
+      "summary": "Coobie roadmap for self-tuning memory manifests inspired by Solitaire-for-Agents",
+      "content": "# Coobie Solitaire-for-Agents Roadmap\n\nPurpose: make memory retrieval self-correcting so the most useful project and core memories arrive in context before work begins.\n\nPriority items:\n- Keep product-local memory in the repo under `.harkonnen/project-memory/` and retain only cross-project learnings in Harkonnen core memory.\n- Track which memory entries were loaded, recalled, and associated with successful or failed runs.\n- Rank retrieval by demonstrated usefulness rather than keyword match alone.\n- Preload likely-relevant project memory, core memory, prior dead ends, and proven success patterns before planning begins.\n- Capture lightweight agent-behavior lessons when a role repeatedly over-plans, under-validates, or skips evidence.\n\nExpected outcome:\n- Coobie becomes a practical long-memory Labrador for the pack: concise, anticipatory, and increasingly better at surfacing the right lessons before the run drifts.\n",
+      "created_at": "2026-04-01T01:40:02.878476336+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "imports__coobie-memory-note",
@@ -82,7 +289,27 @@
       ],
       "summary": "Imported builder note",
       "content": "# Imported Memory Asset\n\n- Asset path: imports/coobie-memory-note.txt\n- Original file: /tmp/coobie-memory-note.txt\n- Media type: document\n- Imported at: 2026-03-30T20:33:31.971120059+00:00\n\n## Notes\nSeeded via CLI import test.\n",
-      "created_at": "2026-03-30T20:33:31.971041239+00:00"
+      "created_at": "2026-03-30T20:33:31.971041239+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "imports__manual-drop-txt",
@@ -93,7 +320,27 @@
       ],
       "summary": "Imported document asset manual-drop.txt",
       "content": "Asset path: imports/manual-drop.txt\nFilename: manual-drop.txt\nMedia type: document\nThis asset is available to Coobie as reference material and can be synced to AnythingLLM for richer retrieval.",
-      "created_at": "2026-03-30T20:34:46.750562846+00:00"
+      "created_at": "2026-03-30T20:34:46.750562846+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "lamdet-middle-peak-sling-note",
@@ -107,7 +354,27 @@
       ],
       "summary": "Middle laminate peak near the LamDet mid-band may be a sling-like anomaly rather than a true laminate peak.",
       "content": "During LamDet parity work against the Ceres Station example corpus, a recurring mismatch pattern appeared where Rust detected a middle laminate peak around the LamDet mid band while the LamDet Python reference did not.\n\nWorking note for Coobie:\n- A detected middle laminate peak in the 100-120 region may in fact be a sling-like anomaly or related false-positive thermal structure rather than a valid laminate-mid peak.\n- Treat repeated Rust-only middle-band detections as a causal investigation target during parity tuning.\n- When reviewing SHIM/TAB disagreements, check whether the middle-band peak should be classified as sling behavior before assuming it is a valid laminate line.\n",
-      "created_at": "2026-03-31T23:53:21.985598535+00:00"
+      "created_at": "2026-03-31T23:53:21.985598535+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "lesson-hidden-scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c",
@@ -119,7 +386,27 @@
       ],
       "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
       "content": "Source episode: hidden_scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
-      "created_at": "2026-03-31T00:07:39.625362720+00:00"
+      "created_at": "2026-03-31T00:07:39.625362720+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "lesson-hidden-scenarios-af67a36a-ffbc-4774-a6ae-aabd475b01ec",
@@ -131,7 +418,27 @@
       ],
       "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
       "content": "Source episode: hidden_scenarios-af67a36a-ffbc-4774-a6ae-aabd475b01ec\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
-      "created_at": "2026-03-31T19:44:21.078881178+00:00"
+      "created_at": "2026-03-31T19:44:21.078881178+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "lesson-hidden-scenarios-f613d94c-bc6a-4bd9-ac5d-cdb7dd80452d",
@@ -143,7 +450,27 @@
       ],
       "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
       "content": "Source episode: hidden_scenarios-f613d94c-bc6a-4bd9-ac5d-cdb7dd80452d\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:hidden scenario evaluation finished scenario s",
-      "created_at": "2026-03-30T23:01:28.437336236+00:00"
+      "created_at": "2026-03-30T23:01:28.437336236+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "lesson-validation-aa3a9fa2-197f-463d-a0c3-4d03a0baba10",
@@ -155,7 +482,27 @@
       ],
       "summary": "Repeated failure pattern in validation: validation:bramble:failure harness forced validation failure harness validation fault for consolidation",
       "content": "Source episode: validation-aa3a9fa2-197f-463d-a0c3-4d03a0baba10\nPhase: validation\nIntervention: No intervention recorded yet\nObserved pattern: validation:bramble:failure harness forced validation failure harness validation fault for consolidation",
-      "created_at": "2026-03-30T23:01:28.419336279+00:00"
+      "created_at": "2026-03-30T23:01:28.419336279+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "project-memory-split",
@@ -168,7 +515,27 @@
       ],
       "summary": "Separate project-local learnings from Harkonnen core memory; promote only strong cross-project patterns into the core store.",
       "content": "Coobie should maintain a two-layer durable memory model.\n\n- Project memory lives with the active repo in `.harkonnen/project-memory/` and should hold repo-specific truths, runtime facts, oracle semantics, and local failure modes.\n- Core memory in `factory/memory/` should retain only strong cross-project lessons, universal factory patterns, and durable guardrails.\n- Runs should retrieve both layers, but new repo-specific run summaries and lessons should be written back to project memory by default.\n",
-      "created_at": "2026-04-01T01:09:25.862470964+00:00"
+      "created_at": "2026-04-01T01:09:25.862470964+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "reference-oracle-scenario-pattern",
@@ -182,7 +549,27 @@
       ],
       "summary": "Reference-oracle regression pattern for Harkonnen runs over external product codebases.",
       "content": "When a run is really a scenario over an external product, Harkonnen should stay the factory and treat product components explicitly.\n\nPattern:\n- code under test = product-owned workspace Harkonnen may change\n- reference oracle = read-only known-good implementation or executable\n- dataset = read-only preserved evidence bundle\n- runtime API = optional product-owned live surface Ash may read\n- evidence artifact = generated report Sable can judge\n\nBehavior:\n- Coobie retrieves project memory topics before Scout and Mason plan.\n- Mason edits only the code-under-test component unless the spec expands scope.\n- Bramble runs both visible product validation and the oracle-comparison harness.\n- Sable judges evidence artifacts, not narrative optimism.\n- Flint packages oracle inputs, outputs, and Coobie summaries together.\n\nLamDet/Ceres example:\n- Ceres Station Rust pipeline = code under test\n- LamDet Python bundle = reference oracle\n- CSV corpus = dataset\n- parity report = evidence artifact\n",
-      "created_at": "2026-04-01T00:32:01.138785510+00:00"
+      "created_at": "2026-04-01T00:32:01.138785510+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-28a77447-2921-4022-ac30-fc79e17a1742",
@@ -194,7 +581,27 @@
       ],
       "summary": "Run 28a77447-2921-4022-ac30-fc79e17a1742 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: ui\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-78ee0229-27f5-4e72-bafc-87627f88d14b] Run 78ee0229-27f5-4e72-bafc-87627f88d14b for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-c0714e93-cd90-48a4-b6ed-92a5211d8c72] Run c0714e93-cd90-48a4-b6ed-92a5211d8c72 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ff\n\n[run-d0b28f3a-edf6-4c8d-a05f-306c83f5c660] Run d0b28f3a-edf6-4c8d-a05f-306c83f5c660 for Sample Feature\nSpec: sample-feature\nProduct: ui\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-e3a682f3-000c-427a-8d22-842b3241cdfe] Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-31T00:15:37.409364659+00:00"
+      "created_at": "2026-03-31T00:15:37.409364659+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f",
@@ -206,7 +613,27 @@
       ],
       "summary": "Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T21:21:14.720915603+00:00"
+      "created_at": "2026-03-30T21:21:14.720915603+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-490a1b4a-ad36-4e72-9808-1aa15d93d428",
@@ -218,7 +645,27 @@
       ],
       "summary": "Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature",
-      "created_at": "2026-03-30T17:59:45.043278417+00:00"
+      "created_at": "2026-03-30T17:59:45.043278417+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-4ee924d4-4df3-4778-8870-5f566f0522de",
@@ -230,7 +677,27 @@
       ],
       "summary": "Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T23:01:25.072344188+00:00"
+      "created_at": "2026-03-30T23:01:25.072344188+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-78ee0229-27f5-4e72-bafc-87627f88d14b",
@@ -242,7 +709,27 @@
       ],
       "summary": "Run 78ee0229-27f5-4e72-bafc-87627f88d14b for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-e3a682f3-000c-427a-8d22-842b3241cdfe] Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T23:01:28.234336716+00:00"
+      "created_at": "2026-03-30T23:01:28.234336716+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-c0714e93-cd90-48a4-b6ed-92a5211d8c72",
@@ -254,7 +741,27 @@
       ],
       "summary": "Run c0714e93-cd90-48a4-b6ed-92a5211d8c72 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-78ee0229-27f5-4e72-bafc-87627f88d14b] Run 78ee0229-27f5-4e72-bafc-87627f88d14b for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-e3a682f3-000c-427a-8d22-842b3241cdfe] Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T23:08:58.824271950+00:00"
+      "created_at": "2026-03-30T23:08:58.824271950+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-d0b28f3a-edf6-4c8d-a05f-306c83f5c660",
@@ -266,7 +773,27 @@
       ],
       "summary": "Run d0b28f3a-edf6-4c8d-a05f-306c83f5c660 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: ui\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-78ee0229-27f5-4e72-bafc-87627f88d14b] Run 78ee0229-27f5-4e72-bafc-87627f88d14b for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-c0714e93-cd90-48a4-b6ed-92a5211d8c72] Run c0714e93-cd90-48a4-b6ed-92a5211d8c72 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ff\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-e3a682f3-000c-427a-8d22-842b3241cdfe] Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-31T00:07:39.438363110+00:00"
+      "created_at": "2026-03-31T00:07:39.438363110+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-d2ad10f9-8023-42ff-b792-f16c2d595887",
@@ -278,7 +805,27 @@
       ],
       "summary": "Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T23:01:26.117341719+00:00"
+      "created_at": "2026-03-30T23:01:26.117341719+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-deeb16be-8955-4af0-8506-c5d161fbfb60",
@@ -290,7 +837,27 @@
       ],
       "summary": "Run deeb16be-8955-4af0-8506-c5d161fbfb60 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-28a77447-2921-4022-ac30-fc79e17a1742] Run 28a77447-2921-4022-ac30-fc79e17a1742 for Sample Feature\nSpec: sample-feature\nProduct: ui\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94\n\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-78ee0229-27f5-4e72-bafc-87627f88d14b] Run 78ee0229-27f5-4e72-bafc-87627f88d14b for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-c0714e93-cd90-48a4-b6ed-92a5211d8c72] Run c0714e93-cd90-48a4-b6ed-92a5211d8c72 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ff\n\n[run-d0b28f3a-edf6-4c8d-a05f-306c83f5c660] Run d0b28f3a-edf6-4c8d-a05f-306c83f5c660 for Sample Feature\nSpec: sample-feature\nProduct: ui\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-e3a682f3-000c-427a-8d22-842b3241cdfe] Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-31T19:44:20.800883483+00:00"
+      "created_at": "2026-03-31T19:44:20.800883483+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-e3a682f3-000c-427a-8d22-842b3241cdfe",
@@ -302,7 +869,27 @@
       ],
       "summary": "Run e3a682f3-000c-427a-8d22-842b3241cdfe for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9ffb-6bdf94adca6f for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980\n\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature\n\n[run-4ee924d4-4df3-4778-8870-5f566f0522de] Run 4ee924d4-4df3-4778-8870-5f566f0522de for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-d2ad10f9-8023-42ff-b792-f16c2d595887] Run d2ad10f9-8023-42ff-b792-f16c2d595887 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: false\nHidden scenarios passed: false\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-2cb199d2-104c-4de0-9ffb-6bdf94adca6f] Run 2cb199d2-104c-4de0-9\n\n[run-eb899cbb-802f-4149-a169-db167b0bc6d7] Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-980",
-      "created_at": "2026-03-30T23:01:27.178339211+00:00"
+      "created_at": "2026-03-30T23:01:27.178339211+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     },
     {
       "id": "run-eb899cbb-802f-4149-a169-db167b0bc6d7",
@@ -314,7 +901,27 @@
       ],
       "summary": "Run eb899cbb-802f-4149-a169-db167b0bc6d7 for Sample Feature",
       "content": "Spec: sample-feature\nProduct: sample-app\nVisible validation passed: true\nHidden scenarios passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Evaluate hidden scenarios with Sable, Package evidence for human review\n\nTop memory hits:\n[run-490a1b4a-ad36-4e72-9808-1aa15d93d428] Run 490a1b4a-ad36-4e72-9808-1aa15d93d428 for Sample Feature\nSpec: sample-feature\nProduct: sample-app\nValidation passed: true\nRecommended steps: Retrieve prior patterns with Coobie, Stage an isolated product workspace, Run visible validation before scenario work, Package evidence for human review\n\nTop memory hits:\nNo memories found for: Sample Feature",
-      "created_at": "2026-03-30T19:38:49.810928915+00:00"
+      "created_at": "2026-03-30T19:38:49.810928915+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
     }
   ]
 }

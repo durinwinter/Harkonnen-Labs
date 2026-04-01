@@ -17,11 +17,11 @@ use crate::{
     config::Paths,
     db,
     llm::{self, LlmRequest},
-    memory::MemoryStore,
+    memory::{MemoryEntry, MemoryProvenance, MemoryStore},
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, EpisodeRecord,
+        AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation, EpisodeRecord,
         HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary,
-        IntentPackage, LessonRecord, PriorCauseSignal, RunEvent, RunRecord, ScenarioResult,
+        IntentPackage, LessonRecord, PriorCauseSignal, ProjectResumeRisk, RunEvent, RunRecord, ScenarioResult,
         Spec, TwinEnvironment, TwinService, ValidationSummary,
     },
     pidgin,
@@ -111,7 +111,7 @@ struct CollectedMemoryHits {
     ids: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExplorationEntry {
     phase: String,
     episode_id: String,
@@ -126,7 +126,7 @@ struct ExplorationEntry {
     open_questions: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct ExplorationLogArtifact {
     run_id: String,
     spec_id: String,
@@ -153,6 +153,29 @@ struct DeadEndRegistryEntry {
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 struct DeadEndRegistry {
     entries: Vec<DeadEndRegistryEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProjectScanManifest {
+    generated_at: String,
+    label: String,
+    source_kind: String,
+    source_path: String,
+    project_memory_root: String,
+    git: Option<TargetGitMetadata>,
+    detected_files: Vec<String>,
+    detected_directories: Vec<String>,
+    likely_commands: Vec<String>,
+    runtime_hints: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ProjectResumePacket {
+    generated_at: String,
+    label: String,
+    current_git: Option<TargetGitMetadata>,
+    summary: Vec<String>,
+    stale_memory: Vec<ProjectResumeRisk>,
 }
 
 impl AppContext {
@@ -974,6 +997,16 @@ Top memory hits:
 
 ")
             ),
+            project_memory_provenance(
+                target_source,
+                Some(run_id),
+                Some(&spec_obj.id),
+                vec![run_id.to_string()],
+                vec![
+                    "git commit or branch changes for the target repo".to_string(),
+                    "hidden scenario oracle, dataset, or runtime assumptions change".to_string(),
+                ],
+            ),
         )
         .await?;
         let memory_store_end = self
@@ -1127,6 +1160,18 @@ Top memory hits:
         if let Some(project_context_hit) = self.read_project_context_hit(target_source).await? {
             project_memory.hits.insert(0, project_context_hit);
         }
+        if let Some(project_scan_hit) = self.read_project_scan_hit(target_source).await? {
+            project_memory.hits.insert(1.min(project_memory.hits.len()), project_scan_hit);
+        }
+        if let Some(resume_packet_hit) = self.read_project_resume_packet_hit(target_source).await? {
+            project_memory.hits.insert(project_memory.hits.len().min(2), resume_packet_hit);
+        }
+        if let Some(strategy_register_hit) = self.read_project_strategy_register_hit(target_source).await? {
+            project_memory.hits.insert(project_memory.hits.len().min(2), strategy_register_hit);
+        }
+        if let Some(memory_status_hit) = self.read_project_memory_status_hit(target_source).await? {
+            project_memory.hits.insert(project_memory.hits.len().min(4), memory_status_hit);
+        }
 
         let mut core_memory = self
             .collect_memory_hits(&self.memory_store, query_terms, "core memory")
@@ -1219,6 +1264,7 @@ Top memory hits:
         let store = MemoryStore::new(self.project_harkonnen_dir(target_source).join("project-memory"));
         self.ensure_project_memory_bootstrap(target_source, &store).await?;
         store.reindex().await?;
+        self.refresh_project_resume_packet(target_source, &store).await?;
         Ok(store)
     }
 
@@ -1240,6 +1286,11 @@ Top memory hits:
 - Project: {}
 - Source path: {}
 - Project memory root: {}
+- Project scan: {}
+- Project manifest: {}
+- Resume packet: {}
+- Strategy register: {}
+- Memory status: {}
 
 ## Coobie Memory Split
 - Put repo-specific lessons, runtime facts, ports, protocols, datasets, oracle semantics, and commissioning notes in `.harkonnen/project-memory/`.
@@ -1249,8 +1300,48 @@ Top memory hits:
                 target_source.label,
                 target_source.source_path,
                 store.root.display(),
+                harkonnen_dir.join("project-scan.md").display(),
+                harkonnen_dir.join("project-manifest.json").display(),
+                harkonnen_dir.join("resume-packet.md").display(),
+                harkonnen_dir.join("strategy-register.md").display(),
+                harkonnen_dir.join("memory-status.md").display(),
             );
             tokio::fs::write(&project_context_path, context).await?;
+        }
+
+        let manifest = build_project_scan_manifest(target_source, &store.root);
+        self.write_json_file(&harkonnen_dir.join("project-manifest.json"), &manifest)
+            .await?;
+
+        let project_scan_path = harkonnen_dir.join("project-scan.md");
+        if !project_scan_path.exists() {
+            let scan = render_project_scan_markdown(&manifest);
+            tokio::fs::write(&project_scan_path, scan).await?;
+        }
+
+        let resume_packet_md = harkonnen_dir.join("resume-packet.md");
+        if !resume_packet_md.exists() {
+            tokio::fs::write(
+                &resume_packet_md,
+                "# Resume Packet\n\n- No resume packet has been generated yet.\n",
+            )
+            .await?;
+        }
+        let strategy_register_md = harkonnen_dir.join("strategy-register.md");
+        if !strategy_register_md.exists() {
+            tokio::fs::write(
+                &strategy_register_md,
+                "# Strategy Register\n\n- No repo-local dead-end strategies have been recorded yet.\n",
+            )
+            .await?;
+        }
+        let memory_status_md = harkonnen_dir.join("memory-status.md");
+        if !memory_status_md.exists() {
+            tokio::fs::write(
+                &memory_status_md,
+                "# Memory Status\n\n- No project-memory contradictions or supersessions have been recorded yet.\n",
+            )
+            .await?;
         }
 
         let guide_path = store.root.join("00-project-memory-guide.md");
@@ -1279,6 +1370,83 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         }
 
         Ok(())
+    }
+
+    async fn read_project_resume_packet_hit(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<String>> {
+        let path = self.project_harkonnen_dir(target_source).join("resume-packet.md");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(format!("[resume packet] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+    }
+
+    async fn read_project_strategy_register_hit(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<String>> {
+        let path = self.project_harkonnen_dir(target_source).join("strategy-register.md");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(format!("[strategy register] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+    }
+
+    async fn read_project_memory_status_hit(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<String>> {
+        let path = self.project_harkonnen_dir(target_source).join("memory-status.md");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        Ok(Some(format!("[memory status] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+    }
+
+    async fn read_project_scan_hit(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<Option<String>> {
+        let path = self.project_harkonnen_dir(target_source).join("project-scan.md");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let trimmed = raw.trim();
+        if trimmed.is_empty() {
+            return Ok(None);
+        }
+        let snippet = trimmed.chars().take(800).collect::<String>();
+        Ok(Some(format!(
+            "[project scan] [{}] {}",
+            path.display(),
+            snippet
+        )))
+    }
+
+    async fn load_project_resume_packet(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<ProjectResumePacket> {
+        let store = MemoryStore::new(self.project_harkonnen_dir(target_source).join("project-memory"));
+        self.refresh_project_resume_packet(target_source, &store).await
     }
 
     async fn read_project_context_hit(
@@ -1313,9 +1481,12 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         tags: Vec<String>,
         summary: &str,
         content: &str,
+        provenance: MemoryProvenance,
     ) -> Result<()> {
         let store = self.project_memory_store(target_source).await?;
-        store.store(id, tags, summary, content).await
+        store
+            .store_with_metadata(id, tags, summary, content, provenance)
+            .await
     }
 
     async fn target_source_for_run(&self, run_id: &str) -> Result<Option<TargetSourceMetadata>> {
@@ -1462,6 +1633,164 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         Ok(signals)
     }
 
+    async fn collect_briefing_evidence_citations(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        query_terms: &[String],
+        domain_signals: &[String],
+    ) -> Result<(Vec<CoobieEvidenceCitation>, Vec<CoobieEvidenceCitation>)> {
+        let exploration = self
+            .collect_relevant_exploration_citations(spec_obj, target_source, query_terms, domain_signals)
+            .await?;
+        let strategy = self
+            .collect_relevant_strategy_register_citations(spec_obj, target_source, query_terms, domain_signals)
+            .await?;
+        Ok((exploration, strategy))
+    }
+
+    async fn collect_relevant_exploration_citations(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        query_terms: &[String],
+        domain_signals: &[String],
+    ) -> Result<Vec<CoobieEvidenceCitation>> {
+        let runs = self.list_runs(40).await?;
+        let mut scored = Vec::<(i32, chrono::DateTime<Utc>, CoobieEvidenceCitation)>::new();
+
+        for run in runs {
+            if run.product != target_source.label {
+                continue;
+            }
+            let exploration_path = self.run_dir(&run.run_id).join("exploration_log.json");
+            if !exploration_path.exists() {
+                continue;
+            }
+            let raw = match tokio::fs::read_to_string(&exploration_path).await {
+                Ok(raw) => raw,
+                Err(_) => continue,
+            };
+            let log = match serde_json::from_str::<ExplorationLogArtifact>(&raw) {
+                Ok(log) => log,
+                Err(_) => continue,
+            };
+            for entry in log.entries {
+                if !matches!(entry.outcome.as_str(), "failure" | "blocked") {
+                    continue;
+                }
+                let haystack = format!(
+                    "{} {} {} {} {} {} {} {} {} {} {} {}",
+                    run.spec_id,
+                    run.product,
+                    entry.phase,
+                    entry.agent,
+                    entry.strategy,
+                    entry.outcome,
+                    entry.failure_constraint,
+                    entry.surviving_structure,
+                    entry.reformulation,
+                    entry.artifacts.join(" "),
+                    entry.parameters.join(" "),
+                    entry.open_questions.join(" ")
+                );
+                let mut score = score_briefing_evidence(&haystack, &spec_obj.id, &target_source.label, query_terms, domain_signals);
+                if run.spec_id == spec_obj.id {
+                    score += 8;
+                }
+                if score <= 0 {
+                    continue;
+                }
+                scored.push((
+                    score,
+                    run.created_at,
+                    CoobieEvidenceCitation {
+                        citation_id: format!("exploration:{}:{}", run.run_id, entry.episode_id),
+                        source_type: "exploration_log".to_string(),
+                        run_id: run.run_id.clone(),
+                        episode_id: Some(entry.episode_id.clone()),
+                        phase: entry.phase.clone(),
+                        agent: entry.agent.clone(),
+                        summary: format!(
+                            "{} used strategy '{}' and ended {}",
+                            entry.agent, entry.strategy, entry.outcome
+                        ),
+                        evidence: format!(
+                            "failure_constraint={}; surviving_structure={}; reformulation={}",
+                            entry.failure_constraint, entry.surviving_structure, entry.reformulation
+                        ),
+                    },
+                ));
+            }
+        }
+
+        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(3).collect())
+    }
+
+    async fn collect_relevant_strategy_register_citations(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        query_terms: &[String],
+        domain_signals: &[String],
+    ) -> Result<Vec<CoobieEvidenceCitation>> {
+        let registry_path = self.paths.factory.join("state").join("dead_ends.json");
+        if !registry_path.exists() {
+            return Ok(Vec::new());
+        }
+        let raw = tokio::fs::read_to_string(&registry_path).await?;
+        let registry = serde_json::from_str::<DeadEndRegistry>(&raw).unwrap_or_default();
+        let mut scored = Vec::<(i32, String, CoobieEvidenceCitation)>::new();
+
+        for entry in registry.entries {
+            if entry.product != target_source.label {
+                continue;
+            }
+            let haystack = format!(
+                "{} {} {} {} {} {} {} {}",
+                entry.spec_id,
+                entry.product,
+                entry.phase,
+                entry.agent,
+                entry.strategy,
+                entry.failure_constraint,
+                entry.surviving_structure,
+                entry.reformulation
+            );
+            let mut score = score_briefing_evidence(&haystack, &spec_obj.id, &target_source.label, query_terms, domain_signals);
+            if entry.spec_id == spec_obj.id {
+                score += 8;
+            }
+            if score <= 0 {
+                continue;
+            }
+            scored.push((
+                score,
+                entry.created_at.clone(),
+                CoobieEvidenceCitation {
+                    citation_id: entry.registry_id.clone(),
+                    source_type: "strategy_register".to_string(),
+                    run_id: entry.run_id.clone(),
+                    episode_id: None,
+                    phase: entry.phase.clone(),
+                    agent: entry.agent.clone(),
+                    summary: format!(
+                        "{} recorded strategy '{}' as a dead end",
+                        entry.agent, entry.strategy
+                    ),
+                    evidence: format!(
+                        "failure_constraint={}; surviving_structure={}; reformulation={}",
+                        entry.failure_constraint, entry.surviving_structure, entry.reformulation
+                    ),
+                },
+            ));
+        }
+
+        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(3).collect())
+    }
+
     async fn build_coobie_briefing(
         &self,
         spec_obj: &Spec,
@@ -1472,6 +1801,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
     ) -> Result<CoobieBriefing> {
         let relevant_lessons = self.find_relevant_lessons(query_terms, domain_signals).await?;
         let prior_causes = self.summarize_prior_causes(5).await?;
+        let resume_packet = self.load_project_resume_packet(target_source).await?;
+        let (exploration_citations, strategy_register_citations) = self
+            .collect_briefing_evidence_citations(spec_obj, target_source, query_terms, domain_signals)
+            .await?;
         let prior_report_count = sqlx::query(
             "SELECT COUNT(DISTINCT run_id) AS cnt FROM causal_hypotheses",
         )
@@ -1481,8 +1814,19 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         let application_risks = build_application_risks(spec_obj, domain_signals, &memory_context.memory_hits, &prior_causes);
         let environment_risks = build_environment_risks(spec_obj, domain_signals);
         let regulatory_considerations = build_regulatory_considerations(spec_obj, domain_signals);
-        let recommended_guardrails = build_recommended_guardrails(spec_obj, domain_signals, &memory_context.memory_hits, &prior_causes);
-        let required_checks = build_required_checks(spec_obj, domain_signals, &regulatory_considerations);
+        let recommended_guardrails = build_recommended_guardrails(
+            spec_obj,
+            domain_signals,
+            &memory_context.memory_hits,
+            &prior_causes,
+            &relevant_lessons,
+        );
+        let required_checks = build_required_checks(
+            spec_obj,
+            domain_signals,
+            &regulatory_considerations,
+            &relevant_lessons,
+        );
         let open_questions = build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
 
         let mut briefing = CoobieBriefing {
@@ -1494,6 +1838,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             memory_hits: memory_context.memory_hits.clone(),
             core_memory_hits: memory_context.core_memory_hits.clone(),
             project_memory_hits: memory_context.project_memory_hits.clone(),
+            resume_packet_summary: resume_packet.summary.clone(),
+            resume_packet_risks: resume_packet.stale_memory.clone(),
+            exploration_citations,
+            strategy_register_citations,
             relevant_lessons,
             prior_causes,
             project_components: spec_obj.project_components.clone(),
@@ -2674,6 +3022,7 @@ TWIN SERVICES:
 
         registry.entries.sort_by(|left, right| left.created_at.cmp(&right.created_at));
         self.write_json_file(&registry_path, &registry).await?;
+        self.sync_project_strategy_register(target_source, &registry).await?;
         let snapshot = registry
             .entries
             .iter()
@@ -2682,6 +3031,75 @@ TWIN SERVICES:
             .collect::<Vec<_>>();
         self.write_json_file(&run_dir.join("dead_end_registry_snapshot.json"), &snapshot)
             .await?;
+        Ok(())
+    }
+
+    async fn refresh_project_resume_packet(
+        &self,
+        target_source: &TargetSourceMetadata,
+        store: &MemoryStore,
+    ) -> Result<ProjectResumePacket> {
+        let entries = store.list_entries().await?;
+        let stale_memory = entries
+            .iter()
+            .filter_map(|entry| build_resume_risk(entry, target_source))
+            .collect::<Vec<_>>();
+        let status_count = entries
+            .iter()
+            .filter(|entry| entry.provenance.status.is_some())
+            .count();
+        let mut summary = vec![format!(
+            "Current git: {}",
+            render_target_git_summary(target_source.git.as_ref())
+        )];
+        summary.push(format!("Project memory entries indexed: {}", entries.len()));
+        summary.push(format!("Entries currently at risk: {}", stale_memory.len()));
+        if status_count > 0 {
+            summary.push(format!("Entries already marked challenged/superseded: {}", status_count));
+        }
+        if target_source.git.as_ref().and_then(|git| git.clean).is_some_and(|clean| !clean) {
+            summary.push("Working tree is dirty; provenance checks may need fresh review before trusting older lessons.".to_string());
+        }
+
+        let packet = ProjectResumePacket {
+            generated_at: Utc::now().to_rfc3339(),
+            label: target_source.label.clone(),
+            current_git: target_source.git.clone(),
+            summary,
+            stale_memory,
+        };
+
+        let harkonnen_dir = self.project_harkonnen_dir(target_source);
+        self.write_json_file(&harkonnen_dir.join("resume-packet.json"), &packet)
+            .await?;
+        tokio::fs::write(
+            harkonnen_dir.join("resume-packet.md"),
+            render_project_resume_packet_markdown(&packet),
+        )
+        .await?;
+        Ok(packet)
+    }
+
+    async fn sync_project_strategy_register(
+        &self,
+        target_source: &TargetSourceMetadata,
+        registry: &DeadEndRegistry,
+    ) -> Result<()> {
+        let harkonnen_dir = self.project_harkonnen_dir(target_source);
+        tokio::fs::create_dir_all(&harkonnen_dir).await?;
+        let relevant = registry
+            .entries
+            .iter()
+            .filter(|entry| entry.product == target_source.label)
+            .cloned()
+            .collect::<Vec<_>>();
+        self.write_json_file(&harkonnen_dir.join("strategy-register.json"), &relevant)
+            .await?;
+        tokio::fs::write(
+            harkonnen_dir.join("strategy-register.md"),
+            render_project_strategy_register_markdown(target_source, &relevant),
+        )
+        .await?;
         Ok(())
     }
 
@@ -2962,6 +3380,10 @@ TWIN SERVICES:
         let prior_lessons = self.list_lessons().await?;
         let target_source = self.target_source_for_run(run_id).await?;
         let mut new_lessons = Vec::new();
+        let mut known_lesson_ids = prior_lessons
+            .iter()
+            .map(|lesson| lesson.lesson_id.clone())
+            .collect::<HashSet<_>>();
 
         for episode in episodes {
             let outcome = episode.outcome.as_deref().unwrap_or("unknown");
@@ -2981,7 +3403,7 @@ TWIN SERVICES:
             }
 
             let lesson_id = format!("lesson-{}", episode.episode_id);
-            if prior_lessons.iter().any(|lesson| lesson.lesson_id == lesson_id) {
+            if known_lesson_ids.contains(&lesson_id) {
                 continue;
             }
 
@@ -3008,8 +3430,6 @@ TWIN SERVICES:
                 last_recalled: None,
                 created_at: Utc::now(),
             };
-            self.insert_lesson(&lesson).await?;
-
             let lesson_body = format!(
                 "Source episode: {}
 Phase: {}
@@ -3023,41 +3443,15 @@ Observed pattern: {}",
                     .unwrap_or_else(|| "No intervention recorded yet".to_string()),
                 pattern
             );
+            self.persist_lesson(
+                lesson,
+                lesson_body,
+                target_source.as_ref(),
+                &mut known_lesson_ids,
+                &mut new_lessons,
+            )
+            .await?;
 
-            if let Some(target_source) = &target_source {
-                self.store_project_memory_entry(
-                    target_source,
-                    &lesson.lesson_id,
-                    lesson.tags.clone(),
-                    &lesson.pattern,
-                    &lesson_body,
-                )
-                .await?;
-            } else {
-                self.memory_store
-                    .store(
-                        &lesson.lesson_id,
-                        lesson.tags.clone(),
-                        &lesson.pattern,
-                        &lesson_body,
-                    )
-                    .await?;
-            }
-
-            if should_promote_to_core_memory(&lesson.tags) {
-                self.memory_store
-                    .store(
-                        &lesson.lesson_id,
-                        lesson.tags.clone(),
-                        &lesson.pattern,
-                        &lesson_body,
-                    )
-                    .await?;
-            }
-
-            new_lessons.push(lesson);
-
-            // Ingest into Coobie causal engine (partial - full ingest happens post-execution)
             let intake_episode = crate::models::FactoryEpisode {
                 run_id: run_id.to_string(),
                 product: String::new(),
@@ -3074,7 +3468,292 @@ Observed pattern: {}",
             let _ = self.coobie.ingest_episode(&intake_episode).await;
         }
 
+        self.consolidate_exploration_artifacts(
+            run_id,
+            target_source.as_ref(),
+            &mut known_lesson_ids,
+            &mut new_lessons,
+        )
+        .await?;
+
         Ok(new_lessons)
+    }
+
+    async fn persist_lesson(
+        &self,
+        lesson: LessonRecord,
+        lesson_body: String,
+        target_source: Option<&TargetSourceMetadata>,
+        known_lesson_ids: &mut HashSet<String>,
+        new_lessons: &mut Vec<LessonRecord>,
+    ) -> Result<()> {
+        if !known_lesson_ids.insert(lesson.lesson_id.clone()) {
+            return Ok(());
+        }
+
+        self.insert_lesson(&lesson).await?;
+        if let Some(target_source) = target_source {
+            let provenance = project_memory_provenance(
+                target_source,
+                None,
+                None,
+                Vec::new(),
+                vec![
+                    "implementation behavior, oracle semantics, or runtime assumptions change".to_string(),
+                ],
+            );
+            self.store_project_memory_entry(
+                target_source,
+                &lesson.lesson_id,
+                lesson.tags.clone(),
+                &lesson.pattern,
+                &lesson_body,
+                provenance.clone(),
+            )
+            .await?;
+            self.reconcile_project_memory_statuses(target_source, &lesson).await?;
+        } else {
+            self.memory_store
+                .store_with_metadata(
+                    &lesson.lesson_id,
+                    lesson.tags.clone(),
+                    &lesson.pattern,
+                    &lesson_body,
+                    MemoryProvenance::default(),
+                )
+                .await?;
+        }
+
+        if should_promote_to_core_memory(&lesson.tags) {
+            let provenance = target_source
+                .map(|target| {
+                    project_memory_provenance(
+                        target,
+                        None,
+                        None,
+                        Vec::new(),
+                        vec![
+                            "cross-project applicability or external-system assumptions are contradicted".to_string(),
+                        ],
+                    )
+                })
+                .unwrap_or_default();
+            self.memory_store
+                .store_with_metadata(
+                    &lesson.lesson_id,
+                    lesson.tags.clone(),
+                    &lesson.pattern,
+                    &lesson_body,
+                    provenance,
+                )
+                .await?;
+        }
+
+        new_lessons.push(lesson);
+        Ok(())
+    }
+
+    async fn reconcile_project_memory_statuses(
+        &self,
+        target_source: &TargetSourceMetadata,
+        lesson: &LessonRecord,
+    ) -> Result<()> {
+        if !lesson.tags.iter().any(|tag| tag == "lesson") {
+            return Ok(());
+        }
+
+        let store = self.project_memory_store(target_source).await?;
+        let entries = store.list_entries().await?;
+        let lesson_key = normalize_memory_text(&lesson.pattern);
+        let lesson_intervention = lesson.intervention.clone().unwrap_or_default().to_lowercase();
+
+        for entry in entries {
+            if entry.id == lesson.lesson_id || !entry.tags.iter().any(|tag| tag == "lesson") {
+                continue;
+            }
+
+            let overlap = shared_specific_tag_count(&entry.tags, &lesson.tags);
+            let entry_key = normalize_memory_text(&entry.summary);
+            let same_pattern = !entry_key.is_empty() && entry_key == lesson_key;
+
+            if same_pattern && !lesson_intervention.is_empty() && !entry.content.to_lowercase().contains(&lesson_intervention) {
+                store
+                    .annotate_entry_status(&entry.id, "superseded", Some(&lesson.lesson_id))
+                    .await?;
+            } else if overlap >= 2 && entry_key != lesson_key {
+                store
+                    .annotate_entry_status(&entry.id, "challenged", Some(&lesson.lesson_id))
+                    .await?;
+            }
+        }
+
+        self.write_project_memory_status_snapshot(target_source, &store).await?;
+        Ok(())
+    }
+
+    async fn write_project_memory_status_snapshot(
+        &self,
+        target_source: &TargetSourceMetadata,
+        store: &MemoryStore,
+    ) -> Result<()> {
+        let entries = store.list_entries().await?;
+        let relevant = entries
+            .into_iter()
+            .filter(|entry| {
+                entry.tags.iter().any(|tag| tag == "lesson")
+                    && (entry.provenance.status.is_some()
+                        || entry.provenance.superseded_by.is_some()
+                        || !entry.provenance.challenged_by.is_empty())
+            })
+            .collect::<Vec<_>>();
+        let harkonnen_dir = self.project_harkonnen_dir(target_source);
+        self.write_json_file(&harkonnen_dir.join("memory-status.json"), &relevant)
+            .await?;
+        tokio::fs::write(
+            harkonnen_dir.join("memory-status.md"),
+            render_project_memory_status_markdown(&relevant),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn consolidate_exploration_artifacts(
+        &self,
+        run_id: &str,
+        target_source: Option<&TargetSourceMetadata>,
+        known_lesson_ids: &mut HashSet<String>,
+        new_lessons: &mut Vec<LessonRecord>,
+    ) -> Result<()> {
+        let run_dir = self.run_dir(run_id);
+        let run_record = self.get_run(run_id).await?;
+        let exploration_path = run_dir.join("exploration_log.json");
+        if exploration_path.exists() {
+            let raw = tokio::fs::read_to_string(&exploration_path).await?;
+            if let Ok(log) = serde_json::from_str::<ExplorationLogArtifact>(&raw) {
+                for entry in log.entries {
+                    if !matches!(entry.outcome.as_str(), "failure" | "blocked") {
+                        continue;
+                    }
+                    let lesson = LessonRecord {
+                        lesson_id: format!("lesson-exploration-{}", entry.episode_id),
+                        source_episode: Some(entry.episode_id.clone()),
+                        pattern: format!(
+                            "Residue exploration dead-end in {}: {}",
+                            entry.phase, entry.strategy
+                        ),
+                        intervention: Some(entry.reformulation.clone()),
+                        tags: vec![
+                            "lesson".to_string(),
+                            "residue".to_string(),
+                            "exploration".to_string(),
+                            "project-memory".to_string(),
+                            entry.phase.clone(),
+                            entry.agent.clone(),
+                        ],
+                        strength: 0.6,
+                        recall_count: 0,
+                        last_recalled: None,
+                        created_at: Utc::now(),
+                    };
+                    let lesson_body = format!(
+                        "Strategy: {}
+Failure constraint: {}
+Surviving structure: {}
+Reformulation: {}
+Artifacts: {}
+Parameters: {}
+Open questions: {}",
+                        entry.strategy,
+                        entry.failure_constraint,
+                        entry.surviving_structure,
+                        entry.reformulation,
+                        entry.artifacts.join(" | "),
+                        entry.parameters.join(" | "),
+                        entry.open_questions.join(" | "),
+                    );
+                    self.persist_lesson(
+                        lesson,
+                        lesson_body,
+                        target_source,
+                        known_lesson_ids,
+                        new_lessons,
+                    )
+                    .await?;
+                }
+            }
+        }
+
+        let Some(run_record) = run_record else {
+            return Ok(());
+        };
+        let registry_path = self.paths.factory.join("state").join("dead_ends.json");
+        if !registry_path.exists() {
+            return Ok(());
+        }
+        let raw = tokio::fs::read_to_string(&registry_path).await?;
+        let registry = serde_json::from_str::<DeadEndRegistry>(&raw).unwrap_or_default();
+        let relevant = registry
+            .entries
+            .into_iter()
+            .filter(|entry| entry.spec_id == run_record.spec_id && entry.product == run_record.product)
+            .collect::<Vec<_>>();
+        let mut grouped = HashMap::<String, Vec<DeadEndRegistryEntry>>::new();
+        for entry in relevant {
+            grouped
+                .entry(format!("{}|{}|{}", entry.phase, entry.agent, entry.strategy))
+                .or_default()
+                .push(entry);
+        }
+        for (key, entries) in grouped {
+            if entries.len() < 2 {
+                continue;
+            }
+            let latest = entries.last().cloned().unwrap_or_else(|| entries[0].clone());
+            let lesson = LessonRecord {
+                lesson_id: format!("lesson-dead-end-{}-{}", run_id, stable_key_fragment(&key)),
+                source_episode: None,
+                pattern: format!(
+                    "Recurring dead-end strategy in {} / {}: {}",
+                    latest.phase, latest.agent, latest.strategy
+                ),
+                intervention: Some(latest.reformulation.clone()),
+                tags: vec![
+                    "lesson".to_string(),
+                    "residue".to_string(),
+                    "dead-end".to_string(),
+                    "strategy-register".to_string(),
+                    "project-memory".to_string(),
+                    latest.phase.clone(),
+                    latest.agent.clone(),
+                ],
+                strength: (entries.len() as f64).min(3.0) / 2.0,
+                recall_count: 0,
+                last_recalled: None,
+                created_at: Utc::now(),
+            };
+            let lesson_body = format!(
+                "Occurrences: {}
+Latest failure constraint: {}
+Latest surviving structure: {}
+Latest reformulation: {}
+Run ids: {}",
+                entries.len(),
+                latest.failure_constraint,
+                latest.surviving_structure,
+                latest.reformulation,
+                entries.iter().map(|entry| entry.run_id.clone()).collect::<Vec<_>>().join(", "),
+            );
+            self.persist_lesson(
+                lesson,
+                lesson_body,
+                target_source,
+                known_lesson_ids,
+                new_lessons,
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     async fn count_prior_matching_failed_episodes(
@@ -3572,6 +4251,7 @@ fn build_recommended_guardrails(
     domain_signals: &[String],
     memory_hits: &[String],
     prior_causes: &[PriorCauseSignal],
+    relevant_lessons: &[LessonRecord],
 ) -> Vec<String> {
     let mut guardrails = vec![
         "Require every planning agent to consume Coobie's briefing before finalizing its output.".to_string(),
@@ -3614,6 +4294,31 @@ fn build_recommended_guardrails(
             cause.description
         ));
     }
+    for lesson in relevant_lessons.iter().take(3) {
+        guardrails.push(format!(
+            "Apply distilled lesson before acting: {}.",
+            lesson.pattern
+        ));
+        if let Some(intervention) = &lesson.intervention {
+            guardrails.push(format!(
+                "Respect learned intervention from Coobie memory: {}.",
+                intervention
+            ));
+        }
+    }
+    if relevant_lessons.iter().any(|lesson| {
+        lesson
+            .tags
+            .iter()
+            .any(|tag| tag == "dead-end" || tag == "strategy-register")
+    }) {
+        guardrails.push("Do not repeat a recorded dead-end strategy unless this run introduces new evidence that explicitly changes the constraint.".to_string());
+    }
+    if relevant_lessons.iter().any(|lesson| {
+        lesson.tags.iter().any(|tag| tag == "residue" || tag == "exploration")
+    }) {
+        guardrails.push("Record each serious attempt with strategy, failure constraint, surviving structure, and reformulation so Coobie can compare retries structurally.".to_string());
+    }
 
     guardrails.dedup();
     guardrails
@@ -3623,6 +4328,7 @@ fn build_required_checks(
     spec_obj: &Spec,
     domain_signals: &[String],
     regulatory_considerations: &[String],
+    relevant_lessons: &[LessonRecord],
 ) -> Vec<String> {
     let mut checks = vec![
         "Visible validation must prove the main project still builds or executes in the staged workspace.".to_string(),
@@ -3669,6 +4375,19 @@ fn build_required_checks(
     }
     if spec_obj.rollback_requirements.is_empty() {
         checks.push("Clarify rollback and degraded-mode expectations before relying on destructive or stateful flows.".to_string());
+    }
+    if relevant_lessons.iter().any(|lesson| {
+        lesson.tags.iter().any(|tag| tag == "residue" || tag == "exploration")
+    }) {
+        checks.push("Write or update exploration_log.json with strategy, failure constraint, surviving structure, reformulation, artifacts, and open questions before the run closes.".to_string());
+    }
+    if relevant_lessons.iter().any(|lesson| {
+        lesson
+            .tags
+            .iter()
+            .any(|tag| tag == "dead-end" || tag == "strategy-register")
+    }) {
+        checks.push("When retrying a recorded dead-end, emit evidence showing what changed relative to the last failed strategy before claiming parity or recovery.".to_string());
     }
 
     checks.dedup();
@@ -3722,6 +4441,377 @@ fn build_coobie_open_questions(
 
     questions.dedup();
     questions
+}
+
+fn render_target_git_summary(git: Option<&TargetGitMetadata>) -> String {
+    match git {
+        Some(git) => format!(
+            "branch={} commit={} remote={} clean={}",
+            git.branch.as_deref().unwrap_or("unknown"),
+            git.commit.as_deref().unwrap_or("unknown"),
+            git.remote_origin.as_deref().unwrap_or("unknown"),
+            git.clean.map(|value| if value { "true" } else { "false" }).unwrap_or("unknown"),
+        ),
+        None => "git metadata unavailable".to_string(),
+    }
+}
+
+fn build_resume_risk(entry: &MemoryEntry, target_source: &TargetSourceMetadata) -> Option<ProjectResumeRisk> {
+    let mut reasons = Vec::new();
+    let current_git = target_source.git.as_ref();
+    if let (Some(stored), Some(current)) = (entry.provenance.git_commit.as_deref(), current_git.and_then(|git| git.commit.as_deref())) {
+        if stored != current {
+            reasons.push(format!("stored commit {} differs from current commit {}", stored, current));
+        }
+    }
+    if let (Some(stored), Some(current)) = (entry.provenance.git_branch.as_deref(), current_git.and_then(|git| git.branch.as_deref())) {
+        if stored != current {
+            reasons.push(format!("stored branch {} differs from current branch {}", stored, current));
+        }
+    }
+    if let Some(stored_path) = entry.provenance.source_path.as_deref() {
+        if stored_path != target_source.source_path {
+            reasons.push("memory was recorded against a different source path".to_string());
+        }
+    }
+    if let Some(status) = entry.provenance.status.as_deref() {
+        reasons.push(format!("memory status is {}", status));
+    }
+    if let Some(superseded_by) = entry.provenance.superseded_by.as_deref() {
+        reasons.push(format!("superseded by {}", superseded_by));
+    }
+    if !entry.provenance.challenged_by.is_empty() {
+        reasons.push(format!("challenged by {}", entry.provenance.challenged_by.join(", ") ));
+    }
+    if current_git.and_then(|git| git.clean).is_some_and(|clean| !clean) && !entry.provenance.stale_when.is_empty() {
+        reasons.push(format!("stale_when conditions: {}", entry.provenance.stale_when.join(" | ")));
+    }
+
+    if reasons.is_empty() {
+        None
+    } else {
+        Some(ProjectResumeRisk {
+            memory_id: entry.id.clone(),
+            summary: entry.summary.clone(),
+            status: entry.provenance.status.clone(),
+            reasons,
+        })
+    }
+}
+
+fn render_project_resume_packet_markdown(packet: &ProjectResumePacket) -> String {
+    let risk_lines = if packet.stale_memory.is_empty() {
+        "- No project-memory entries are currently flagged as stale or contradicted.".to_string()
+    } else {
+        packet
+            .stale_memory
+            .iter()
+            .map(|risk| format!(
+                "- {} [{}] {}",
+                risk.memory_id,
+                risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                if risk.reasons.is_empty() { "no reasons recorded".to_string() } else { risk.reasons.join(" | ") }
+            ))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
+    format!(
+        "# Resume Packet\n\n- Generated at: {}\n- Project: {}\n- Current git: {}\n\n## Summary\n{}\n\n## Project Memory At Risk\n{}\n",
+        packet.generated_at,
+        packet.label,
+        render_target_git_summary(packet.current_git.as_ref()),
+        render_list(&packet.summary, "No resume summary generated yet."),
+        risk_lines,
+    )
+}
+
+fn project_memory_provenance(
+    target_source: &TargetSourceMetadata,
+    source_run_id: Option<&str>,
+    source_spec_id: Option<&str>,
+    evidence_run_ids: Vec<String>,
+    stale_when: Vec<String>,
+) -> MemoryProvenance {
+    MemoryProvenance {
+        source_label: Some(target_source.label.clone()),
+        source_kind: Some(target_source.source_kind.clone()),
+        source_path: Some(target_source.source_path.clone()),
+        source_run_id: source_run_id.map(|value| value.to_string()),
+        source_spec_id: source_spec_id.map(|value| value.to_string()),
+        git_branch: target_source.git.as_ref().and_then(|git| git.branch.clone()),
+        git_commit: target_source.git.as_ref().and_then(|git| git.commit.clone()),
+        git_remote: target_source.git.as_ref().and_then(|git| git.remote_origin.clone()),
+        evidence_run_ids,
+        stale_when,
+        status: None,
+        superseded_by: None,
+        challenged_by: Vec::new(),
+    }
+}
+
+fn build_project_scan_manifest(
+    target_source: &TargetSourceMetadata,
+    project_memory_root: &Path,
+) -> ProjectScanManifest {
+    let source_path = PathBuf::from(&target_source.source_path);
+    let detected_files = detect_project_files(&source_path);
+    let detected_directories = detect_project_directories(&source_path);
+    let likely_commands = detect_project_commands(&source_path);
+    let runtime_hints = detect_runtime_hints(&source_path, &detected_files, &detected_directories);
+
+    ProjectScanManifest {
+        generated_at: Utc::now().to_rfc3339(),
+        label: target_source.label.clone(),
+        source_kind: target_source.source_kind.clone(),
+        source_path: target_source.source_path.clone(),
+        project_memory_root: project_memory_root.display().to_string(),
+        git: target_source.git.clone(),
+        detected_files,
+        detected_directories,
+        likely_commands,
+        runtime_hints,
+    }
+}
+
+fn detect_project_files(source_path: &Path) -> Vec<String> {
+    let candidates = [
+        "Cargo.toml",
+        "package.json",
+        "pnpm-lock.yaml",
+        "package-lock.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "docker-compose.yml",
+        "docker-compose.yaml",
+        "README.md",
+        "docs",
+    ];
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            let path = source_path.join(candidate);
+            path.exists().then(|| candidate.to_string())
+        })
+        .collect()
+}
+
+fn detect_project_directories(source_path: &Path) -> Vec<String> {
+    let candidates = [
+        "src",
+        "crates",
+        "ui",
+        "frontend",
+        "backend",
+        "apps",
+        "services",
+        "examples",
+        "tests",
+        "scripts",
+        "docs",
+        "data",
+    ];
+    candidates
+        .iter()
+        .filter_map(|candidate| {
+            let path = source_path.join(candidate);
+            path.is_dir().then(|| candidate.to_string())
+        })
+        .collect()
+}
+
+fn detect_project_commands(source_path: &Path) -> Vec<String> {
+    let mut commands = Vec::new();
+    if source_path.join("Cargo.toml").exists() {
+        commands.push("cargo check".to_string());
+        commands.push("cargo test -q".to_string());
+    }
+    if source_path.join("package.json").exists() {
+        commands.push("npm run build".to_string());
+        commands.push("npm run dev".to_string());
+    }
+    if source_path.join("pyproject.toml").exists() || source_path.join("requirements.txt").exists() {
+        commands.push("python3 -m pytest".to_string());
+    }
+    commands.sort();
+    commands.dedup();
+    commands
+}
+
+fn normalize_memory_text(value: &str) -> String {
+    value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .collect::<String>()
+        .split_whitespace()
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn shared_specific_tag_count(left: &[String], right: &[String]) -> usize {
+    let generic = ["lesson", "project-memory", "causal", "residue", "exploration", "dead-end", "strategy-register"];
+    let left = left
+        .iter()
+        .filter(|tag| !generic.contains(&tag.as_str()))
+        .collect::<Vec<_>>();
+    let right = right
+        .iter()
+        .filter(|tag| !generic.contains(&tag.as_str()))
+        .collect::<Vec<_>>();
+    left.iter()
+        .filter(|tag| right.iter().any(|candidate| candidate == *tag))
+        .count()
+}
+
+fn render_project_strategy_register_markdown(
+    target_source: &TargetSourceMetadata,
+    entries: &[DeadEndRegistryEntry],
+) -> String {
+    if entries.is_empty() {
+        return format!(
+            "# Strategy Register\n\n- Project: {}\n- No repo-local dead-end strategies have been recorded yet.\n",
+            target_source.label
+        );
+    }
+
+    let lines = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "- [{}] phase={} agent={} strategy={} failure_constraint={} reformulation={}",
+                entry.registry_id, entry.phase, entry.agent, entry.strategy, entry.failure_constraint, entry.reformulation
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("# Strategy Register\n\n- Project: {}\n- Entries: {}\n\n{}\n", target_source.label, entries.len(), lines)
+}
+
+fn render_project_memory_status_markdown(entries: &[MemoryEntry]) -> String {
+    if entries.is_empty() {
+        return "# Memory Status\n\n- No project-memory contradictions or supersessions have been recorded yet.\n".to_string();
+    }
+
+    let lines = entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "- {} status={} superseded_by={} challenged_by={}",
+                entry.id,
+                entry.provenance.status.clone().unwrap_or_else(|| "active".to_string()),
+                entry.provenance.superseded_by.clone().unwrap_or_else(|| "none".to_string()),
+                if entry.provenance.challenged_by.is_empty() {
+                    "none".to_string()
+                } else {
+                    entry.provenance.challenged_by.join(", ")
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n");
+
+    format!("# Memory Status\n\n{}\n", lines)
+}
+
+fn detect_runtime_hints(
+    source_path: &Path,
+    detected_files: &[String],
+    detected_directories: &[String],
+) -> Vec<String> {
+    let mut hints = Vec::new();
+    if detected_files.iter().any(|value| value == "Cargo.toml")
+        && detected_directories.iter().any(|value| value == "ui" || value == "frontend")
+    {
+        hints.push("Repo appears to contain both backend and UI surfaces.".to_string());
+    }
+    if detected_directories.iter().any(|value| value == "examples") {
+        hints.push("Example datasets or reference integrations may live under examples/.".to_string());
+    }
+    if detected_directories.iter().any(|value| value == "tests") {
+        hints.push("Repo exposes explicit test surfaces under tests/.".to_string());
+    }
+    if source_path.join(".harkonnen").exists() {
+        hints.push("Repo already contains Harkonnen-local continuity files.".to_string());
+    }
+    hints
+}
+
+fn render_project_scan_markdown(manifest: &ProjectScanManifest) -> String {
+    let git_summary = manifest
+        .git
+        .as_ref()
+        .map(|git| {
+            format!(
+                "branch={} commit={} remote={} clean={}",
+                git.branch.clone().unwrap_or_else(|| "unknown".to_string()),
+                git.commit.clone().unwrap_or_else(|| "unknown".to_string()),
+                git.remote_origin.clone().unwrap_or_else(|| "unknown".to_string()),
+                git.clean
+                    .map(|value| if value { "true" } else { "false" }.to_string())
+                    .unwrap_or_else(|| "unknown".to_string())
+            )
+        })
+        .unwrap_or_else(|| "git metadata unavailable".to_string());
+
+    format!(
+        "# Project Scan\n\n- Generated at: {}\n- Project: {}\n- Source kind: {}\n- Source path: {}\n- Project memory root: {}\n- Git: {}\n\n## Detected Files\n{}\n\n## Detected Directories\n{}\n\n## Likely Commands\n{}\n\n## Runtime Hints\n{}\n",
+        manifest.generated_at,
+        manifest.label,
+        manifest.source_kind,
+        manifest.source_path,
+        manifest.project_memory_root,
+        git_summary,
+        render_list(&manifest.detected_files, "No key top-level files detected yet."),
+        render_list(&manifest.detected_directories, "No key top-level directories detected yet."),
+        render_list(&manifest.likely_commands, "No likely commands inferred yet."),
+        render_list(&manifest.runtime_hints, "No runtime hints inferred yet."),
+    )
+}
+
+fn score_briefing_evidence(
+    haystack: &str,
+    spec_id: &str,
+    product: &str,
+    query_terms: &[String],
+    domain_signals: &[String],
+) -> i32 {
+    let haystack = haystack.to_lowercase();
+    let mut score = 0;
+
+    if haystack.contains(&spec_id.to_lowercase()) {
+        score += 8;
+    }
+    if haystack.contains(&product.to_lowercase()) {
+        score += 5;
+    }
+    for term in query_terms {
+        let needle = term.trim().to_lowercase();
+        if needle.len() >= 3 && haystack.contains(&needle) {
+            score += 3;
+        }
+    }
+    for signal in domain_signals {
+        let needle = signal.trim().to_lowercase();
+        if !needle.is_empty() && haystack.contains(&needle) {
+            score += 2;
+        }
+    }
+
+    score
+}
+
+fn stable_key_fragment(value: &str) -> String {
+    let mut fragment = value
+        .chars()
+        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .collect::<String>();
+    while fragment.contains("--") {
+        fragment = fragment.replace("--", "-");
+    }
+    let fragment = fragment.trim_matches('-');
+    let fragment = if fragment.is_empty() { "dead-end" } else { fragment };
+    fragment.chars().take(48).collect()
 }
 
 fn has_project_component_role(spec_obj: &Spec, role: &str) -> bool {

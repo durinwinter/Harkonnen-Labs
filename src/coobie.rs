@@ -32,8 +32,9 @@ use std::collections::HashMap;
 use uuid::Uuid;
 
 use crate::models::{
-    CausalHypothesis, CoobieBriefing, CounterfactualEstimate, CounterfactualOutcome,
-    FactoryEpisode, InterventionPlan, ProjectComponent, ScenarioBlueprint,
+    CausalHypothesis, CoobieBriefing, CoobieEvidenceCitation, CounterfactualEstimate,
+    CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord, ProjectComponent,
+    ProjectResumeRisk, ScenarioBlueprint,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -525,6 +526,74 @@ fn fallback_value(value: &str) -> &str {
     }
 }
 
+fn render_citations(citations: &[CoobieEvidenceCitation], empty_line: &str) -> String {
+    if citations.is_empty() {
+        return format!("- {}", empty_line);
+    }
+
+    citations
+        .iter()
+        .map(|citation| {
+            format!(
+                "- [{}] {}\n  run: {}\n  phase/agent: {}/{}\n  evidence: {}",
+                citation.citation_id,
+                citation.summary,
+                citation.run_id,
+                citation.phase,
+                citation.agent,
+                citation.evidence
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_resume_risks(risks: &[ProjectResumeRisk]) -> String {
+    if risks.is_empty() {
+        return "- No project-memory entries are currently flagged as stale or contradicted.".to_string();
+    }
+
+    risks
+        .iter()
+        .map(|risk| {
+            format!(
+                "- {} [{}]\n  reasons: {}",
+                risk.memory_id,
+                risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                if risk.reasons.is_empty() {
+                    "no explicit reasons recorded".to_string()
+                } else {
+                    risk.reasons.join(" | ")
+                }
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
+fn render_relevant_lessons(lessons: &[LessonRecord]) -> String {
+    if lessons.is_empty() {
+        return "- No distilled lessons were elevated for this run yet.".to_string();
+    }
+
+    lessons
+        .iter()
+        .map(|lesson| {
+            let intervention = lesson
+                .intervention
+                .as_deref()
+                .unwrap_or("No intervention has been recorded yet.");
+            format!(
+                "- {}\n  intervention: {}\n  tags: {}",
+                lesson.pattern,
+                intervention,
+                lesson.tags.join(", ")
+            )
+        })
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
     let cause_lines = if briefing.prior_causes.is_empty() {
         "- No prior causal reports matched strongly enough to summarize yet.".to_string()
@@ -563,6 +632,12 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 - Project memory hits: {}
 - Core memory hits: {}
 
+## Resume Packet Summary
+{}
+
+## Project Memory At Risk
+{}
+
 ## Project Memory Context
 {}
 
@@ -590,6 +665,15 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 ## Prior Causes Worth Respecting
 {}
 
+## Distilled Lessons To Apply
+{}
+
+## Exploration Evidence Coobie Is Citing
+{}
+
+## Strategy Register Evidence Coobie Is Citing
+{}
+
 ## Guardrails I Want The Pack To Follow
 {}
 
@@ -605,6 +689,11 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
         project_memory_root,
         briefing.project_memory_hits.len(),
         briefing.core_memory_hits.len(),
+        render_bullet_lines(
+            &briefing.resume_packet_summary,
+            "No resume packet summary was generated yet.",
+        ),
+        render_resume_risks(&briefing.resume_packet_risks),
         render_bullet_lines(
             &briefing.project_memory_hits,
             "No project-local memory hits were retrieved yet.",
@@ -623,6 +712,15 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             "No explicit regulatory considerations were recorded yet.",
         ),
         cause_lines,
+        render_relevant_lessons(&briefing.relevant_lessons),
+        render_citations(
+            &briefing.exploration_citations,
+            "No prior exploration-log entries were elevated for this run yet.",
+        ),
+        render_citations(
+            &briefing.strategy_register_citations,
+            "No strategy-register entries were elevated for this run yet.",
+        ),
         render_bullet_lines(
             &briefing.recommended_guardrails,
             "No extra guardrails were generated yet.",

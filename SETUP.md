@@ -83,6 +83,24 @@ Generate a Windows-oriented work setup on a Windows host:
 cargo run -- setup init --machine-name amazon-builder-01 --role work --template work-windows
 ```
 
+## Fastest work-windows bring-up
+
+If you already know the machine should be Claude-only, the shortest path is:
+
+```powershell
+$env:HARKONNEN_SETUP = "work-windows"
+$env:ANTHROPIC_API_KEY = "sk-ant-..."
+$env:MEMORY_FILE_PATH = ".\factory\memory\store.json"
+.\scripts\factory-up-windows.ps1
+.\scripts\launch-pack-board-windows.ps1 -OpenBrowser
+```
+
+That gives you two operator surfaces immediately:
+- Claude Code in the stamped target repo, which is the main place you talk to the system
+- Pack Board in the browser, which is the control-room view
+
+For the full operator walkthrough, see [WORK_WINDOWS_QUICKSTART.md](./WORK_WINDOWS_QUICKSTART.md).
+
 ## Activating a generated setup
 
 Linux or macOS:

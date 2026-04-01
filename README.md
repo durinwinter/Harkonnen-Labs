@@ -24,6 +24,7 @@ Agents do the implementation work.
 - [Agent Context](./AGENTS.md)
 - [Architecture](./ARCHITECTURE.md)
 - [Setup Guide](./SETUP.md)
+- [Work Windows Quickstart](./WORK_WINDOWS_QUICKSTART.md)
 - [Coobie Memory](./COOBIE.md)
 - [Coobie Spec](./COOBIE_SPEC.md)
 
@@ -53,6 +54,13 @@ cargo run -- run start factory/specs/examples/sample_feature.yaml --product-path
 cargo run -- run status <run-id>
 cargo run -- run report <run-id>
 cargo run -- serve --port 3000
+```
+
+On a Claude-only Windows work machine, the fastest path is:
+
+```powershell
+.\scripts\factory-up-windows.ps1
+.\scripts\launch-pack-board-windows.ps1 -OpenBrowser
 ```
 
 To stamp a Claude-only Labrador pack into another repo, use:

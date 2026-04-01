@@ -1,10 +1,10 @@
-# Harkonnen Labs — Windows Factory Bring-Up
+# Harkonnen Labs - Windows Factory Bring-Up
 # Single script to go from fresh clone to a running factory spine on work-windows.
 #
 # Run from the repo root in an elevated PowerShell terminal:
 #   .\scripts\factory-up-windows.ps1
 #
-# Idempotent — safe to re-run. Existing .env and seed docs are not overwritten.
+# Idempotent - safe to re-run. Existing .env and seed docs are not overwritten.
 #
 # What this script does:
 #   1.  Check prerequisites (node, npm, cargo)
@@ -49,7 +49,7 @@ function Require-NodeVersion($min) {
     if ([int]$raw -lt $min) {
         Fail "Node.js v$min+ required (found: $(node --version)). Upgrade at https://nodejs.org"
     }
-    Ok "node $(node --version) — meets minimum v$min"
+    Ok "node $(node --version) - meets minimum v$min"
 }
 
 function Test-PortFree($port) {
@@ -94,7 +94,7 @@ function Npm-GlobalInstall($pkg) {
 
 Write-Host ""
 Write-Host "  ╔══════════════════════════════════════════════╗" -ForegroundColor DarkCyan
-Write-Host "  ║   Harkonnen Labs — Windows Factory Bring-Up  ║" -ForegroundColor DarkCyan
+Write-Host "  ║   Harkonnen Labs - Windows Factory Bring-Up  ║" -ForegroundColor DarkCyan
 Write-Host "  ╚══════════════════════════════════════════════╝" -ForegroundColor DarkCyan
 Write-Host "  Setup: work-windows (Claude only, no Docker)"
 Write-Host "  Root:  $RepoRoot"
@@ -106,7 +106,7 @@ Require-NodeVersion 18
 Require "npm"   "bundled with Node.js"
 Require "cargo" "https://rustup.rs"
 
-# Port check for the harkonnen serve port (3000). Informational — does not block install.
+# Port check for the harkonnen serve port (3000). Informational - does not block install.
 Check-Port 3000 "harkonnen serve" | Out-Null
 
 # ── 2. ANTHROPIC_API_KEY ──────────────────────────────────────────────────────
@@ -135,7 +135,7 @@ if (-not $env:ANTHROPIC_API_KEY) {
         $env:ANTHROPIC_API_KEY = $key.Trim()
         Ok "Key accepted for this session"
     } else {
-        Warn "Skipping — setup check will report MISSING until you set ANTHROPIC_API_KEY"
+        Warn "Skipping - setup check will report MISSING until you set ANTHROPIC_API_KEY"
     }
 } else {
     Ok "ANTHROPIC_API_KEY is set"
@@ -155,7 +155,7 @@ if (-not (Test-Path $EnvFile)) {
         Ok "Created minimal .env"
     }
 } else {
-    Ok ".env already exists — not overwritten"
+    Ok ".env already exists - not overwritten"
 }
 
 # Ensure HARKONNEN_SETUP is in the file
@@ -187,7 +187,7 @@ foreach ($pkg in $packages) {
 }
 
 if ($script:McpFailures -gt 0) {
-    Warn "$($script:McpFailures) MCP package(s) failed to install — Claude Code MCP tools will not work until resolved"
+    Warn "$($script:McpFailures) MCP package(s) failed to install - Claude Code MCP tools will not work until resolved"
 }
 
 # ── 6. Build harkonnen binary ─────────────────────────────────────────────────
@@ -205,7 +205,7 @@ if ($Release) {
 }
 
 if (-not (Test-Path $BinPath)) {
-    Fail "Build failed — harkonnen.exe not found at $BinPath"
+    Fail "Build failed - harkonnen.exe not found at $BinPath"
 }
 Ok "Binary: $BinPath"
 
@@ -267,7 +267,7 @@ $McpBlock = [ordered]@{
 }
 
 if (Test-Path $ClaudeSettings) {
-    # Merge into existing file — guard against malformed JSON
+    # Merge into existing file - guard against malformed JSON
     $rawJson = Get-Content $ClaudeSettings -Raw
     $existing = $null
     try {
@@ -276,7 +276,7 @@ if (Test-Path $ClaudeSettings) {
         Warn "settings.local.json exists but could not be parsed: $_"
         $backup = "$ClaudeSettings.bak"
         Copy-Item $ClaudeSettings $backup -Force
-        Warn "Backed up to $backup — will overwrite with a fresh config"
+        Warn "Backed up to $backup - will overwrite with a fresh config"
     }
 
     if ($null -ne $existing) {
@@ -312,32 +312,32 @@ Write-Host ""
 
 Write-Host "  What is working now:" -ForegroundColor White
 @(
-    "harkonnen spec validate <file>          — Scout: parse and validate specs",
-    "harkonnen run start <spec> --product X  — create a run record + workspace",
-    "harkonnen run status <id>               — check run status",
-    "harkonnen run report <id>               — print run report",
-    "harkonnen artifact package <id>         — package artifacts",
-    "harkonnen memory init / index           — Coobie: seed + rebuild memory index",
-    "harkonnen setup check                   — verify providers + MCP servers",
-    "MCP: memory, filesystem, sqlite         — available to Claude Code"
+    "harkonnen spec validate <file>          - Scout: parse and validate specs",
+    "harkonnen run start <spec> --product X  - create a run record + workspace",
+    "harkonnen run status <id>               - check run status",
+    "harkonnen run report <id>               - print run report",
+    "harkonnen artifact package <id>         - package artifacts",
+    "harkonnen memory init / index           - Coobie: seed + rebuild memory index",
+    "harkonnen setup check                   - verify providers + MCP servers",
+    "MCP: memory, filesystem, sqlite         - available to Claude Code"
 ) | ForEach-Object { Write-Host "    [+] $_" -ForegroundColor Green }
 
 Write-Host ""
 Write-Host ""
 Write-Host "  Working now, beyond the factory spine:" -ForegroundColor White
 @(
-    "Provider-aware LLM routing  — Scout, Mason, Piper, Bramble, and Ash can call configured providers with fallback paths",
-    "Hidden scenarios            — protected scenario files are evaluated through the Rust run pipeline",
-    "Digital twin manifests      — Ash provisions a safe local twin manifest with dependency stubs and optional narrative",
-    "Coordination API            — Keeper file claims, heartbeats, and conflict policy are available through harkonnen serve",
-    "Pack Board UI               — React/Vite UI and API-backed run detail views exist in the repo",
-    "Claude pack export          — setup claude-pack can stamp another repo with Labradors, context, and MCP wiring"
+    "Provider-aware LLM routing  - Scout, Mason, Piper, Bramble, and Ash can call configured providers with fallback paths",
+    "Hidden scenarios            - protected scenario files are evaluated through the Rust run pipeline",
+    "Digital twin manifests      - Ash provisions a safe local twin manifest with dependency stubs and optional narrative",
+    "Coordination API            - Keeper file claims, heartbeats, and conflict policy are available through harkonnen serve",
+    "Pack Board UI               - React/Vite UI and API-backed run detail views exist in the repo",
+    "Claude pack export          - setup claude-pack can stamp another repo with Labradors, context, and MCP wiring"
 ) | ForEach-Object { Write-Host "    [+] $_" -ForegroundColor Green }
 
 Write-Host ""
 Write-Host "  Still optional or still evolving:" -ForegroundColor White
 @(
-    "Direct Claude cowork spawning from the Rust orchestrator is not wired yet — the Claude pack exporter is the handoff path today",
+    "Direct Claude cowork spawning from the Rust orchestrator is not wired yet - the Claude pack exporter is the handoff path today",
     "Richer black-box hidden scenarios beyond artifact/event checks can still be expanded",
     "WinCC OA MCP integration depends on the target machine and project environment",
     "Coobie semantic memory and DeepCausality phase 2 remain future upgrades"
@@ -345,7 +345,7 @@ Write-Host "  Still optional or still evolving:" -ForegroundColor White
 
 Write-Host ""
 Write-Host "  Next steps:" -ForegroundColor White
-Write-Host "    1. Restart Claude Code — it will pick up the new MCP servers"
+Write-Host "    1. Restart Claude Code - it will pick up the new MCP servers"
 Write-Host "    2. Validate the factory: harkonnen spec validate factory\specs\examples\sample_feature.yaml"
 Write-Host '    3. Export a Labrador pack into SPO: harkonnen setup claude-pack --target-path <path-to-SPO> --project-name SPO --project-type winccoa --domain "Siemens WinCC OA / industrial automation" --summary "SPO is a WinCC OA based Siemens product operated through a Claude-only Labrador pack." --winccoa'
 Write-Host "    4. Launch the Pack Board: .\scripts\launch-pack-board-windows.ps1 -OpenBrowser"

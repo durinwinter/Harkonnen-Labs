@@ -1,4 +1,4 @@
-# Harkonnen Labs — Windows Pack Board launcher
+# Harkonnen Labs - Windows Pack Board launcher
 # Starts the Rust API and the Vite Pack Board against the work-windows setup.
 #
 # Usage (PowerShell, from repo root or anywhere):

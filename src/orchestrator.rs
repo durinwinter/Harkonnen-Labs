@@ -1783,14 +1783,24 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         target_source: &TargetSourceMetadata,
         query_terms: &[String],
         domain_signals: &[String],
-    ) -> Result<(Vec<CoobieEvidenceCitation>, Vec<CoobieEvidenceCitation>)> {
+    ) -> Result<(Vec<CoobieEvidenceCitation>, Vec<CoobieEvidenceCitation>, Vec<CoobieEvidenceCitation>)> {
+        let resume_packet = self.load_project_resume_packet(target_source).await?;
         let exploration = self
             .collect_relevant_exploration_citations(spec_obj, target_source, query_terms, domain_signals)
             .await?;
         let strategy = self
             .collect_relevant_strategy_register_citations(spec_obj, target_source, query_terms, domain_signals)
             .await?;
-        Ok((exploration, strategy))
+        let mitigation = self
+            .collect_relevant_mitigation_history_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+                &resume_packet.stale_memory,
+            )
+            .await?;
+        Ok((exploration, strategy, mitigation))
     }
 
     async fn collect_relevant_exploration_citations(
@@ -1872,6 +1882,111 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         Ok(scored.into_iter().map(|(_, _, citation)| citation).take(3).collect())
     }
 
+    async fn collect_relevant_mitigation_history_citations(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        query_terms: &[String],
+        domain_signals: &[String],
+        current_risks: &[ProjectResumeRisk],
+    ) -> Result<Vec<CoobieEvidenceCitation>> {
+        let history = self.load_project_stale_memory_history(target_source).await?;
+        if history.records.is_empty() {
+            return Ok(Vec::new());
+        }
+
+        let current_risk_ids = current_risks
+            .iter()
+            .map(|risk| risk.memory_id.as_str())
+            .collect::<HashSet<_>>();
+        let mut scored = Vec::<(i32, String, CoobieEvidenceCitation)>::new();
+
+        for record in history.records.iter().rev().take(12) {
+            for entry in &record.entries {
+                let haystack = format!(
+                    "{} {} {} {} {} {} {} {} {} {}",
+                    record.spec_id,
+                    record.product,
+                    entry.memory_id,
+                    entry.severity,
+                    entry.severity_score,
+                    entry.status,
+                    entry.mitigation_steps.join(" "),
+                    entry.related_checks.join(" "),
+                    entry.evidence.join(" "),
+                    record.resolved_since_previous.join(" ")
+                );
+                let mut score = score_briefing_evidence(
+                    &haystack,
+                    &spec_obj.id,
+                    &target_source.label,
+                    query_terms,
+                    domain_signals,
+                );
+                if record.spec_id == spec_obj.id {
+                    score += 8;
+                }
+                if current_risk_ids.contains(entry.memory_id.as_str()) {
+                    score += 12;
+                }
+                if entry.risk_reduced_from_previous == Some(true) {
+                    score += 4;
+                }
+                if entry.status == "unresolved" {
+                    score += 3;
+                }
+                if score <= 0 {
+                    continue;
+                }
+                scored.push((
+                    score,
+                    record.generated_at.clone(),
+                    CoobieEvidenceCitation {
+                        citation_id: format!("mitigation:{}:{}", record.run_id, entry.memory_id),
+                        source_type: "stale_memory_history".to_string(),
+                        run_id: record.run_id.clone(),
+                        episode_id: None,
+                        phase: "stale_memory_followup".to_string(),
+                        agent: "coobie".to_string(),
+                        summary: format!(
+                            "memory {} was {} at severity {} score {}",
+                            entry.memory_id, entry.status, entry.severity, entry.severity_score
+                        ),
+                        evidence: format!(
+                            "previous_score={}; reduced_from_previous={}; mitigation_steps={}; related_checks={}; evidence={}",
+                            entry
+                                .previous_severity_score
+                                .map(|value| value.to_string())
+                                .unwrap_or_else(|| "none".to_string()),
+                            entry
+                                .risk_reduced_from_previous
+                                .map(|value| if value { "true" } else { "false" }.to_string())
+                                .unwrap_or_else(|| "unknown".to_string()),
+                            if entry.mitigation_steps.is_empty() {
+                                "none".to_string()
+                            } else {
+                                entry.mitigation_steps.join(" | ")
+                            },
+                            if entry.related_checks.is_empty() {
+                                "none".to_string()
+                            } else {
+                                entry.related_checks.join(" | ")
+                            },
+                            if entry.evidence.is_empty() {
+                                "none".to_string()
+                            } else {
+                                entry.evidence.join(" | ")
+                            }
+                        ),
+                    },
+                ));
+            }
+        }
+
+        scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(4).collect())
+    }
+
     async fn collect_relevant_strategy_register_citations(
         &self,
         spec_obj: &Spec,
@@ -1945,10 +2060,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
     ) -> Result<CoobieBriefing> {
         let relevant_lessons = self.find_relevant_lessons(query_terms, domain_signals).await?;
         let prior_causes = self.summarize_prior_causes(5).await?;
-        let resume_packet = self.load_project_resume_packet(target_source).await?;
-        let (exploration_citations, strategy_register_citations) = self
+        let (exploration_citations, strategy_register_citations, mitigation_history_citations) = self
             .collect_briefing_evidence_citations(spec_obj, target_source, query_terms, domain_signals)
             .await?;
+        let resume_packet = self.load_project_resume_packet(target_source).await?;
         let prior_report_count = sqlx::query(
             "SELECT COUNT(DISTINCT run_id) AS cnt FROM causal_hypotheses",
         )
@@ -1958,7 +2073,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         let application_risks = build_application_risks(spec_obj, domain_signals, &memory_context.memory_hits, &prior_causes);
         let environment_risks = build_environment_risks(spec_obj, domain_signals);
         let regulatory_considerations = build_regulatory_considerations(spec_obj, domain_signals);
-        let stale_memory_mitigation_plan = build_stale_memory_mitigation_plan(&resume_packet.stale_memory);
+        let mut stale_memory_mitigation_plan = build_stale_memory_mitigation_plan(&resume_packet.stale_memory);
         let mut recommended_guardrails = build_recommended_guardrails(
             spec_obj,
             domain_signals,
@@ -1979,6 +2094,12 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             &mut required_checks,
             &mut open_questions,
         );
+        apply_mitigation_history_context(
+            &mitigation_history_citations,
+            &mut stale_memory_mitigation_plan,
+            &mut recommended_guardrails,
+            &mut open_questions,
+        );
 
         let mut briefing = CoobieBriefing {
             spec_id: spec_obj.id.clone(),
@@ -1994,6 +2115,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             stale_memory_mitigation_plan,
             exploration_citations,
             strategy_register_citations,
+            mitigation_history_citations,
             relevant_lessons,
             prior_causes,
             project_components: spec_obj.project_components.clone(),
@@ -5011,6 +5133,44 @@ fn apply_stale_memory_mitigations(
 
     recommended_guardrails.dedup();
     required_checks.dedup();
+    open_questions.dedup();
+}
+
+fn apply_mitigation_history_context(
+    citations: &[CoobieEvidenceCitation],
+    stale_memory_mitigation_plan: &mut Vec<String>,
+    recommended_guardrails: &mut Vec<String>,
+    open_questions: &mut Vec<String>,
+) {
+    if citations.is_empty() {
+        return;
+    }
+
+    for citation in citations.iter().take(3) {
+        stale_memory_mitigation_plan.push(format!(
+            "Reuse prior mitigation evidence: {} ({})",
+            citation.summary, citation.evidence
+        ));
+    }
+    if citations
+        .iter()
+        .any(|citation| citation.evidence.contains("reduced_from_previous=true"))
+    {
+        recommended_guardrails.push(
+            "When a prior stale-memory mitigation reduced severity, preserve that check path instead of rediscovering it from scratch.".to_string(),
+        );
+    }
+    if citations
+        .iter()
+        .any(|citation| citation.summary.contains("unresolved"))
+    {
+        open_questions.push(
+            "Which stale-memory mitigation remained unresolved on the last comparable run, and what evidence is still missing?".to_string(),
+        );
+    }
+
+    stale_memory_mitigation_plan.dedup();
+    recommended_guardrails.dedup();
     open_questions.dedup();
 }
 

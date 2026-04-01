@@ -169,6 +169,8 @@ pub struct CoobieBriefing {
     pub exploration_citations: Vec<CoobieEvidenceCitation>,
     #[serde(default)]
     pub strategy_register_citations: Vec<CoobieEvidenceCitation>,
+    #[serde(default)]
+    pub mitigation_history_citations: Vec<CoobieEvidenceCitation>,
     pub relevant_lessons: Vec<LessonRecord>,
     pub prior_causes: Vec<PriorCauseSignal>,
     pub project_components: Vec<ProjectComponent>,

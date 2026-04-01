@@ -19,6 +19,7 @@ principles:
   - local_first: All state (specs, runs, artifacts, memory) is owned locally
   - role_separation: Each agent has bounded tools and responsibilities
   - compound_learning: Every run makes future runs better via Coobie
+  - outer_factory_truth: Worker harnesses may assist, but Harkonnen owns policy, hidden evaluation, memory truth, and acceptance
 
 status:
   implemented:
@@ -41,10 +42,19 @@ status:
     - Keeper coordination API with file-claim conflict detection and heartbeats
     - Pack Board web UI (React/Vite) with agent grid, timeline, policy board
     - project-scoped scenario blueprints with code-under-test/oracle/dataset components
+    - repo-local project memory under `.harkonnen/project-memory/` plus core/project memory split
+    - repo-local project scan, strategy register, memory status, resume packet, and stale-memory history
+    - exploration log and dead-end registry with Coobie evidence citations
+    - stale-memory severity scoring, mitigation plans, and mitigation-outcome tracking
     - RunDetailDrawer with causal, timeline, agents, lessons tabs
     - CausalReportPanel and ValidationPanel components
   planned:
     - DeepCausality integration (Phase 2 causal engine)
+    - OpenAgent-style worker adapter with bounded task envelopes and allowed/denied path policy
+    - formal pre-execution plan-quality pipeline: draft, gap review, ruthless review, Coobie critique, execution
+    - worker-session continuity separated from factory truth and acceptance state
+    - hierarchical repo-local context and skill bundles for external codebases
+    - safer hash-anchored or drift-resistant edit protocol for external repos
     - Ash LLM call for twin environment narrative
     - Semantic memory indexing via AnythingLLM or MCP memory
     - Pack Board: run-start trigger from UI

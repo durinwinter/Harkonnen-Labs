@@ -679,6 +679,9 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 ## Strategy Register Evidence Coobie Is Citing
 {}
 
+## Prior Mitigation Outcomes Coobie Is Citing
+{}
+
 ## Guardrails I Want The Pack To Follow
 {}
 
@@ -729,6 +732,10 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
         render_citations(
             &briefing.strategy_register_citations,
             "No strategy-register entries were elevated for this run yet.",
+        ),
+        render_citations(
+            &briefing.mitigation_history_citations,
+            "No prior stale-memory mitigation outcomes were elevated for this run yet.",
         ),
         render_bullet_lines(
             &briefing.recommended_guardrails,

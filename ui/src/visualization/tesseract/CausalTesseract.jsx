@@ -10,9 +10,47 @@ import ClusterHull       from './components/ClusterHull';
 import DetailPanel       from './components/DetailPanel';
 import { useLensMode, LENS_MODES } from './hooks/useLensMode';
 import { useSceneSelection } from './hooks/useSceneSelection';
-import { buildScene, EXAMPLE_SCENE } from './scene/scene-builder';
+import { EXAMPLE_SCENE } from './scene/scene-builder';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+
+/**
+ * The Rust handler serialises with serde rename_all = "camelCase" and
+ * explicit #[serde(rename = "observedPosition3D")] / "inferredPosition3D" /
+ * "position3D".  Map any remaining snake_case fields that the Three.js
+ * components reference by their JS-side names.
+ */
+function normalizeScene(raw) {
+  const episodeNodes = (raw.episodeNodes ?? []).map((ep) => ({
+    ...ep,
+    // positions arrive as arrays [x,y,z] — keep as-is
+    observedPosition3D: ep.observedPosition3D ?? ep.observed_position_3d ?? [0, 0, 0],
+    inferredPosition3D: ep.inferredPosition3D ?? ep.inferred_position_3d ?? [0, 0, 0],
+    primaryCauseType:   ep.primaryCauseType   ?? ep.primary_cause_type   ?? 'context_gap',
+    primaryCauseText:   ep.primaryCauseText   ?? ep.primary_cause_text   ?? null,
+    rawScores:          ep.rawScores          ?? ep.raw_scores           ?? null,
+    interventionPotential: ep.interventionPotential ?? ep.intervention_potential ?? 0.5,
+    interventions:      ep.interventions      ?? [],
+    contributingCauses: ep.contributingCauses ?? ep.contributing_causes  ?? [],
+  }));
+
+  const causeNodes = (raw.causeNodes ?? []).map((c) => ({
+    ...c,
+    position3D:        c.position3D  ?? c.position_3d  ?? [0, 0, 0],
+    causeType:         c.causeType   ?? c.cause_type   ?? c.type ?? 'context_gap',
+    type:              c.causeType   ?? c.cause_type   ?? c.type ?? 'context_gap',
+    supportingRunIds:  c.supportingRunIds ?? c.supporting_run_ids ?? [],
+    interventions:     c.interventions   ?? [],
+  }));
+
+  return {
+    episodeNodes,
+    causeNodes,
+    interventionNodes: raw.interventionNodes ?? [],
+    edges:    raw.edges    ?? [],
+    clusters: raw.clusters ?? [],
+  };
+}
 
 /** Ambient + fill lighting for the scene. */
 function SceneLights() {
@@ -40,18 +78,15 @@ export default function CausalTesseract({ onClose }) {
 
     const load = async () => {
       try {
-        const runs = await fetch(`${API_BASE}/runs`).then((r) => r.json());
-        const runReports = await Promise.all(
-          runs.slice(0, 24).map((run) =>
-            fetch(`${API_BASE}/runs/${run.run_id}/causal-report`)
-              .then((r) => (r.ok ? r.json() : null))
-              .then((report) => ({ run, report }))
-              .catch(() => ({ run, report: null })),
-          ),
-        );
+        const scene = await fetch(`${API_BASE}/tesseract/scene`).then((r) => {
+          if (!r.ok) throw new Error(`${r.status}`);
+          return r.json();
+        });
         if (!cancelled) {
-          setScene(buildScene(runReports));
-          setIsDemo(false);
+          // Normalize camelCase field names from Rust serde output
+          const normalized = normalizeScene(scene);
+          setScene(normalized.episodeNodes.length > 0 ? normalized : EXAMPLE_SCENE);
+          setIsDemo(normalized.episodeNodes.length === 0);
           setLoading(false);
         }
       } catch {

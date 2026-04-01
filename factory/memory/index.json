@@ -197,8 +197,47 @@
         "factory"
       ],
       "summary": "Coobie roadmap for causaloid-driven reasoning across application and environment layers",
-      "content": "# Coobie Causaloid Roadmap\n\nPurpose: move Coobie from heuristic after-action diagnosis toward reusable causal reasoning that spans application behavior, runtime environment, and regulatory context.\n\nPriority items:\n- Model application-level and environment-level causes together instead of treating them as separate stories.\n- Add industrial signals for timing, burst data loss, PLC acknowledgement drift, historian lag, SCADA alarm semantics, simulator fidelity, and degraded-mode transitions.\n- Treat regulatory constraints such as GMP, GxP, audit trails, and validation evidence as first-class causal factors rather than late reporting concerns.\n- Promote active causaloids into preflight guardrails so Coobie affects planning before Scout, Mason, Ash, Bramble, and Sable act.\n- Evolve from simple scalar thresholds toward richer contextual hypergraphs and policy-aware propagation when the domain requires it.\n\nExpected outcome:\n- Coobie can explain not only what failed, but which environmental conditions and policy constraints made the failure likely and which intervention should be tried next.\n",
-      "created_at": "2026-04-01T01:40:02.878387676+00:00",
+      "content": "# Coobie Causaloid Roadmap\n\nPurpose: move Coobie from heuristic after-action diagnosis toward reusable causal reasoning that spans application behavior, runtime environment, regulatory context, and worker-plan quality.\n\nPriority items:\n- Model application-level and environment-level causes together instead of treating them as separate stories.\n- Add industrial signals for timing, burst data loss, PLC acknowledgement drift, historian lag, SCADA alarm semantics, simulator fidelity, and degraded-mode transitions.\n- Treat regulatory constraints such as GMP, GxP, audit trails, and validation evidence as first-class causal factors rather than late reporting concerns.\n- Promote active causaloids into preflight guardrails so Coobie affects planning before Scout, Mason, Ash, Bramble, and Sable act.\n- Critique worker plans before execution: if a planner ignores known causal hazards, stale memories, or hidden-scenario failure modes, Coobie should block or revise the plan.\n- Track worker-harness failures as causal objects too: insufficient exploration, unverified execution, poor tool isolation, and weak evidence should become reusable cause categories.\n- Evolve from simple scalar thresholds toward richer contextual hypergraphs and policy-aware propagation when the domain requires it.\n\nExpected outcome:\n- Coobie can explain not only what failed, but which environmental conditions, worker-plan decisions, and policy constraints made the failure likely and which intervention should be tried next.\n",
+      "created_at": "2026-04-01T15:20:15.187773044+00:00",
+      "provenance": {
+        "source_label": null,
+        "source_kind": null,
+        "source_path": null,
+        "source_run_id": null,
+        "source_spec_id": null,
+        "git_branch": null,
+        "git_commit": null,
+        "git_remote": null,
+        "evidence_run_ids": [],
+        "stale_when": [],
+        "observed_paths": [],
+        "code_under_test_paths": [],
+        "observed_surfaces": [],
+        "status": null,
+        "superseded_by": null,
+        "challenged_by": []
+      },
+      "recall_count": 0,
+      "last_recalled": null,
+      "loaded_for_run_count": 0,
+      "contributed_to_success_count": 0,
+      "contributed_to_failure_count": 0
+    },
+    {
+      "id": "coobie-openagent-roadmap",
+      "tags": [
+        "coobie",
+        "roadmap",
+        "openagent",
+        "worker-harness",
+        "planning",
+        "universal",
+        "cross-project",
+        "factory"
+      ],
+      "summary": "Coobie roadmap for borrowing OpenAgent-style worker-harness ideas without surrendering Harkonnen truth",
+      "content": "# Coobie OpenAgent Roadmap\n\nPurpose: borrow the strongest orchestration mechanics from OpenAgent while keeping Harkonnen as the outer factory governor.\n\nPriority items:\n- Treat any OpenAgent-like system as an inner worker harness for exploration, planning, execution, and visible verification only.\n- Keep hidden scenarios, policy, causal memory, digital-twin truth, and release acceptance outside the worker harness.\n- Add a bounded worker adapter that hands the harness an explicit task envelope with allowed paths, denied paths, visible success conditions, and required return artifacts.\n- Build a pre-execution quality gate: Scout draft plan, gap review, ruthless plan review, Coobie causal critique, then Mason or worker execution.\n- Preserve worker continuity in a separate state file so resumability helps long jobs without replacing Harkonnen's run DB, blackboard, or artifact truth.\n- Add hierarchical repo-local context and skill bundles under `.harkonnen/` so external repos can preload focused context into the worker harness.\n- Explore safer edit substrates inspired by hash-anchored editing so external-codebase modifications fail closed when context drifts.\n\nExpected outcome:\n- Harkonnen can use an OpenAgent-style forge for disciplined planning and execution while Coobie, Sable, Keeper, Ash, and Flint still decide what is true, allowed, hidden, and accepted.\n",
+      "created_at": "2026-04-01T15:20:15.188086424+00:00",
       "provenance": {
         "source_label": null,
         "source_kind": null,
@@ -236,8 +275,8 @@
         "factory"
       ],
       "summary": "Coobie roadmap for Residue-style exploration discipline and dead-end retention",
-      "content": "# Coobie Residue Roadmap\n\nPurpose: preserve structural learning from failed attempts so the pack stops rediscovering the same constraints.\n\nPriority items:\n- Treat `exploration_log.json` and `exploration_log.md` as first-class evidence artifacts for every substantive run.\n- Preserve each attempt as strategy, outcome, failure constraint, surviving structure, reformulation, artifacts, parameters, and open questions.\n- Maintain a machine-readable strategy register in `factory/state/dead_ends.json` so routing and retries can respect prior dead ends.\n- Synthesize exploration patterns into lessons during consolidation instead of leaving them as inert logs.\n- Require retries to declare what changed relative to the previous failed strategy before claiming progress.\n\nExpected outcome:\n- Harkonnen learns from structure, not just outcomes, and Coobie can steer the pack away from known dead ends on the next run.\n",
-      "created_at": "2026-04-01T01:40:02.878435396+00:00",
+      "content": "# Coobie Residue Roadmap\n\nPurpose: preserve structural learning from failed attempts so the pack stops rediscovering the same constraints.\n\nPriority items:\n- Treat `exploration_log.json` and `exploration_log.md` as first-class evidence artifacts for every substantive run.\n- Preserve each attempt as strategy, outcome, failure constraint, surviving structure, reformulation, artifacts, parameters, and open questions.\n- Maintain a machine-readable strategy register in `factory/state/dead_ends.json` so routing and retries can respect prior dead ends.\n- Synthesize exploration patterns into lessons during consolidation instead of leaving them as inert logs.\n- Require retries to declare what changed relative to the previous failed strategy before claiming progress.\n- Add a formal plan-review residue chain before execution: initial plan, gap analysis, ruthless review, Coobie critique, and final bounded execution plan should all leave evidence.\n- Preserve worker-session continuity separately from factory truth so resumability helps execution without becoming the acceptance authority.\n- Record which mitigation steps actually reduced stale-memory severity so the next run can reuse successful evidence paths instead of merely re-reading the same warning.\n\nExpected outcome:\n- Harkonnen learns from structure, not just outcomes, and Coobie can steer the pack away from known dead ends on the next run while proving which remediation path actually worked.\n",
+      "created_at": "2026-04-01T15:20:15.187871014+00:00",
       "provenance": {
         "source_label": null,
         "source_kind": null,
@@ -275,8 +314,8 @@
         "factory"
       ],
       "summary": "Coobie roadmap for self-tuning memory manifests inspired by Solitaire-for-Agents",
-      "content": "# Coobie Solitaire-for-Agents Roadmap\n\nPurpose: make memory retrieval self-correcting so the most useful project and core memories arrive in context before work begins.\n\nPriority items:\n- Keep product-local memory in the repo under `.harkonnen/project-memory/` and retain only cross-project learnings in Harkonnen core memory.\n- Track which memory entries were loaded, recalled, and associated with successful or failed runs.\n- Rank retrieval by demonstrated usefulness rather than keyword match alone.\n- Preload likely-relevant project memory, core memory, prior dead ends, and proven success patterns before planning begins.\n- Capture lightweight agent-behavior lessons when a role repeatedly over-plans, under-validates, or skips evidence.\n\nExpected outcome:\n- Coobie becomes a practical long-memory Labrador for the pack: concise, anticipatory, and increasingly better at surfacing the right lessons before the run drifts.\n",
-      "created_at": "2026-04-01T01:40:02.878476336+00:00",
+      "content": "# Coobie Solitaire-for-Agents Roadmap\n\nPurpose: make memory retrieval self-correcting so the most useful project and core memories arrive in context before work begins.\n\nPriority items:\n- Keep product-local memory in the repo under `.harkonnen/project-memory/` and retain only cross-project learnings in Harkonnen core memory.\n- Track which memory entries were loaded, recalled, and associated with successful or failed runs.\n- Rank retrieval by demonstrated usefulness rather than keyword match alone.\n- Preload likely-relevant project memory, core memory, prior dead ends, and proven success patterns before planning begins.\n- Capture lightweight agent-behavior lessons when a role repeatedly over-plans, under-validates, or skips evidence.\n- Distinguish worker-session memory from Coobie memory: resumable harness state is short-horizon convenience, while Coobie remains the durable causal source of truth.\n- Preload hierarchical repo-local context and scoped skill bundles so external worker harnesses start informed without reading the whole world.\n- Feed prior mitigation outcomes back into memory ranking so revalidated memories earn trust and unresolved memories are surfaced with stronger caution.\n\nExpected outcome:\n- Coobie becomes a practical long-memory Labrador for the pack: concise, anticipatory, increasingly better at surfacing the right lessons before the run drifts, and careful about what belongs to worker convenience versus durable factory truth.\n",
+      "created_at": "2026-04-01T15:20:15.187941504+00:00",
       "provenance": {
         "source_label": null,
         "source_kind": null,
@@ -559,8 +598,8 @@
         "workflow"
       ],
       "summary": "Separate project-local learnings from Harkonnen core memory; promote only strong cross-project patterns into the core store.",
-      "content": "Coobie should maintain a two-layer durable memory model.\n\n- Project memory lives with the active repo in `.harkonnen/project-memory/` and should hold repo-specific truths, runtime facts, oracle semantics, and local failure modes.\n- Core memory in `factory/memory/` should retain only strong cross-project lessons, universal factory patterns, and durable guardrails.\n- Runs should retrieve both layers, but new repo-specific run summaries and lessons should be written back to project memory by default.\n",
-      "created_at": "2026-04-01T01:09:25.862470964+00:00",
+      "content": "Coobie should maintain a layered durable memory model.\n\n- Project memory lives with the active repo in `.harkonnen/project-memory/` and should hold repo-specific truths, runtime facts, oracle semantics, local failure modes, and validated mitigation outcomes.\n- Core memory in `factory/memory/` should retain only strong cross-project lessons, universal factory patterns, and durable guardrails.\n- Worker-harness session memory or resumable state should stay separate from both layers; it is execution convenience, not durable causal truth.\n- Runs should retrieve both durable layers, but new repo-specific run summaries and lessons should be written back to project memory by default.\n- Promote a lesson into core memory only after repeated confirmation across scenarios or products, not merely because a single external repo used it successfully.\n",
+      "created_at": "2026-04-01T15:20:15.188008944+00:00",
       "provenance": {
         "source_label": null,
         "source_kind": null,

@@ -11,14 +11,35 @@ patterns:
     optional_components:
       - runtime_api
       - evidence_artifact
+      - worker_harness
     factory_expectations:
       - Scout frames the run as a scenario over product-owned components instead of a factory-owned feature build.
-      - Coobie retrieves project memory topics before planning and turns them into guardrails, checks, and open questions.
+      - Coobie retrieves project memory topics before planning and turns them into guardrails, checks, open questions, and mitigation reuse.
       - Mason changes only the code-under-test component unless the spec explicitly scopes oracle or tooling work.
       - Bramble runs visible build/test validation plus the reference-oracle comparison command sequence.
       - Ash may read declared product runtime APIs, but coordination and run truth still come from the Harkonnen backend.
       - Sable judges generated evidence artifacts against hidden scenario rules without rewriting the scenario to fit the output.
       - Flint packages the oracle inputs, comparison artifacts, Coobie summaries, and scenario verdict into the run bundle.
+  bounded_worker_forge:
+    description: >
+      Harkonnen delegates visible exploration, planning, and execution to a
+      bounded inner worker harness while retaining memory truth, hidden
+      scenarios, policy, twin judgment, and final acceptance outside the
+      harness.
+    required_components:
+      - code_under_test
+      - worker_harness
+    optional_components:
+      - runtime_api
+      - reference_oracle
+      - dataset
+      - evidence_artifact
+    factory_expectations:
+      - Scout and Coobie prepare a bounded task envelope with explicit allowed paths, denied paths, visible success conditions, and required return artifacts.
+      - The worker harness may explore, plan, execute, and run visible verification, but it cannot access hidden scenarios, Keeper policy internals, or Coobie's core causal memory directly.
+      - Coobie critiques the plan before execution and can require plan revisions when known dead ends, stale memories, or causal hazards are ignored.
+      - Worker-session continuity remains a harness concern; Harkonnen DB state, blackboard truth, and acceptance state remain external and authoritative.
+      - Bramble, Ash, Sable, Keeper, and Flint still perform independent factory-owned evaluation after the harness returns artifacts.
 component_roles:
   code_under_test:
     meaning: Product-owned code or configuration that Harkonnen may change during the run.
@@ -30,6 +51,8 @@ component_roles:
     meaning: Product-owned live API or protocol surface that Ash may observe for twin facts.
   evidence_artifact:
     meaning: Generated report or bundle that Sable can judge as hidden acceptance evidence.
+  worker_harness:
+    meaning: External planning/execution substrate used as a bounded inner forge, never the source of policy, hidden truth, or acceptance.
 examples:
   - spec: factory/specs/examples/lamdet_algorithm_parity.yaml
     pattern: reference_oracle_regression
@@ -37,3 +60,8 @@ examples:
       - Ceres Station is the code under test.
       - LamDet Python is the external oracle.
       - The CSV corpus is the preserved dataset bundle.
+  - spec: conceptual
+    pattern: bounded_worker_forge
+    notes:
+      - An OpenAgent-style planner/executor swarm is treated as the inner worker harness.
+      - Harkonnen remains the outer factory governor and acceptance authority.

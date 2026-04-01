@@ -12,6 +12,9 @@ Priority items:
 - Maintain a machine-readable strategy register in `factory/state/dead_ends.json` so routing and retries can respect prior dead ends.
 - Synthesize exploration patterns into lessons during consolidation instead of leaving them as inert logs.
 - Require retries to declare what changed relative to the previous failed strategy before claiming progress.
+- Add a formal plan-review residue chain before execution: initial plan, gap analysis, ruthless review, Coobie critique, and final bounded execution plan should all leave evidence.
+- Preserve worker-session continuity separately from factory truth so resumability helps execution without becoming the acceptance authority.
+- Record which mitigation steps actually reduced stale-memory severity so the next run can reuse successful evidence paths instead of merely re-reading the same warning.
 
 Expected outcome:
-- Harkonnen learns from structure, not just outcomes, and Coobie can steer the pack away from known dead ends on the next run.
+- Harkonnen learns from structure, not just outcomes, and Coobie can steer the pack away from known dead ends on the next run while proving which remediation path actually worked.

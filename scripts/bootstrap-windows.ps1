@@ -1,4 +1,4 @@
-# Harkonnen Labs — Windows bootstrap
+# Harkonnen Labs - Windows bootstrap
 # Sets up the work-windows setup: Claude only, MCP servers via npx, no Docker.
 #
 # Usage (run from repo root in an elevated PowerShell terminal):
@@ -14,12 +14,12 @@ param(
 $ErrorActionPreference = "Stop"
 
 Write-Host ""
-Write-Host "Harkonnen Labs — Windows Bootstrap"
+Write-Host "Harkonnen Labs - Windows Bootstrap"
 Write-Host "==================================="
 Write-Host "Base dir: $BaseDir"
 Write-Host ""
 
-# ── Prerequisites check ───────────────────────────────────────────────────────
+# -- Prerequisites check -------------------------------------------------------
 
 $missing = @()
 
@@ -41,7 +41,7 @@ Write-Host "  npm   $(npm   --version)"
 Write-Host "  cargo $(cargo --version)"
 Write-Host ""
 
-# ── Directories ───────────────────────────────────────────────────────────────
+# -- Directories ---------------------------------------------------------------
 
 $dirs = @(
     $BaseDir,
@@ -62,7 +62,7 @@ foreach ($d in $dirs) {
 Write-Host "Directories: ok"
 Write-Host ""
 
-# ── MCP servers (install globally so npx -y works offline) ───────────────────
+# -- MCP servers (install globally so npx -y works offline) -------------------
 
 Write-Host "Installing MCP servers..."
 
@@ -80,7 +80,7 @@ Write-Host ""
 Write-Host "MCP servers: ok"
 Write-Host ""
 
-# ── Environment file ──────────────────────────────────────────────────────────
+# -- Environment file ----------------------------------------------------------
 
 $envTarget = Join-Path (Get-Location) ".env"
 
@@ -91,12 +91,12 @@ if (-not (Test-Path $envTarget)) {
         Write-Host "Created .env from .env.example"
     }
 } else {
-    Write-Host ".env already exists — skipping"
+    Write-Host ".env already exists - skipping"
 }
 
 Write-Host ""
 
-# ── Summary ───────────────────────────────────────────────────────────────────
+# -- Summary -------------------------------------------------------------------
 
 Write-Host "Bootstrap complete."
 Write-Host ""

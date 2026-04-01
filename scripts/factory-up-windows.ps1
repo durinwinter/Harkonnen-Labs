@@ -26,7 +26,7 @@ $ErrorActionPreference = "Stop"
 $RepoRoot = Split-Path -Parent (Split-Path -Parent $MyInvocation.MyCommand.Path)
 Set-Location $RepoRoot
 
-# ── Helpers ───────────────────────────────────────────────────────────────────
+# -- Helpers -------------------------------------------------------------------
 
 function Step($msg) { Write-Host "`n  >> $msg" -ForegroundColor Cyan }
 function Ok($msg)   { Write-Host "     [ok] $msg"      -ForegroundColor Green }
@@ -36,7 +36,7 @@ function Info($msg) { Write-Host "          $msg" }
 
 function Require($cmd, $hint) {
     if (-not (Get-Command $cmd -ErrorAction SilentlyContinue)) {
-        Fail "Missing: $cmd  →  $hint"
+        Fail "Missing: $cmd  ->  $hint"
     }
     Ok "$cmd $(& $cmd --version 2>&1 | Select-Object -First 1)"
 }
@@ -45,11 +45,16 @@ function Require-NodeVersion($min) {
     if (-not (Get-Command node -ErrorAction SilentlyContinue)) {
         Fail "Node.js is required (v$min+). Install from https://nodejs.org"
     }
-    $raw = (node --version 2>&1) -replace '[^0-9].*', ''
-    if ([int]$raw -lt $min) {
-        Fail "Node.js v$min+ required (found: $(node --version)). Upgrade at https://nodejs.org"
+    $versionText = (& node --version 2>&1 | Select-Object -First 1).ToString().Trim()
+    $majorText = $versionText.TrimStart('v', 'V').Split('.')[0]
+    $major = 0
+    if (-not [int]::TryParse($majorText, [ref]$major)) {
+        Fail "Could not parse Node.js version from: $versionText"
     }
-    Ok "node $(node --version) - meets minimum v$min"
+    if ($major -lt $min) {
+        Fail "Node.js v$min+ required (found: $versionText). Upgrade at https://nodejs.org"
+    }
+    Ok "node $versionText - meets minimum v$min"
 }
 
 function Test-PortFree($port) {
@@ -71,8 +76,8 @@ function Check-Port($port, $label) {
 }
 
 function Npm-GlobalInstall($pkg) {
-    $installed = npm list -g --depth=0 2>$null | Select-String ([regex]::Escape($pkg))
-    if ($installed) {
+    $output = npm list -g --depth=0 $pkg 2>&1
+    if ($LASTEXITCODE -eq 0) {
         Ok "$pkg (already installed)"
         return
     }
@@ -80,8 +85,7 @@ function Npm-GlobalInstall($pkg) {
     $output = npm install --global $pkg 2>&1
     if ($LASTEXITCODE -ne 0) {
         Warn "npm install -g $pkg failed (exit $LASTEXITCODE)"
-        $output | Select-String "^npm (ERR!|WARN)" | Select-Object -First 5 |
-            ForEach-Object { Info $_.Line }
+        $output | Select-Object -First 5 | ForEach-Object { Info $_.ToString() }
         Info "Try running this terminal as Administrator, or set a user-writable prefix:"
         Info "  npm config set prefix `"$env:APPDATA\npm`""
         $script:McpFailures++
@@ -90,16 +94,16 @@ function Npm-GlobalInstall($pkg) {
     }
 }
 
-# ── Banner ────────────────────────────────────────────────────────────────────
+# -- Banner --------------------------------------------------------------------
 
 Write-Host ""
-Write-Host "  ╔══════════════════════════════════════════════╗" -ForegroundColor DarkCyan
-Write-Host "  ║   Harkonnen Labs - Windows Factory Bring-Up  ║" -ForegroundColor DarkCyan
-Write-Host "  ╚══════════════════════════════════════════════╝" -ForegroundColor DarkCyan
+Write-Host "  +==============================================+" -ForegroundColor DarkCyan
+Write-Host "  |   Harkonnen Labs - Windows Factory Bring-Up  |" -ForegroundColor DarkCyan
+Write-Host "  +==============================================+" -ForegroundColor DarkCyan
 Write-Host "  Setup: work-windows (Claude only, no Docker)"
 Write-Host "  Root:  $RepoRoot"
 
-# ── 1. Prerequisites ──────────────────────────────────────────────────────────
+# -- 1. Prerequisites ----------------------------------------------------------
 
 Step "Checking prerequisites"
 Require-NodeVersion 18
@@ -109,7 +113,7 @@ Require "cargo" "https://rustup.rs"
 # Port check for the harkonnen serve port (3000). Informational - does not block install.
 Check-Port 3000 "harkonnen serve" | Out-Null
 
-# ── 2. ANTHROPIC_API_KEY ──────────────────────────────────────────────────────
+# -- 2. ANTHROPIC_API_KEY ------------------------------------------------------
 
 Step "Resolving ANTHROPIC_API_KEY"
 
@@ -117,12 +121,16 @@ Step "Resolving ANTHROPIC_API_KEY"
 $EnvFile = Join-Path $RepoRoot ".env"
 if (Test-Path $EnvFile) {
     Get-Content $EnvFile | ForEach-Object {
-        if ($_ -match "^\s*([^#][^=]+)=(.+)$") {
-            $k = $matches[1].Trim()
-            $v = $matches[2].Trim()
-            if (-not [System.Environment]::GetEnvironmentVariable($k)) {
-                [System.Environment]::SetEnvironmentVariable($k, $v, "Process")
-            }
+        $line = $_.ToString()
+        if ([string]::IsNullOrWhiteSpace($line)) { return }
+        $trimmed = $line.Trim()
+        if ($trimmed.StartsWith('#')) { return }
+        $separator = $line.IndexOf('=')
+        if ($separator -lt 1) { return }
+        $k = $line.Substring(0, $separator).Trim()
+        $v = $line.Substring($separator + 1).Trim()
+        if (-not [string]::IsNullOrWhiteSpace($k) -and -not [System.Environment]::GetEnvironmentVariable($k)) {
+            [System.Environment]::SetEnvironmentVariable($k, $v, 'Process')
         }
     }
     Info "Loaded $EnvFile"
@@ -141,7 +149,7 @@ if (-not $env:ANTHROPIC_API_KEY) {
     Ok "ANTHROPIC_API_KEY is set"
 }
 
-# ── 3. Write .env ─────────────────────────────────────────────────────────────
+# -- 3. Write .env -------------------------------------------------------------
 
 Step "Writing .env"
 
@@ -160,18 +168,26 @@ if (-not (Test-Path $EnvFile)) {
 
 # Ensure HARKONNEN_SETUP is in the file
 $envContent = Get-Content $EnvFile
-if (-not ($envContent -match "HARKONNEN_SETUP")) {
+$hasSetup = $false
+foreach ($line in $envContent) {
+    $trimmed = $line.ToString().TrimStart()
+    if ($trimmed.StartsWith('HARKONNEN_SETUP=')) {
+        $hasSetup = $true
+        break
+    }
+}
+if (-not $hasSetup) {
     Add-Content $EnvFile "`nHARKONNEN_SETUP=work-windows"
     Info "Added HARKONNEN_SETUP=work-windows to .env"
 }
 
-# ── 4. Session environment ────────────────────────────────────────────────────
+# -- 4. Session environment ----------------------------------------------------
 
 Step "Setting session environment"
 $env:HARKONNEN_SETUP = "work-windows"
 Ok "HARKONNEN_SETUP=work-windows"
 
-# ── 5. Install MCP packages ───────────────────────────────────────────────────
+# -- 5. Install MCP packages ---------------------------------------------------
 
 Step "Installing MCP server packages (npm install -g)"
 
@@ -190,7 +206,7 @@ if ($script:McpFailures -gt 0) {
     Warn "$($script:McpFailures) MCP package(s) failed to install - Claude Code MCP tools will not work until resolved"
 }
 
-# ── 6. Build harkonnen binary ─────────────────────────────────────────────────
+# -- 6. Build harkonnen binary -------------------------------------------------
 
 Step "Building harkonnen binary"
 
@@ -209,7 +225,7 @@ if (-not (Test-Path $BinPath)) {
 }
 Ok "Binary: $BinPath"
 
-# ── Helper to run harkonnen ───────────────────────────────────────────────────
+# -- Helper to run harkonnen ---------------------------------------------------
 
 function Harkonnen {
     param([string[]]$Args)
@@ -219,13 +235,13 @@ function Harkonnen {
     }
 }
 
-# ── 7. Memory init (Coobie) ───────────────────────────────────────────────────
+# -- 7. Memory init (Coobie) ---------------------------------------------------
 
 Step "Initializing Coobie's memory  (harkonnen memory init)"
 
 Harkonnen "memory", "init"
 
-# ── 8. Setup check ────────────────────────────────────────────────────────────
+# -- 8. Setup check ------------------------------------------------------------
 
 Step "Verifying setup  (harkonnen setup check)"
 
@@ -233,7 +249,7 @@ Write-Host ""
 Harkonnen "setup", "check"
 Write-Host ""
 
-# ── 9. Write Claude Code MCP config ──────────────────────────────────────────
+# -- 9. Write Claude Code MCP config ------------------------------------------
 
 Step "Writing .claude/settings.local.json (MCP server config)"
 
@@ -302,12 +318,12 @@ if (Test-Path $ClaudeSettings) {
     Ok "Created $ClaudeSettings"
 }
 
-# ── 10. Summary ───────────────────────────────────────────────────────────────
+# -- 10. Summary ---------------------------------------------------------------
 
 Write-Host ""
-Write-Host "  ════════════════════════════════════════════════" -ForegroundColor DarkCyan
+Write-Host "  ================================================" -ForegroundColor DarkCyan
 Write-Host "  Factory spine is up." -ForegroundColor Green
-Write-Host "  ════════════════════════════════════════════════" -ForegroundColor DarkCyan
+Write-Host "  ================================================" -ForegroundColor DarkCyan
 Write-Host ""
 
 Write-Host "  What is working now:" -ForegroundColor White

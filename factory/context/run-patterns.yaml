@@ -1,0 +1,39 @@
+patterns:
+  reference_oracle_regression:
+    description: >
+      Harkonnen treats an external reference implementation plus preserved
+      datasets as the hidden scenario oracle, while a separate product
+      codebase is the code under test.
+    required_components:
+      - code_under_test
+      - reference_oracle
+      - dataset
+    optional_components:
+      - runtime_api
+      - evidence_artifact
+    factory_expectations:
+      - Scout frames the run as a scenario over product-owned components instead of a factory-owned feature build.
+      - Coobie retrieves project memory topics before planning and turns them into guardrails, checks, and open questions.
+      - Mason changes only the code-under-test component unless the spec explicitly scopes oracle or tooling work.
+      - Bramble runs visible build/test validation plus the reference-oracle comparison command sequence.
+      - Ash may read declared product runtime APIs, but coordination and run truth still come from the Harkonnen backend.
+      - Sable judges generated evidence artifacts against hidden scenario rules without rewriting the scenario to fit the output.
+      - Flint packages the oracle inputs, comparison artifacts, Coobie summaries, and scenario verdict into the run bundle.
+component_roles:
+  code_under_test:
+    meaning: Product-owned code or configuration that Harkonnen may change during the run.
+  reference_oracle:
+    meaning: External known-good implementation or executable used as hidden scenario truth.
+  dataset:
+    meaning: Preserved input evidence bundle that drives both the oracle and the code under test.
+  runtime_api:
+    meaning: Product-owned live API or protocol surface that Ash may observe for twin facts.
+  evidence_artifact:
+    meaning: Generated report or bundle that Sable can judge as hidden acceptance evidence.
+examples:
+  - spec: factory/specs/examples/lamdet_algorithm_parity.yaml
+    pattern: reference_oracle_regression
+    notes:
+      - Ceres Station is the code under test.
+      - LamDet Python is the external oracle.
+      - The CSV corpus is the preserved dataset bundle.

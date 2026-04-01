@@ -1,28 +1,95 @@
 id: lamdet-algorithm-parity
 title: LamDet Algorithm Parity
 purpose: >
-  Compare the converted LamDet Python reference against the Ceres Rust pipeline
-  on the example CSV corpus so Harkonnen can verify algorithmic parity without
-  requiring the Windows-only camera stack.
+  Treat the LamDet Python example plus preserved CSV datasets as the hidden
+  reference scenario, and treat the Ceres Station Rust pipeline as the code
+  under test. Harkonnen should prove algorithmic parity by orchestrating the
+  comparison workflow end to end without depending on live hardware.
 scope:
-  - run the LamDet Python oracle against the raw CSV corpus
-  - export frame-by-frame Ceres Rust pipeline results from the same CSV corpus
+  - stage the ceres-station workspace as the product code under test
+  - run the LamDet Python oracle against the preserved raw CSV corpus
+  - export frame-by-frame Ceres Rust pipeline results from the same corpus
   - compare zone classification, pass/fail, sling detection, peak counts, and matched labels
-  - write a parity report that Coobie can reason over
+  - write parity evidence that Coobie and Sable can use as scenario truth
 constraints:
-  - no USB camera or live hardware required
-  - use the example CSV corpus as the source of truth for this parity pass
+  - Harkonnen Labs remains separate from the product codebase and reference bundle
+  - the LamDet oracle and CSV corpus are read-only evidence inputs for this run
+  - no USB camera or live hardware required for this scenario
   - do not modify the example CSV files during validation
-  - keep the parity harness inside the ceres-station workspace boundary
+  - keep code changes focused on the code-under-test component unless the spec expands scope
 inputs:
-  - "corpus directory: products/ceres-station/examples/csv_files-20260223T192449Z-1-001/csv_files/"
-  - "python reference package: products/ceres-station/examples/lamdet_reference_py/"
-  - "ceres pipeline workspace: products/ceres-station/ceres-station/"
+  - "code under test: products/ceres-station/ceres-station/"
+  - "reference oracle: products/ceres-station/examples/lamdet_reference_py/"
+  - "dataset corpus: products/ceres-station/examples/csv_files-20260223T192449Z-1-001/csv_files/"
 outputs:
   - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_python_reference.jsonl
   - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_rust_reference.jsonl
   - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+  - coobie_briefing.json showing the project components and scenario blueprint Harkonnen used
   - causal_summary.md from Coobie describing parity failures or confirmation
+project_components:
+  - name: ceres_station_pipeline
+    role: code_under_test
+    kind: rust_workspace
+    path: products/ceres-station/ceres-station/
+    owner: product_repo
+    notes:
+      - Main product workspace under evaluation.
+      - The parity harness should tune this component, not the oracle or datasets.
+    interfaces:
+      - cargo workspace
+      - ceres-pipeline example exporter
+  - name: lamdet_python_oracle
+    role: reference_oracle
+    kind: python_reference
+    path: products/ceres-station/examples/lamdet_reference_py/
+    owner: example_bundle
+    notes:
+      - Converted Linux-safe LamDet reference logic.
+      - Read-only oracle for frame-by-frame parity comparison.
+    interfaces:
+      - python3
+      - lamdet_parity.py
+  - name: lamdet_csv_corpus
+    role: dataset
+    kind: csv_corpus
+    path: products/ceres-station/examples/csv_files-20260223T192449Z-1-001/csv_files/
+    owner: example_bundle
+    notes:
+      - Preserved raw and exported CSV evidence bundle.
+      - Replay corpus that drives both the oracle and the product exporter.
+    interfaces:
+      - CSV replay
+  - name: lamdet_parity_report
+    role: evidence_artifact
+    kind: generated_json_report
+    path: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    owner: run_artifact
+    notes:
+      - Nested metrics are judged by Sable as hidden-scenario evidence.
+scenario_blueprint:
+  pattern: reference_oracle_regression
+  objective: >
+    Use an external known-good implementation plus preserved datasets as the
+    hidden scenario, then drive the code under test until the generated parity
+    report reaches full agreement.
+  code_under_test:
+    - ceres_station_pipeline
+  hidden_oracles:
+    - lamdet_python_oracle
+  datasets:
+    - lamdet_csv_corpus
+  coobie_memory_topics:
+    - lamdet
+    - parity
+    - sling
+    - middle peak
+    - laminate detection
+  required_artifacts:
+    - products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    - coobie_briefing.json
+    - coobie_preflight_response.md
+    - causal_summary.md
 test_commands:
   - python3 products/ceres-station/ceres-station/scripts/lamdet_parity.py --output-dir products/ceres-station/ceres-station/tmp/lamdet-parity
 acceptance_criteria:
@@ -36,9 +103,11 @@ acceptance_criteria:
 forbidden_behaviors:
   - using live camera acquisition in place of corpus replay
   - changing threshold values solely to hide parity gaps
-  - modifying the CSV corpus contents
+  - modifying the oracle or CSV corpus contents to manufacture agreement
+  - blurring Harkonnen factory artifacts with product-owned source inputs
 rollback_requirements:
   - generated parity artifacts may be deleted without affecting source state
+  - source edits stay confined to the code-under-test component unless the spec expands scope
 dependencies:
   - python3 with numpy and scipy available
   - rust toolchain with cargo available

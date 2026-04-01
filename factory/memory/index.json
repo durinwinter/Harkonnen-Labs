@@ -158,6 +158,20 @@
       "created_at": "2026-03-30T23:01:28.419336279+00:00"
     },
     {
+      "id": "reference-oracle-scenario-pattern",
+      "tags": [
+        "workflow",
+        "scenario",
+        "oracle",
+        "parity",
+        "harkonnen",
+        "coobie"
+      ],
+      "summary": "Reference-oracle regression pattern for Harkonnen runs over external product codebases.",
+      "content": "When a run is really a scenario over an external product, Harkonnen should stay the factory and treat product components explicitly.\n\nPattern:\n- code under test = product-owned workspace Harkonnen may change\n- reference oracle = read-only known-good implementation or executable\n- dataset = read-only preserved evidence bundle\n- runtime API = optional product-owned live surface Ash may read\n- evidence artifact = generated report Sable can judge\n\nBehavior:\n- Coobie retrieves project memory topics before Scout and Mason plan.\n- Mason edits only the code-under-test component unless the spec expands scope.\n- Bramble runs both visible product validation and the oracle-comparison harness.\n- Sable judges evidence artifacts, not narrative optimism.\n- Flint packages oracle inputs, outputs, and Coobie summaries together.\n\nLamDet/Ceres example:\n- Ceres Station Rust pipeline = code under test\n- LamDet Python bundle = reference oracle\n- CSV corpus = dataset\n- parity report = evidence artifact\n",
+      "created_at": "2026-04-01T00:32:01.138785510+00:00"
+    },
+    {
       "id": "run-28a77447-2921-4022-ac30-fc79e17a1742",
       "tags": [
         "run",

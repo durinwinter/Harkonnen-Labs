@@ -12,13 +12,13 @@ Policy event stream: `GET /api/coordination/policy-events`.
 
 Claim work with `POST /api/coordination/claim`, heartbeat with `POST /api/coordination/heartbeat`, and release it with `POST /api/coordination/release`.
 
-Last updated: 2026-04-01T00:14:29.237977040+00:00
+Last updated: 2026-04-01T00:24:30.576399326+00:00
 
 ## Active Claims
 
 ### codex
 Task: organize lamdet example as harkonnen run pattern
-Status: active
+Status: stale
 Claimed: 2026-04-01T00:14:29.237977040+00:00
 Last heartbeat: 2026-04-01T00:14:29.237977040+00:00
 Files:

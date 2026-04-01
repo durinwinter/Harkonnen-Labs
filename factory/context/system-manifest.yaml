@@ -40,6 +40,7 @@ status:
     - causal report per run (causal_report.json + API endpoint)
     - Keeper coordination API with file-claim conflict detection and heartbeats
     - Pack Board web UI (React/Vite) with agent grid, timeline, policy board
+    - project-scoped scenario blueprints with code-under-test/oracle/dataset components
     - RunDetailDrawer with causal, timeline, agents, lessons tabs
     - CausalReportPanel and ValidationPanel components
   planned:
@@ -73,3 +74,4 @@ key_files:
   artifacts: factory/artifacts/
   state_db: factory/state.db
   context: factory/context/
+  run_patterns: factory/context/run-patterns.yaml

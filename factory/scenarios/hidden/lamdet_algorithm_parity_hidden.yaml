@@ -1,0 +1,69 @@
+id: lamdet-algorithm-parity-hidden
+spec_id: lamdet-algorithm-parity
+title: Hidden acceptance for reference-oracle parity
+description: >
+  Sable judges this run as a reference-oracle regression scenario. The product
+  code under test must match the preserved LamDet oracle on the preserved CSV
+  evidence bundle, and the parity evidence artifacts must be present for review.
+checks:
+  - kind: run_status
+    equals: completed
+  - kind: event_present
+    phase: intake
+    agent: scout
+  - kind: event_present
+    phase: memory
+    agent: coobie
+  - kind: event_present
+    phase: validation
+    agent: bramble
+  - kind: event_present
+    phase: hidden_scenarios
+    agent: sable
+  - kind: event_present
+    phase: artifacts
+    agent: flint
+  - kind: validation_passed
+  - kind: test_exit_code
+    equals: 0
+    label: lamdet_parity.py
+  - kind: metric_eq
+    artifact: corpus_results.json
+    field: all_passed
+    value: true
+  - kind: artifact_exists
+    path: coobie_briefing.json
+  - kind: artifact_exists
+    path: coobie_preflight_response.md
+  - kind: artifact_exists
+    path: causal_summary.md
+  - kind: artifact_exists
+    path: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+  - kind: metric_gte
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: records_compared
+    value: 38000
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.frame_alignment
+    value: 1.0
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.zone_match
+    value: 1.0
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.pass_match
+    value: 1.0
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.sling_match
+    value: 1.0
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.peak_count_match
+    value: 1.0
+  - kind: metric_eq
+    artifact: products/ceres-station/ceres-station/tmp/lamdet-parity/lamdet_parity_report.json
+    field: metric_rates.label_match
+    value: 1.0

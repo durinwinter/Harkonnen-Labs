@@ -409,5 +409,24 @@
     ],
     "message": "Keeper granted claim for codex",
     "created_at": "2026-04-01T00:14:29.237977040+00:00"
+  },
+  {
+    "event_id": "d8aee324-ae75-40eb-8032-f504060a9a57",
+    "managed_by": "keeper",
+    "event_type": "claim_stale",
+    "status": "stale",
+    "agent": "codex",
+    "conflicting_agent": null,
+    "files": [
+      "src/models.rs",
+      "src/spec.rs",
+      "src/orchestrator.rs",
+      "src/scenarios.rs",
+      "factory/specs",
+      "factory/context",
+      "factory/memory"
+    ],
+    "message": "Keeper marked claim for codex as stale after 600 seconds without a heartbeat",
+    "created_at": "2026-04-01T00:24:30.576399326+00:00"
   }
 ]

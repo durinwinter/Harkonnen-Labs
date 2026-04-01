@@ -229,7 +229,7 @@ fn evaluate_check(
                 Ok(v) => v,
                 Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
             };
-            match json.get(field).and_then(|v| v.as_f64()) {
+            match json_field(&json, field).and_then(|v| v.as_f64()) {
                 Some(n) => HiddenScenarioCheckResult {
                     kind,
                     passed: n >= *value,
@@ -238,7 +238,7 @@ fn evaluate_check(
                 None => HiddenScenarioCheckResult {
                     kind,
                     passed: false,
-                    details: format!("field '{field}' not found or not numeric in {artifact}"),
+                    details: format!("field path '{field}' not found or not numeric in {artifact}"),
                 },
             }
         }
@@ -248,7 +248,7 @@ fn evaluate_check(
                 Ok(v) => v,
                 Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
             };
-            match json.get(field) {
+            match json_field(&json, field) {
                 Some(actual) => HiddenScenarioCheckResult {
                     kind,
                     passed: actual == value,
@@ -257,7 +257,7 @@ fn evaluate_check(
                 None => HiddenScenarioCheckResult {
                     kind,
                     passed: false,
-                    details: format!("field '{field}' not found in {artifact}"),
+                    details: format!("field path '{field}' not found in {artifact}"),
                 },
             }
         }
@@ -285,6 +285,13 @@ fn evaluate_check(
             }
         }
     }
+}
+
+fn json_field<'a>(json: &'a JsonValue, field_path: &str) -> Option<&'a JsonValue> {
+    field_path
+        .split('.')
+        .filter(|segment| !segment.is_empty())
+        .try_fold(json, |current, segment| current.get(segment))
 }
 
 fn read_json_artifact(path: &Path) -> std::result::Result<JsonValue, String> {

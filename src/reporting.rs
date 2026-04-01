@@ -5,8 +5,8 @@ use std::path::Path;
 use crate::{
     coobie::CausalReport,
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, HiddenScenarioSummary, LessonRecord, TwinEnvironment,
-        ValidationSummary,
+        AgentExecution, BlackboardState, CoobieBriefing, HiddenScenarioSummary, LessonRecord, ProjectComponent,
+        ScenarioBlueprint, TwinEnvironment, ValidationSummary,
     },
     orchestrator::AppContext,
 };
@@ -25,6 +25,72 @@ struct TargetSourceMetadataReport {
     source_kind: String,
     source_path: String,
     git: Option<TargetGitMetadataReport>,
+}
+
+fn render_component_lines(components: &[ProjectComponent]) -> Vec<String> {
+    components
+        .iter()
+        .map(|component| {
+            let mut parts = vec![format!("role={}", fallback_value(&component.role))];
+            parts.push(format!("kind={}", fallback_value(&component.kind)));
+            parts.push(format!("path={}", component.path));
+            if !component.owner.trim().is_empty() {
+                parts.push(format!("owner={}", component.owner.trim()));
+            }
+            if !component.interfaces.is_empty() {
+                parts.push(format!("interfaces={}", component.interfaces.join(", ")));
+            }
+            if !component.notes.is_empty() {
+                parts.push(format!("notes={}", component.notes.join(" | ")));
+            }
+            format!("- {} -> {}", component.name, parts.join("; "))
+        })
+        .collect()
+}
+
+fn render_blueprint_lines(blueprint: Option<&ScenarioBlueprint>) -> Vec<String> {
+    let Some(blueprint) = blueprint else {
+        return vec!["- No explicit scenario blueprint recorded.".to_string()];
+    };
+
+    let mut lines = Vec::new();
+    if !blueprint.pattern.trim().is_empty() {
+        lines.push(format!("- pattern={}", blueprint.pattern.trim()));
+    }
+    if !blueprint.objective.trim().is_empty() {
+        lines.push(format!("- objective={}", blueprint.objective.trim()));
+    }
+    if !blueprint.code_under_test.is_empty() {
+        lines.push(format!("- code_under_test={}", blueprint.code_under_test.join(", ")));
+    }
+    if !blueprint.hidden_oracles.is_empty() {
+        lines.push(format!("- hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+    }
+    if !blueprint.datasets.is_empty() {
+        lines.push(format!("- datasets={}", blueprint.datasets.join(", ")));
+    }
+    if !blueprint.runtime_surfaces.is_empty() {
+        lines.push(format!("- runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+    }
+    if !blueprint.coobie_memory_topics.is_empty() {
+        lines.push(format!("- coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+    }
+    if !blueprint.required_artifacts.is_empty() {
+        lines.push(format!("- required_artifacts={}", blueprint.required_artifacts.join(", ")));
+    }
+    if lines.is_empty() {
+        lines.push("- No explicit scenario blueprint recorded.".to_string());
+    }
+    lines
+}
+
+fn fallback_value(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "unspecified"
+    } else {
+        trimmed
+    }
 }
 
 pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
@@ -228,11 +294,16 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
         report.push_str("No lessons were promoted for this run.\n");
     }
 
-    report.push_str("\nCoobie Preflight\n-----------------\n");
+    report.push_str("
+Coobie Preflight
+-----------------
+");
     if let Some(briefing) = coobie_briefing {
-        report.push_str(&format!("Generated: {}\n", briefing.generated_at));
+        report.push_str(&format!("Generated: {}
+", briefing.generated_at));
         report.push_str(&format!(
-            "Domain signals: {}\n",
+            "Domain signals: {}
+",
             if briefing.domain_signals.is_empty() {
                 "none".to_string()
             } else {
@@ -240,7 +311,8 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
             }
         ));
         report.push_str(&format!(
-            "Required checks: {}\n",
+            "Required checks: {}
+",
             if briefing.required_checks.is_empty() {
                 "none".to_string()
             } else {
@@ -248,15 +320,29 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
             }
         ));
         report.push_str(&format!(
-            "Regulatory considerations: {}\n",
+            "Regulatory considerations: {}
+",
             if briefing.regulatory_considerations.is_empty() {
                 "none".to_string()
             } else {
                 briefing.regulatory_considerations.join(" | ")
             }
         ));
+        report.push_str("Project components:
+");
+        for line in render_component_lines(&briefing.project_components) {
+            report.push_str(&format!("{}
+", line));
+        }
+        report.push_str("Scenario blueprint:
+");
+        for line in render_blueprint_lines(briefing.scenario_blueprint.as_ref()) {
+            report.push_str(&format!("{}
+", line));
+        }
     } else {
-        report.push_str("No Coobie preflight briefing written yet.\n");
+        report.push_str("No Coobie preflight briefing written yet.
+");
     }
 
     report.push_str("\nCoobie Responses\n-----------------\n");

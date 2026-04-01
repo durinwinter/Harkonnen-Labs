@@ -33,7 +33,7 @@ use uuid::Uuid;
 
 use crate::models::{
     CausalHypothesis, CoobieBriefing, CounterfactualEstimate, CounterfactualOutcome,
-    FactoryEpisode, InterventionPlan,
+    FactoryEpisode, InterventionPlan, ProjectComponent, ScenarioBlueprint,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -461,6 +461,70 @@ fn render_bullet_lines(items: &[String], empty_line: &str) -> String {
     }
 }
 
+fn render_component_lines(components: &[ProjectComponent]) -> String {
+    let lines = components
+        .iter()
+        .map(|component| {
+            let mut details = vec![format!("role={}", fallback_value(&component.role))];
+            details.push(format!("kind={}", fallback_value(&component.kind)));
+            details.push(format!("path={}", component.path));
+            if !component.owner.trim().is_empty() {
+                details.push(format!("owner={}", component.owner.trim()));
+            }
+            if !component.interfaces.is_empty() {
+                details.push(format!("interfaces={}", component.interfaces.join(", ")));
+            }
+            if !component.notes.is_empty() {
+                details.push(format!("notes={}", component.notes.join(" | ")));
+            }
+            format!("{} -> {}", component.name, details.join("; "))
+        })
+        .collect::<Vec<_>>();
+    render_bullet_lines(&lines, "No project components were declared yet.")
+}
+
+fn render_blueprint_lines(blueprint: Option<&ScenarioBlueprint>) -> String {
+    let Some(blueprint) = blueprint else {
+        return "- No explicit scenario blueprint was declared yet.".to_string();
+    };
+
+    let mut lines = Vec::new();
+    if !blueprint.pattern.trim().is_empty() {
+        lines.push(format!("pattern={}", blueprint.pattern.trim()));
+    }
+    if !blueprint.objective.trim().is_empty() {
+        lines.push(format!("objective={}", blueprint.objective.trim()));
+    }
+    if !blueprint.code_under_test.is_empty() {
+        lines.push(format!("code_under_test={}", blueprint.code_under_test.join(", ")));
+    }
+    if !blueprint.hidden_oracles.is_empty() {
+        lines.push(format!("hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+    }
+    if !blueprint.datasets.is_empty() {
+        lines.push(format!("datasets={}", blueprint.datasets.join(", ")));
+    }
+    if !blueprint.runtime_surfaces.is_empty() {
+        lines.push(format!("runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+    }
+    if !blueprint.coobie_memory_topics.is_empty() {
+        lines.push(format!("coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+    }
+    if !blueprint.required_artifacts.is_empty() {
+        lines.push(format!("required_artifacts={}", blueprint.required_artifacts.join(", ")));
+    }
+    render_bullet_lines(&lines, "No explicit scenario blueprint was declared yet.")
+}
+
+fn fallback_value(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "unspecified"
+    } else {
+        trimmed
+    }
+}
+
 pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
     let cause_lines = if briefing.prior_causes.is_empty() {
         "- No prior causal reports matched strongly enough to summarize yet.".to_string()
@@ -493,6 +557,12 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 ## Domain Signals
 {}
 
+## Project Components
+{}
+
+## Scenario Blueprint
+{}
+
 ## Application Risks
 {}
 
@@ -518,6 +588,8 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
         briefing.spec_id,
         briefing.product,
         render_bullet_lines(&briefing.domain_signals, "No domain signals were detected yet."),
+        render_component_lines(&briefing.project_components),
+        render_blueprint_lines(briefing.scenario_blueprint.as_ref()),
         render_bullet_lines(&briefing.application_risks, "No application risks were highlighted yet."),
         render_bullet_lines(&briefing.environment_risks, "No environment risks were highlighted yet."),
         render_bullet_lines(

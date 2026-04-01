@@ -1189,7 +1189,7 @@ impl AppContext {
         let application_risks = build_application_risks(spec_obj, domain_signals, memory_hits, &prior_causes);
         let environment_risks = build_environment_risks(spec_obj, domain_signals);
         let regulatory_considerations = build_regulatory_considerations(spec_obj, domain_signals);
-        let recommended_guardrails = build_recommended_guardrails(domain_signals, memory_hits, &prior_causes);
+        let recommended_guardrails = build_recommended_guardrails(spec_obj, domain_signals, memory_hits, &prior_causes);
         let required_checks = build_required_checks(spec_obj, domain_signals, &regulatory_considerations);
         let open_questions = build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
 
@@ -1202,6 +1202,8 @@ impl AppContext {
             memory_hits: memory_hits.to_vec(),
             relevant_lessons,
             prior_causes,
+            project_components: spec_obj.project_components.clone(),
+            scenario_blueprint: spec_obj.scenario_blueprint.clone(),
             application_risks,
             environment_risks,
             regulatory_considerations,
@@ -2641,6 +2643,14 @@ fn build_implementation_plan(
         "No recommended steps were generated.",
     );
     let domain_signals = render_list(&briefing.domain_signals, "No domain signals inferred yet.");
+    let project_components = render_list(
+        &render_project_component_lines(spec_obj),
+        "No project components were declared in the spec.",
+    );
+    let scenario_blueprint = render_list(
+        &render_scenario_blueprint_lines(spec_obj),
+        "No explicit scenario blueprint was declared in the spec.",
+    );
     let application_risks = render_list(
         &briefing.application_risks,
         "No application-level risks inferred yet.",
@@ -2702,6 +2712,12 @@ fn build_implementation_plan(
 ## Coobie Domain Signals
 {}
 
+## Project Components
+{}
+
+## Scenario Blueprint
+{}
+
 ## Application Risks
 {}
 
@@ -2736,6 +2752,8 @@ fn build_implementation_plan(
         acceptance,
         recommended_steps,
         domain_signals,
+        project_components,
+        scenario_blueprint,
         application_risks,
         environment_risks,
         regulatory,
@@ -2768,6 +2786,29 @@ fn build_coobie_query_terms(spec_obj: &Spec, target_source: &TargetSourceMetadat
         .chain(spec_obj.security_expectations.iter())
     {
         terms.push(value.clone());
+    }
+
+    for component in &spec_obj.project_components {
+        terms.push(component.name.clone());
+        terms.push(component.role.clone());
+        terms.push(component.kind.clone());
+        terms.push(component.path.clone());
+        if !component.owner.is_empty() {
+            terms.push(component.owner.clone());
+        }
+        terms.extend(component.notes.iter().cloned());
+        terms.extend(component.interfaces.iter().cloned());
+    }
+
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        terms.push(blueprint.pattern.clone());
+        terms.push(blueprint.objective.clone());
+        terms.extend(blueprint.code_under_test.iter().cloned());
+        terms.extend(blueprint.hidden_oracles.iter().cloned());
+        terms.extend(blueprint.datasets.iter().cloned());
+        terms.extend(blueprint.runtime_surfaces.iter().cloned());
+        terms.extend(blueprint.coobie_memory_topics.iter().cloned());
+        terms.extend(blueprint.required_artifacts.iter().cloned());
     }
 
     let mut unique = Vec::new();
@@ -2875,11 +2916,27 @@ fn build_application_risks(
     if domain_signals.iter().any(|signal| signal == "manufacturing_execution") {
         risks.push("Batch, recipe, and traceability state can drift if workflow transitions are not modeled as explicit state machines.".to_string());
     }
+    if has_project_component_role(spec_obj, "reference_oracle") {
+        risks.push("Parity can drift when the code under test and external oracle use different preprocessing, reference anchors, or anomaly semantics.".to_string());
+    }
+    if has_project_component_role(spec_obj, "dataset") {
+        risks.push("Dataset-driven validation is strong for deterministic logic, but it can still miss hardware acquisition quirks and floor timing behavior if the workflow treats replay as production.".to_string());
+    }
     if spec_obj.security_expectations.is_empty() {
         risks.push("Security expectations are underspecified, which leaves device trust, credential handling, and operator access ambiguous.".to_string());
     }
     if memory_hits.iter().any(|hit| hit.contains("No memories found")) {
         risks.push("Coobie found little directly reusable prior context, so assumptions need stronger explicit checks and telemetry.".to_string());
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        if !blueprint.coobie_memory_topics.is_empty()
+            && memory_hits.iter().any(|hit| hit.contains("No memories found"))
+        {
+            risks.push(format!(
+                "The run declares project memory topics ({}) but Coobie did not retrieve strong context yet, so the pack is at risk of relearning known behavior the hard way.",
+                blueprint.coobie_memory_topics.join(", ")
+            ));
+        }
     }
     for cause in prior_causes.iter().take(2) {
         risks.push(format!(
@@ -2911,6 +2968,12 @@ fn build_environment_risks(spec_obj: &Spec, domain_signals: &[String]) -> Vec<St
     }
     if domain_signals.iter().any(|signal| signal == "simulation") {
         risks.push("Simulator fidelity gaps can hide timing or protocol defects unless the twin declares what is simulated versus merely stubbed.".to_string());
+    }
+    if has_project_component_role(spec_obj, "runtime_api") {
+        risks.push("Twin assumptions can drift from the product runtime API unless request/response behavior, health surfaces, and degraded states are checked against the product-owned endpoints.".to_string());
+    }
+    if has_project_component_role(spec_obj, "dataset") {
+        risks.push("Replay datasets preserve evidence for comparison, but they do not automatically prove live transport timing, USB capture stability, or runtime service readiness.".to_string());
     }
     if dependency_text.contains("docker") || dependency_text.contains("container") {
         risks.push("Containerized support services may start cleanly while still masking floor-network timing and service-discovery behavior.".to_string());
@@ -2957,6 +3020,7 @@ fn build_regulatory_considerations(spec_obj: &Spec, domain_signals: &[String]) -
 }
 
 fn build_recommended_guardrails(
+    spec_obj: &Spec,
     domain_signals: &[String],
     memory_hits: &[String],
     prior_causes: &[PriorCauseSignal],
@@ -2975,6 +3039,23 @@ fn build_recommended_guardrails(
     }
     if domain_signals.iter().any(|signal| signal == "regulated_environment") {
         guardrails.push("Preserve auditability: configuration changes, operator actions, and derived records should all produce reviewable evidence.".to_string());
+    }
+    if has_project_component_role(spec_obj, "reference_oracle") {
+        guardrails.push("Treat the external oracle as read-only evidence: tune the code under test to match observed behavior, not the oracle to match a preferred outcome.".to_string());
+    }
+    if has_project_component_role(spec_obj, "dataset") {
+        guardrails.push("Preserve datasets as immutable evidence inputs and record which dataset bundle was used for each comparison run.".to_string());
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        if !blueprint.coobie_memory_topics.is_empty() {
+            guardrails.push(format!(
+                "Retrieve and cite project memory topics before planning: {}.",
+                blueprint.coobie_memory_topics.join(", ")
+            ));
+        }
+        if !blueprint.runtime_surfaces.is_empty() {
+            guardrails.push("Keep Harkonnen coordination state separate from product runtime APIs; Ash may read product surfaces, but the pack still coordinates through the Harkonnen backend.".to_string());
+        }
     }
     if memory_hits.iter().any(|hit| hit.contains("No memories found")) {
         guardrails.push("When prior memory is weak, convert assumptions into explicit open questions and required checks before implementation proceeds.".to_string());
@@ -3015,8 +3096,28 @@ fn build_required_checks(
     if domain_signals.iter().any(|signal| signal == "simulation") {
         checks.push("Compare simulator assumptions against at least one declared real-world timing or protocol constraint.".to_string());
     }
+    if has_project_component_role(spec_obj, "reference_oracle") {
+        checks.push("Run the preserved dataset through both the code under test and the external oracle, then emit a comparison artifact that records mismatches instead of summarizing them away.".to_string());
+    }
+    if has_project_component_role(spec_obj, "dataset") {
+        checks.push("Record dataset identity, frame counts, and replay provenance in the run artifacts so Sable can judge the scenario against preserved evidence.".to_string());
+    }
+    if has_project_component_role(spec_obj, "runtime_api")
+        || spec_obj
+            .scenario_blueprint
+            .as_ref()
+            .map(|b| !b.runtime_surfaces.is_empty())
+            .unwrap_or(false)
+    {
+        checks.push("State clearly which facts came from the Harkonnen API versus product-owned runtime APIs before Ash or Sable treats them as ground truth.".to_string());
+    }
     if !regulatory_considerations.is_empty() {
         checks.push("Emit evidence artifacts that support audit trails, traceability, and validation review.".to_string());
+    }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        for artifact in &blueprint.required_artifacts {
+            checks.push(format!("Produce required evidence artifact: {}", artifact));
+        }
     }
     if spec_obj.rollback_requirements.is_empty() {
         checks.push("Clarify rollback and degraded-mode expectations before relying on destructive or stateful flows.".to_string());
@@ -3045,6 +3146,25 @@ fn build_coobie_open_questions(
     if domain_signals.iter().any(|signal| signal == "simulation") {
         questions.push("Which simulator behaviors are trusted representations of the plant, and which are convenience stubs only?".to_string());
     }
+    if let Some(blueprint) = &spec_obj.scenario_blueprint {
+        if blueprint.pattern.eq_ignore_ascii_case("reference_oracle_regression") {
+            if blueprint.hidden_oracles.is_empty() {
+                questions.push("Which external oracle or known-good reference implementation defines the hidden acceptance behavior for this run?".to_string());
+            }
+            if blueprint.datasets.is_empty() {
+                questions.push("Which preserved dataset bundle should drive the reference-oracle comparison run?".to_string());
+            }
+        }
+        if !blueprint.runtime_surfaces.is_empty() {
+            questions.push("Which product-owned runtime surfaces may Ash observe directly, and which should remain inferred only through Harkonnen artifacts?".to_string());
+        }
+        if !blueprint.coobie_memory_topics.is_empty() {
+            questions.push(format!(
+                "Which prior lessons about {} should be treated as strong prior evidence versus hypotheses to retest?",
+                blueprint.coobie_memory_topics.join(", ")
+            ));
+        }
+    }
     if !regulatory_considerations.is_empty() {
         questions.push("Which regulatory evidence expectations, such as GMP validation artifacts or audit trails, must this run preserve?".to_string());
     }
@@ -3054,6 +3174,77 @@ fn build_coobie_open_questions(
 
     questions.dedup();
     questions
+}
+
+fn has_project_component_role(spec_obj: &Spec, role: &str) -> bool {
+    spec_obj
+        .project_components
+        .iter()
+        .any(|component| component.role.eq_ignore_ascii_case(role))
+}
+
+fn render_project_component_lines(spec_obj: &Spec) -> Vec<String> {
+    spec_obj
+        .project_components
+        .iter()
+        .map(|component| {
+            let mut details = vec![format!("role={}", fallback_component_value(&component.role))];
+            details.push(format!("kind={}", fallback_component_value(&component.kind)));
+            details.push(format!("path={}", component.path));
+            if !component.owner.trim().is_empty() {
+                details.push(format!("owner={}", component.owner.trim()));
+            }
+            if !component.interfaces.is_empty() {
+                details.push(format!("interfaces={}", component.interfaces.join(", ")));
+            }
+            if !component.notes.is_empty() {
+                details.push(format!("notes={}", component.notes.join(" | ")));
+            }
+            format!("{} -> {}", component.name, details.join("; "))
+        })
+        .collect()
+}
+
+fn render_scenario_blueprint_lines(spec_obj: &Spec) -> Vec<String> {
+    let Some(blueprint) = &spec_obj.scenario_blueprint else {
+        return Vec::new();
+    };
+
+    let mut lines = Vec::new();
+    if !blueprint.pattern.trim().is_empty() {
+        lines.push(format!("pattern={}", blueprint.pattern.trim()));
+    }
+    if !blueprint.objective.trim().is_empty() {
+        lines.push(format!("objective={}", blueprint.objective.trim()));
+    }
+    if !blueprint.code_under_test.is_empty() {
+        lines.push(format!("code_under_test={}", blueprint.code_under_test.join(", ")));
+    }
+    if !blueprint.hidden_oracles.is_empty() {
+        lines.push(format!("hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+    }
+    if !blueprint.datasets.is_empty() {
+        lines.push(format!("datasets={}", blueprint.datasets.join(", ")));
+    }
+    if !blueprint.runtime_surfaces.is_empty() {
+        lines.push(format!("runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+    }
+    if !blueprint.coobie_memory_topics.is_empty() {
+        lines.push(format!("coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+    }
+    if !blueprint.required_artifacts.is_empty() {
+        lines.push(format!("required_artifacts={}", blueprint.required_artifacts.join(", ")));
+    }
+    lines
+}
+
+fn fallback_component_value(value: &str) -> &str {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        "unspecified"
+    } else {
+        trimmed
+    }
 }
 
 fn render_list(items: &[String], empty_message: &str) -> String {

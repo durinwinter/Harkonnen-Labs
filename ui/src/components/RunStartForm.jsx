@@ -1,6 +1,6 @@
 import React, { useEffect, useState } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
 export default function RunStartForm({ onRunStarted, onClose }) {
   const [spec, setSpec] = useState('');
@@ -14,6 +14,7 @@ export default function RunStartForm({ onRunStarted, onClose }) {
   const [pickerParentPath, setPickerParentPath] = useState('');
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState('');
+  const [runHiddenScenarios, setRunHiddenScenarios] = useState(true);
 
   useEffect(() => {
     const handler = (e) => { if (e.key === 'Escape') onClose?.(); };
@@ -74,6 +75,7 @@ export default function RunStartForm({ onRunStarted, onClose }) {
           spec: trimmedSpec,
           ...(trimmedProjectPath ? { product_path: trimmedProjectPath } : {}),
           ...(!trimmedProjectPath && trimmedProduct ? { product: trimmedProduct } : {}),
+          run_hidden_scenarios: runHiddenScenarios,
         }),
       });
       if (!resp.ok) {
@@ -121,6 +123,12 @@ export default function RunStartForm({ onRunStarted, onClose }) {
               <button className="btn-browse" type="button" onClick={openPicker} disabled={submitting}>Browse...</button>
             </div>
             <span className="field-hint">Use this for repos outside <code>products/</code>. If provided, it takes precedence over product name.</span>
+          </label>
+
+
+          <label className="field-checkbox">
+            <input type="checkbox" checked={runHiddenScenarios} onChange={(e) => setRunHiddenScenarios(e.target.checked)} />
+            <span>Run hidden scenarios with Sable</span>
           </label>
 
           {error && <div className="form-error">{error}</div>}
@@ -276,6 +284,16 @@ export default function RunStartForm({ onRunStarted, onClose }) {
           background: var(--accent-gold, #c2a372);
           color: #111;
           font-weight: 700;
+        }
+        .field-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 0.6rem;
+          color: var(--text-primary, #fff);
+        }
+        .field-checkbox input {
+          width: 16px;
+          height: 16px;
         }
         .form-error {
           background: rgba(120, 39, 30, 0.3);

@@ -392,6 +392,7 @@ fn build_run_request(
         spec_path,
         product,
         product_path,
+        run_hidden_scenarios: true,
         failure_harness,
     })
 }

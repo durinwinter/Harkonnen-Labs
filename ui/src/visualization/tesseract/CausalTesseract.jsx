@@ -12,7 +12,7 @@ import { useLensMode, LENS_MODES } from './hooks/useLensMode';
 import { useSceneSelection } from './hooks/useSceneSelection';
 import { EXAMPLE_SCENE } from './scene/scene-builder';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
 /**
  * The Rust handler serialises with serde rename_all = "camelCase" and

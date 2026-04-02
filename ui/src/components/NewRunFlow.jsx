@@ -1,6 +1,6 @@
 import { useState } from 'react';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 const STEP_LABELS = ['Describe', 'Review Spec', 'Launch'];
 
 export default function NewRunFlow({ onClose, onRunStarted }) {
@@ -21,6 +21,7 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
   const [pickerParentPath, setPickerParentPath] = useState('');
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState('');
+  const [runHiddenScenarios, setRunHiddenScenarios] = useState(true);
 
   async function loadDirectories(nextPath = '') {
     setPickerLoading(true);
@@ -68,6 +69,7 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
           intent: intent.trim(),
           product: product.trim(),
           ...(trimmedProjectPath ? { product_path: trimmedProjectPath } : {}),
+          run_hidden_scenarios: runHiddenScenarios,
         }),
       });
       if (!res.ok) {
@@ -100,6 +102,7 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
           spec_yaml: specYaml,
           ...(trimmedProjectPath ? { product_path: trimmedProjectPath } : {}),
           ...(!trimmedProjectPath && trimmedProduct ? { product: trimmedProduct } : {}),
+          run_hidden_scenarios: runHiddenScenarios,
         }),
       });
       if (!res.ok) {
@@ -185,6 +188,16 @@ Examples:
 
             {draftError && <div className="nrf-error">{draftError}</div>}
 
+
+            <label className="nrf-checkbox">
+              <input
+                type="checkbox"
+                checked={runHiddenScenarios}
+                onChange={e => setRunHiddenScenarios(e.target.checked)}
+              />
+              <span>Run hidden scenarios with Sable</span>
+            </label>
+
             <div className="nrf-actions">
               <button className="nrf-btn secondary" type="button" onClick={onClose}>Cancel</button>
               <button className="nrf-btn primary" type="button" onClick={draftSpec} disabled={!intent.trim() || !product.trim() || drafting}>
@@ -223,6 +236,7 @@ Examples:
                 <p className="nrf-confirm-sub">Product: <strong>{product}</strong></p>
                 {projectPath.trim() && <p className="nrf-confirm-sub">Project path: <code>{projectPath.trim()}</code></p>}
                 <p className="nrf-confirm-sub">Spec: <code>{specId}</code></p>
+                <p className="nrf-confirm-sub">Hidden scenarios: <strong>{runHiddenScenarios ? 'enabled' : 'skipped'}</strong></p>
                 <p className="nrf-confirm-desc">
                   The full 9-agent pipeline will run - Scout through Coobie. You can monitor progress on the Factory Floor and annotate causes in the Workbench when it completes.
                 </p>
@@ -411,6 +425,17 @@ Examples:
         .nrf-confirm-sub, .nrf-confirm-desc {
           margin: 0.2rem 0;
           color: rgba(255, 255, 255, 0.82);
+        }
+        .nrf-checkbox {
+          display: flex;
+          align-items: center;
+          gap: 0.55rem;
+          color: rgba(255, 255, 255, 0.82);
+          font-size: 0.92rem;
+        }
+        .nrf-checkbox input {
+          width: 16px;
+          height: 16px;
         }
         .nrf-error {
           background: rgba(120, 39, 30, 0.3);

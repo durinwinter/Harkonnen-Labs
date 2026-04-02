@@ -52,6 +52,7 @@ pub struct RunRequest {
     pub spec_path: String,
     pub product: Option<String>,
     pub product_path: Option<String>,
+    pub run_hidden_scenarios: bool,
     pub failure_harness: Option<FailureHarness>,
 }
 
@@ -2083,16 +2084,33 @@ next_actions={}",
         let events_so_far = self.list_run_events(run_id).await?;
         let run_attempt = self.run_attempt_number(run_id).await?;
         let hidden_definitions = scenarios::load_hidden_scenarios(&self.paths.scenarios, &spec_obj.id)?;
-        let mut hidden_scenarios = scenarios::evaluate_hidden_scenarios(
-            &hidden_definitions,
-            predicted_final_status,
-            run_attempt,
-            &events_so_far,
-            &validation,
-            &twin,
-            &agent_executions,
-            &run_dir,
-        );
+        let mut hidden_scenarios = if req.run_hidden_scenarios {
+            scenarios::evaluate_hidden_scenarios(
+                &hidden_definitions,
+                predicted_final_status,
+                run_attempt,
+                &events_so_far,
+                &validation,
+                &twin,
+                &agent_executions,
+                &run_dir,
+            )
+        } else {
+            HiddenScenarioSummary {
+                passed: true,
+                results: vec![HiddenScenarioEvaluation {
+                    scenario_id: "operator-skip".to_string(),
+                    title: "Hidden scenarios skipped".to_string(),
+                    passed: true,
+                    details: "Hidden scenarios were skipped for this run by operator request.".to_string(),
+                    checks: vec![HiddenScenarioCheckResult {
+                        kind: "operator_skip".to_string(),
+                        passed: true,
+                        details: "Launch request disabled hidden scenarios.".to_string(),
+                    }],
+                }],
+            }
+        };
         if let Some(message) = req.harness_message("hidden_scenarios") {
             hidden_scenarios.passed = false;
             hidden_scenarios.results.push(HiddenScenarioEvaluation {
@@ -2121,7 +2139,9 @@ next_actions={}",
         )
         .await?;
         let hidden_outcome = if hidden_scenarios.passed { "success" } else { "failure" };
-        let hidden_message = if let Some(message) = req.harness_message("hidden_scenarios") {
+        let hidden_message = if !req.run_hidden_scenarios {
+            "Hidden scenarios skipped by operator request".to_string()
+        } else if let Some(message) = req.harness_message("hidden_scenarios") {
             format!("Failure harness forced hidden scenario failure: {message}")
         } else {
             format!(
@@ -5255,6 +5275,11 @@ TOOL SURFACE:
             .await?;
         self.write_json_file(&run_dir.join("agent_executions.json"), agent_executions)
             .await?;
+        tokio::fs::write(
+            run_dir.join("agent_response_log.md"),
+            render_agent_response_log(agent_executions),
+        )
+        .await?;
         Ok(())
     }
 
@@ -11428,4 +11453,47 @@ fn infer_intervention(events: &[RunEvent]) -> Option<String> {
         .rev()
         .find(|event| event.status == "complete")
         .map(|event| format!("{} completed: {}", event.agent, event.message))
+}
+
+
+fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
+    let mut out = String::from("# Labrador Response Log
+
+");
+    for execution in agent_executions {
+        out.push_str(&format!("## {} ({})
+
+", execution.display_name, execution.agent_name));
+        out.push_str(&format!("- Role: {}
+", execution.role));
+        out.push_str(&format!("- Provider: {}
+", execution.provider));
+        out.push_str(&format!("- Model: {}
+", execution.model));
+        out.push_str(&format!("- Mode: {}
+", execution.mode));
+        if !execution.summary.trim().is_empty() {
+            out.push_str(&format!("- Summary: {}
+", execution.summary.trim()));
+        }
+        out.push_str("
+### Prompt
+
+```text
+");
+        out.push_str(execution.prompt.trim());
+        out.push_str("
+```
+
+### Output
+
+```text
+");
+        out.push_str(execution.output.trim());
+        out.push_str("
+```
+
+");
+    }
+    out
 }

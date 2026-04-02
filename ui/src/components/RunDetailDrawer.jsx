@@ -3,7 +3,7 @@ import CausalReportPanel from './CausalReportPanel';
 import ValidationPanel from './ValidationPanel';
 import CoobieSignalPanel from './CoobieSignalPanel';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
 async function fetchJson(url) {
   const r = await fetch(url);

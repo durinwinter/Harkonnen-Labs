@@ -1511,6 +1511,12 @@ struct StartRunRequest {
     product_path: Option<String>,
     #[serde(default)]
     spec_yaml: Option<String>,
+    #[serde(default = "default_true")]
+    run_hidden_scenarios: bool,
+}
+
+fn default_true() -> bool {
+    true
 }
 
 async fn start_run(
@@ -1577,6 +1583,7 @@ async fn start_run(
         spec_path,
         product: if product_path.is_some() { None } else { product },
         product_path,
+        run_hidden_scenarios: req.run_hidden_scenarios,
         failure_harness: None,
     };
 

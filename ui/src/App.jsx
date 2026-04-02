@@ -6,7 +6,7 @@ import CausalWorkbench from './components/CausalWorkbench';
 import FactoryFloor from './components/FactoryFloor';
 import NewRunFlow from './components/NewRunFlow';
 
-const API_BASE = import.meta.env.VITE_API_BASE || 'http://localhost:3000/api';
+const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
 const AGENT_DEFS = [
   { id: 'scout', name: 'Scout', role: 'Spec Retriever', group: 'planning', accentColor: '#c4922a' },

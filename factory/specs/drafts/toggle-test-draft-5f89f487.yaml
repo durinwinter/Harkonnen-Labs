@@ -1,0 +1,26 @@
+id: toggle-test-draft-5f89f487
+title: Toggle Test
+purpose: >
+  Smoke test hidden scenario skip path.
+scope:
+  - toggle-test
+constraints:
+  - remain within the toggle-test workspace boundary
+  - do not modify files outside the target product
+inputs:
+  - "product directory: /tmp/harkonnen-hidden-toggle-test"
+outputs:
+  - implementation artifacts in the run workspace
+  - validation.json with pass/fail verdict
+acceptance_criteria:
+  - Run should complete.
+forbidden_behaviors:
+  - deleting unrelated files
+  - reaching outside the workspace boundary
+rollback_requirements:
+  - retain prior artifacts unless explicitly cleaned up
+dependencies: []
+performance_expectations:
+  - commands should complete in a reasonable time
+security_expectations:
+  - secrets must not appear in logs or artifact bundles

@@ -28,16 +28,34 @@ pub struct HiddenScenarioFile {
 #[derive(Debug, Clone, Deserialize)]
 #[serde(tag = "kind", rename_all = "snake_case")]
 pub enum HiddenScenarioCheck {
-    RunStatus { equals: String },
-    EventPresent { phase: String, agent: String },
-    ArtifactExists { path: String },
+    RunStatus {
+        equals: String,
+    },
+    EventPresent {
+        phase: String,
+        agent: String,
+    },
+    ArtifactExists {
+        path: String,
+    },
     ValidationPassed,
-    AgentExecuted { agent: String },
-    TwinServicePresent { service: String },
+    AgentExecuted {
+        agent: String,
+    },
+    TwinServicePresent {
+        service: String,
+    },
     /// Check the exit_code field in corpus_results.json for the named command.
-    TestExitCode { equals: i32, label: String },
+    TestExitCode {
+        equals: i32,
+        label: String,
+    },
     /// Check that a numeric field in a JSON artifact is >= value.
-    MetricGte { artifact: String, field: String, value: f64 },
+    MetricGte {
+        artifact: String,
+        field: String,
+        value: f64,
+    },
     /// Check that a numeric field in a JSON artifact is >= the threshold selected for this run attempt.
     MetricGteByAttempt {
         artifact: String,
@@ -45,11 +63,20 @@ pub enum HiddenScenarioCheck {
         thresholds: Vec<AttemptThreshold>,
     },
     /// Check that a field in a JSON artifact equals value (JSON comparison).
-    MetricEq { artifact: String, field: String, value: JsonValue },
+    MetricEq {
+        artifact: String,
+        field: String,
+        value: JsonValue,
+    },
     /// Check that any .md artifact in the run dir contains all required tag strings.
-    MemoryEntryExists { tags: Vec<String> },
+    MemoryEntryExists {
+        tags: Vec<String>,
+    },
     /// Check that the named artifact's raw text contains all required snippets.
-    ArtifactContainsAll { path: String, contains_all: Vec<String> },
+    ArtifactContainsAll {
+        path: String,
+        contains_all: Vec<String>,
+    },
     ExplorationLogExists,
 }
 
@@ -122,7 +149,18 @@ pub fn evaluate_hidden_scenarios(
             let checks = scenario
                 .checks
                 .iter()
-                .map(|check| evaluate_check(check, run_status, run_attempt, events, validation, twin, agent_executions, run_dir))
+                .map(|check| {
+                    evaluate_check(
+                        check,
+                        run_status,
+                        run_attempt,
+                        events,
+                        validation,
+                        twin,
+                        agent_executions,
+                        run_dir,
+                    )
+                })
                 .collect::<Vec<_>>();
             let passed = checks.iter().all(|check| check.passed);
             HiddenScenarioEvaluation {
@@ -132,7 +170,10 @@ pub fn evaluate_hidden_scenarios(
                 details: if passed {
                     scenario.description.clone()
                 } else {
-                    format!("{} (one or more hidden checks failed)", scenario.description)
+                    format!(
+                        "{} (one or more hidden checks failed)",
+                        scenario.description
+                    )
                 },
                 checks,
             }
@@ -203,7 +244,10 @@ fn evaluate_check(
             }
         }
         HiddenScenarioCheck::TwinServicePresent { service } => {
-            let found = twin.services.iter().any(|candidate| candidate.name == *service);
+            let found = twin
+                .services
+                .iter()
+                .any(|candidate| candidate.name == *service);
             HiddenScenarioCheckResult {
                 kind: format!("twin_service_present({service})"),
                 passed: found,
@@ -219,7 +263,13 @@ fn evaluate_check(
             let results_path = run_dir.join("corpus_results.json");
             let json = match read_json_artifact(&results_path) {
                 Ok(v) => v,
-                Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
+                Err(msg) => {
+                    return HiddenScenarioCheckResult {
+                        kind,
+                        passed: false,
+                        details: msg,
+                    }
+                }
             };
             let commands = json.get("commands").and_then(|c| c.as_array());
             let entry = commands.and_then(|cmds| {
@@ -240,11 +290,21 @@ fn evaluate_check(
                 details: format!("actual exit_code: {exit_code}"),
             }
         }
-        HiddenScenarioCheck::MetricGte { artifact, field, value } => {
+        HiddenScenarioCheck::MetricGte {
+            artifact,
+            field,
+            value,
+        } => {
             let kind = format!("metric_gte({artifact}.{field} >= {value})");
             let json = match read_json_artifact(&run_dir.join(artifact)) {
                 Ok(v) => v,
-                Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
+                Err(msg) => {
+                    return HiddenScenarioCheckResult {
+                        kind,
+                        passed: false,
+                        details: msg,
+                    }
+                }
             };
             match json_field(&json, field).and_then(|v| v.as_f64()) {
                 Some(n) => HiddenScenarioCheckResult {
@@ -259,27 +319,42 @@ fn evaluate_check(
                 },
             }
         }
-        HiddenScenarioCheck::MetricGteByAttempt { artifact, field, thresholds } => {
+        HiddenScenarioCheck::MetricGteByAttempt {
+            artifact,
+            field,
+            thresholds,
+        } => {
             let selected = match threshold_for_attempt(thresholds, run_attempt) {
                 Some(value) => value,
                 None => {
                     return HiddenScenarioCheckResult {
                         kind: format!("metric_gte_by_attempt({artifact}.{field})"),
                         passed: false,
-                        details: "no thresholds were configured for adaptive metric check".to_string(),
+                        details: "no thresholds were configured for adaptive metric check"
+                            .to_string(),
                     }
                 }
             };
-            let kind = format!("metric_gte_by_attempt({artifact}.{field} >= {selected} @ attempt {run_attempt})");
+            let kind = format!(
+                "metric_gte_by_attempt({artifact}.{field} >= {selected} @ attempt {run_attempt})"
+            );
             let json = match read_json_artifact(&run_dir.join(artifact)) {
                 Ok(v) => v,
-                Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
+                Err(msg) => {
+                    return HiddenScenarioCheckResult {
+                        kind,
+                        passed: false,
+                        details: msg,
+                    }
+                }
             };
             match json_field(&json, field).and_then(|v| v.as_f64()) {
                 Some(n) => HiddenScenarioCheckResult {
                     kind,
                     passed: n >= selected,
-                    details: format!("actual: {n}, required >= {selected} for attempt {run_attempt}"),
+                    details: format!(
+                        "actual: {n}, required >= {selected} for attempt {run_attempt}"
+                    ),
                 },
                 None => HiddenScenarioCheckResult {
                     kind,
@@ -288,11 +363,21 @@ fn evaluate_check(
                 },
             }
         }
-        HiddenScenarioCheck::MetricEq { artifact, field, value } => {
+        HiddenScenarioCheck::MetricEq {
+            artifact,
+            field,
+            value,
+        } => {
             let kind = format!("metric_eq({artifact}.{field} == {value})");
             let json = match read_json_artifact(&run_dir.join(artifact)) {
                 Ok(v) => v,
-                Err(msg) => return HiddenScenarioCheckResult { kind, passed: false, details: msg },
+                Err(msg) => {
+                    return HiddenScenarioCheckResult {
+                        kind,
+                        passed: false,
+                        details: msg,
+                    }
+                }
             };
             match json_field(&json, field) {
                 Some(actual) => HiddenScenarioCheckResult {
@@ -354,7 +439,11 @@ fn evaluate_check(
                 details: if missing.is_empty() {
                     format!("all required snippets found in {}", target.display())
                 } else {
-                    format!("missing snippets in {}: {}", target.display(), missing.join(", "))
+                    format!(
+                        "missing snippets in {}: {}",
+                        target.display(),
+                        missing.join(", ")
+                    )
                 },
             }
         }
@@ -398,6 +487,5 @@ fn read_json_artifact(path: &Path) -> std::result::Result<JsonValue, String> {
     }
     let raw = std::fs::read_to_string(path)
         .map_err(|e| format!("could not read {}: {e}", path.display()))?;
-    serde_json::from_str(&raw)
-        .map_err(|e| format!("could not parse {}: {e}", path.display()))
+    serde_json::from_str(&raw).map_err(|e| format!("could not parse {}: {e}", path.display()))
 }

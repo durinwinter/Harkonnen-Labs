@@ -1,0 +1,162 @@
+version: 1
+name: backend_interaction_control_plane
+status: active
+intent: >-
+  Shift the backend from pure autonomous orchestration toward a conversational
+  control plane where the human can inspect, answer, consolidate, and query the
+  pack without breaking role boundaries.
+interaction_model:
+  primary_surface: pack_chat
+  autonomy_boundary: supervised_autonomy
+  principles:
+    - User interaction is a first-class backend domain, not a UI-only helper.
+    - The blackboard is the canonical runtime surface for current pack state.
+    - Consolidation is reviewable and operator-triggerable at task boundaries and after runs.
+    - Coobie answers operator questions using current run state before historical recall.
+services:
+  - name: conversation
+    purpose: Persist PackChat threads, directed agent messages, blocked questions, and operator replies.
+    planned_modules:
+      - src/chat.rs
+      - src/interaction.rs
+      - src/checkpoints.rs
+    planned_tables:
+      - chat_threads
+      - chat_messages
+      - run_checkpoints
+      - checkpoint_answers
+    planned_routes:
+      - method: GET
+        path: /api/chat/threads
+      - method: POST
+        path: /api/chat/threads
+      - method: POST
+        path: /api/chat/threads/:id/messages
+      - method: POST
+        path: /api/agents/:id/chat
+      - method: POST
+        path: /api/agents/:id/unblock
+  - name: blackboard
+    purpose: Expose the four Coobie board slices as backend-owned read models.
+    planned_modules:
+      - src/blackboard.rs
+    planned_tables:
+      - blackboard_slices
+    existing_routes:
+      - method: GET
+        path: /api/runs/:id/blackboard
+      - method: GET
+        path: /api/runs/:id/blackboard/:role
+    first_milestone_routes:
+      - method: GET
+        path: /api/runs/:id/board/memory
+        response: MemoryBoardResponse
+    planned_routes:
+      - method: GET
+        path: /api/runs/:id/board/mission
+      - method: GET
+        path: /api/runs/:id/board/action
+      - method: GET
+        path: /api/runs/:id/board/evidence
+  - name: consolidation
+    purpose: Make lesson promotion and pattern review explicit, repeatable, and operator-visible.
+    planned_modules:
+      - src/consolidation.rs
+    planned_tables:
+      - consolidation_runs
+      - consolidation_candidates
+    first_milestone_routes:
+      - method: POST
+        path: /api/runs/:id/consolidate
+        response: ConsolidateRunResponse
+    planned_routes:
+      - method: GET
+        path: /api/runs/:id/consolidation
+      - method: POST
+        path: /api/runs/:id/consolidation/:candidate_id/decision
+  - name: coobie_query
+    purpose: Route operator causal questions through Coobie's retrieval order.
+    planned_modules:
+      - src/coobie_query.rs
+    planned_tables:
+      - coobie_queries
+      - memory_usage_events
+    planned_routes:
+      - method: POST
+        path: /api/coobie/query
+      - method: GET
+        path: /api/runs/:id/memory-usage
+      - method: GET
+        path: /api/runs/:id/causal-events
+retrieval_order:
+  - working_memory
+  - blackboard
+  - typed_lessons
+  - semantic_recall
+  - causal_lookup
+first_milestone:
+  goal: Make Memory Board and manual run consolidation real backend capabilities.
+  implemented_routes:
+    - method: GET
+      path: /api/runs/:id/board/memory
+      backing_artifacts:
+        - blackboard.json
+        - coobie_briefing.json
+        - phase_attributions.json
+        - stale_memory_mitigation_status.json
+    - method: POST
+      path: /api/runs/:id/consolidate
+      behavior:
+        - reload run snapshot spec.yaml
+        - run existing Coobie consolidation
+        - attach any new lessons back onto the blackboard
+  response_contracts:
+    MemoryBoardResponse:
+      fields:
+        - run_id
+        - current_phase
+        - active_recalled_lessons
+        - phase_memory_usage
+        - causal_precedents
+        - policy_reminders
+        - project_memory_root
+        - stale_risk_summary
+        - stale_memory_entries
+        - consolidate_available
+    ConsolidateRunResponse:
+      fields:
+        - run_id
+        - total_new_lessons
+        - new_lessons
+        - memory_board
+second_milestone:
+  goal: Persist blackboard blockers as checkpoints and let the operator reply or unblock agents in-band.
+  implemented_routes:
+    - method: GET
+      path: /api/runs/:id/checkpoints
+      behavior:
+        - materialize checkpoints from blackboard open_blockers
+        - return persisted checkpoints with operator answers
+    - method: POST
+      path: /api/runs/:id/checkpoints/:checkpoint_id/reply
+      behavior:
+        - persist operator answer or decision payload
+        - mark checkpoint answered or resolved
+    - method: POST
+      path: /api/agents/:id/unblock
+      behavior:
+        - resolve open checkpoints for the named agent within a run
+        - remove matching blockers from the blackboard
+third_milestone:
+  goal: Expose the remaining Coobie board slices as backend-authored read models.
+  implemented_routes:
+    - method: GET
+      path: /api/runs/:id/board/mission
+    - method: GET
+      path: /api/runs/:id/board/action
+    - method: GET
+      path: /api/runs/:id/board/evidence
+next_milestones:
+  - Add operator-reviewed consolidation candidates instead of immediate blind promotion.
+  - Add Coobie causal query endpoints backed by the new phase attribution records.
+  - Add PackChat thread persistence and direct agent-addressed conversation routes.

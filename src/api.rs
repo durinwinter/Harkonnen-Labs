@@ -16,9 +16,17 @@ use tracing::info;
 
 use crate::{
     coobie::CausalReport,
-    models::{AgentExecution, BlackboardState, CoobieBriefing, EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchReport, EvidenceSource, LessonRecord, RunEvent, RunRecord, Spec},
+    models::{
+        AgentExecution, BlackboardState, CoobieBriefing, EvidenceAnnotation,
+        EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchReport,
+        EvidenceSource, HiddenScenarioSummary, InterventionPlan, LessonRecord,
+        PhaseAttributionRecord, PriorCauseSignal, RunCheckpointRecord, RunEvent, RunRecord, Spec,
+        ValidationSummary,
+    },
     orchestrator::{AppContext, RunRequest},
     pidgin::{self, PidginTranslation},
+    reporting,
+    setup::command_available,
     tesseract,
 };
 
@@ -29,12 +37,149 @@ struct RunStateResponse {
     blackboard: Option<BlackboardState>,
     lessons: Vec<LessonRecord>,
     agent_executions: Vec<AgentExecution>,
+    phase_attributions: Vec<PhaseAttributionRecord>,
     coobie_briefing: Option<CoobieBriefing>,
     causal_report: Option<CausalReport>,
     coobie_preflight_response: Option<String>,
     coobie_report_response: Option<String>,
     evidence_match_report: Option<EvidenceMatchReport>,
     coobie_translations: Vec<PidginTranslation>,
+}
+
+#[derive(Debug, Serialize)]
+struct ConsolidateRunResponse {
+    run_id: String,
+    total_new_lessons: usize,
+    new_lessons: Vec<LessonRecord>,
+    memory_board: MemoryBoardResponse,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBoardResponse {
+    run_id: String,
+    current_phase: Option<String>,
+    active_recalled_lessons: Vec<MemoryBoardLessonView>,
+    phase_memory_usage: Vec<MemoryBoardPhaseUsage>,
+    causal_precedents: Vec<PriorCauseSignal>,
+    policy_reminders: Vec<String>,
+    project_memory_root: Option<String>,
+    stale_risk_summary: MemoryBoardRiskSummary,
+    stale_memory_entries: Vec<MemoryBoardRiskView>,
+    consolidate_available: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct MissionBoardResponse {
+    run_id: String,
+    spec_id: String,
+    title: String,
+    purpose: String,
+    product: String,
+    run_status: String,
+    current_phase: Option<String>,
+    active_goal: Option<String>,
+    scope: Vec<String>,
+    constraints: Vec<String>,
+    acceptance_criteria: Vec<String>,
+    forbidden_behaviors: Vec<String>,
+    open_blockers: Vec<String>,
+    resolved_items: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct ActionBoardResponse {
+    run_id: String,
+    current_phase: Option<String>,
+    active_goal: Option<String>,
+    agent_claims: HashMap<String, String>,
+    open_blockers: Vec<String>,
+    open_checkpoints: Vec<RunCheckpointRecord>,
+    recent_events: Vec<RunEvent>,
+    latest_agent_executions: Vec<AgentExecution>,
+}
+
+#[derive(Debug, Serialize)]
+struct EvidenceBoardResponse {
+    run_id: String,
+    artifact_refs: Vec<String>,
+    validation: Option<ValidationSummary>,
+    hidden_scenarios: Option<HiddenScenarioSummary>,
+    evidence_match_report: Option<EvidenceMatchReport>,
+    causal_report: Option<CausalReport>,
+    recent_evidence_events: Vec<RunEvent>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBoardLessonView {
+    lesson: LessonRecord,
+    used_in_phases: Vec<String>,
+    used_by_agents: Vec<String>,
+    outcomes: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBoardPhaseUsage {
+    phase: String,
+    agent_name: String,
+    outcome: String,
+    prompt_bundle_provider: Option<String>,
+    memory_hits: Vec<String>,
+    core_memory_ids: Vec<String>,
+    project_memory_ids: Vec<String>,
+    relevant_lesson_ids: Vec<String>,
+    required_checks: Vec<String>,
+    guardrails: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBoardRiskSummary {
+    stale_risk_count: usize,
+    satisfied_count: usize,
+    partially_satisfied_count: usize,
+    unresolved_count: usize,
+    active_risk_score: i32,
+}
+
+#[derive(Debug, Serialize)]
+struct MemoryBoardRiskView {
+    memory_id: String,
+    summary: String,
+    severity: String,
+    severity_score: i32,
+    reasons: Vec<String>,
+    mitigation_status: Option<String>,
+    mitigation_steps: Vec<String>,
+    related_checks: Vec<String>,
+    evidence: Vec<String>,
+    previous_severity_score: Option<i32>,
+    risk_reduced_from_previous: Option<bool>,
+}
+
+#[derive(Debug, Deserialize)]
+struct MemoryBoardStaleStatusArtifact {
+    #[serde(default)]
+    entries: Vec<MemoryBoardStaleStatusEntry>,
+}
+
+#[derive(Debug, Clone, Deserialize)]
+struct MemoryBoardStaleStatusEntry {
+    memory_id: String,
+    #[serde(default)]
+    severity: String,
+    #[serde(default)]
+    severity_score: i32,
+    #[serde(default)]
+    mitigation_steps: Vec<String>,
+    #[serde(default)]
+    related_checks: Vec<String>,
+    #[serde(default)]
+    status: String,
+    #[serde(default)]
+    evidence: Vec<String>,
+    #[serde(default)]
+    previous_severity_score: Option<i32>,
+    #[serde(default)]
+    risk_reduced_from_previous: Option<bool>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -118,9 +263,135 @@ struct ReleaseRequest {
     agent: String,
 }
 
+#[derive(Debug, Serialize)]
+struct SimpleOperationResponse {
+    ok: bool,
+    message: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RunReportResponse {
+    report: String,
+}
+
+#[derive(Debug, Serialize)]
+struct RunPackageResponse {
+    path: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct SpecValidateRequest {
+    #[serde(default)]
+    path: Option<String>,
+    #[serde(default)]
+    spec_yaml: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SpecValidateResponse {
+    valid: bool,
+    spec_id: String,
+    title: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SetupCheckProviderStatus {
+    name: String,
+    enabled: bool,
+    api_key_env: String,
+    configured: bool,
+    model: String,
+}
+
+#[derive(Debug, Serialize)]
+struct SetupCheckMcpStatus {
+    name: String,
+    command: String,
+    available: bool,
+    aliases: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SetupCheckResponse {
+    setup_name: String,
+    platform: String,
+    default_provider: String,
+    providers: Vec<SetupCheckProviderStatus>,
+    agent_routes: HashMap<String, String>,
+    mcp_servers: Vec<SetupCheckMcpStatus>,
+}
+
 #[derive(Debug, Deserialize)]
 struct HeartbeatRequest {
     agent: String,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckpointReplyRequest {
+    #[serde(default)]
+    answered_by: Option<String>,
+    #[serde(default)]
+    answer_text: String,
+    #[serde(default)]
+    decision_json: Option<serde_json::Value>,
+    #[serde(default)]
+    resolve: bool,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentUnblockRequest {
+    run_id: String,
+    #[serde(default)]
+    checkpoint_id: Option<String>,
+    #[serde(default)]
+    answered_by: Option<String>,
+    #[serde(default)]
+    answer_text: Option<String>,
+    #[serde(default)]
+    decision_json: Option<serde_json::Value>,
+}
+
+#[derive(Debug, Serialize)]
+struct AgentUnblockResponse {
+    run_id: String,
+    agent: String,
+    resolved: usize,
+    checkpoints: Vec<RunCheckpointRecord>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CoobieQueryRequest {
+    message: String,
+    #[serde(default)]
+    run_id: Option<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct AgentChatRequest {
+    message: String,
+    #[serde(default)]
+    run_id: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct CoobieQueryResponse {
+    agent: String,
+    response: String,
+    retrieval_path: Vec<String>,
+    confidence: f64,
+    sources: Vec<CoobieQuerySource>,
+}
+
+#[derive(Debug, Serialize)]
+struct CoobieQuerySource {
+    kind: String,
+    label: String,
+    #[serde(default)]
+    run_id: Option<String>,
+    #[serde(default)]
+    phase: Option<String>,
+    #[serde(default)]
+    artifact: Option<String>,
 }
 
 #[derive(Debug, Deserialize)]
@@ -268,32 +539,73 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id", get(get_run))
         .route("/api/runs/:id/events", get(get_run_events))
         .route("/api/runs/:id/blackboard", get(get_run_blackboard))
-        .route("/api/runs/:id/blackboard/:role", get(get_run_blackboard_for_role))
+        .route(
+            "/api/runs/:id/blackboard/:role",
+            get(get_run_blackboard_for_role),
+        )
+        .route("/api/runs/:id/board/mission", get(get_run_mission_board))
+        .route("/api/runs/:id/board/action", get(get_run_action_board))
+        .route("/api/runs/:id/board/evidence", get(get_run_evidence_board))
+        .route("/api/runs/:id/board/memory", get(get_run_memory_board))
+        .route("/api/runs/:id/checkpoints", get(get_run_checkpoints))
+        .route(
+            "/api/runs/:id/checkpoints/:checkpoint_id/reply",
+            post(post_run_checkpoint_reply),
+        )
         .route("/api/runs/:id/lessons", get(get_run_lessons))
         .route("/api/runs/:id/state", get(get_run_state))
+        .route("/api/runs/:id/consolidate", post(post_run_consolidate))
+        .route("/api/chat", post(post_chat))
+        .route("/api/coobie/query", post(post_coobie_query))
+        .route("/api/agents/:id/chat", post(post_agent_chat))
+        .route("/api/agents/:id/unblock", post(post_agent_unblock))
         .route("/api/runs/:id/coobie-briefing", get(get_coobie_briefing))
         .route("/api/runs/:id/coobie-response", get(get_coobie_response))
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
-        .route("/api/runs/:id/evidence-match-report", get(get_run_evidence_match_report))
+        .route(
+            "/api/runs/:id/evidence-match-report",
+            get(get_run_evidence_match_report),
+        )
         .route("/api/evidence/bundles", get(list_evidence_bundles))
         .route("/api/evidence/bundles/:name", get(get_evidence_bundle))
         .route("/api/evidence/history", get(get_evidence_history))
-        .route("/api/evidence/bundles/save", post(post_evidence_bundle_save))
-        .route("/api/evidence/annotations/upsert", post(post_evidence_annotation_upsert))
-        .route("/api/evidence/annotations/review", post(post_evidence_annotation_review))
+        .route(
+            "/api/evidence/bundles/save",
+            post(post_evidence_bundle_save),
+        )
+        .route(
+            "/api/evidence/annotations/upsert",
+            post(post_evidence_annotation_upsert),
+        )
+        .route(
+            "/api/evidence/annotations/review",
+            post(post_evidence_annotation_review),
+        )
         .route("/api/evidence/similar", get(get_similar_evidence_windows))
-        .route("/api/evidence/match-report", post(post_evidence_match_report))
+        .route(
+            "/api/evidence/match-report",
+            post(post_evidence_match_report),
+        )
         .route("/api/fs/directories", get(get_directory_browser))
         .route("/api/capacity", get(get_capacity))
         .route("/api/tesseract/scene", get(get_tesseract_scene))
+        .route("/api/setup/check", get(get_setup_check))
+        .route("/api/spec/validate", post(post_spec_validate))
+        .route("/api/memory/init", post(post_memory_init))
+        .route("/api/memory/index", post(post_memory_index))
         .route("/api/runs/start", post(start_run))
+        .route("/api/runs/:id/report", get(get_run_report))
+        .route("/api/runs/:id/package", post(post_run_package))
         .route("/api/runs/:id/artifacts", get(list_run_artifacts))
         .route("/api/runs/:id/artifacts/:name", get(get_run_artifact))
         .route("/api/runs/:id/memory-note", post(add_memory_note))
         .route("/api/scout/draft", post(scout_draft))
         .route("/api/coordination/assignments", get(get_assignments))
-        .route("/api/coordination/policy-events", get(get_coordination_policy_events))
+        .route(
+            "/api/coordination/policy-events",
+            get(get_coordination_policy_events),
+        )
         .route("/api/coordination/claim", post(claim_task))
         .route("/api/coordination/heartbeat", post(heartbeat_task))
         .route("/api/coordination/release", post(release_task))
@@ -328,7 +640,11 @@ async fn get_directory_browser(
     State(app): State<AppContext>,
     Query(query): Query<DirectoryBrowseQuery>,
 ) -> impl IntoResponse {
-    let requested = query.path.as_deref().map(str::trim).filter(|value| !value.is_empty());
+    let requested = query
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
     let current = match requested {
         Some(path) => {
             let candidate = PathBuf::from(path);
@@ -353,7 +669,9 @@ async fn get_directory_browser(
     let mut directories = Vec::new();
     let read_dir = match fs::read_dir(&current) {
         Ok(iter) => iter,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     };
 
     for entry in read_dir.flatten() {
@@ -383,7 +701,10 @@ async fn get_directory_browser(
     (StatusCode::OK, Json(response)).into_response()
 }
 
-async fn get_run_events(Path(id): Path<String>, State(app): State<AppContext>) -> impl IntoResponse {
+async fn get_run_events(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
     match app.list_run_events(&id).await {
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
@@ -401,7 +722,9 @@ async fn get_run_blackboard(
             match read_optional_json::<BlackboardState>(&blackboard_path).await {
                 Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
                 Ok(None) => (StatusCode::NOT_FOUND, "Blackboard not found").into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -419,7 +742,9 @@ async fn get_run_blackboard_for_role(
             match read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await {
                 Ok(Some(board)) => (StatusCode::OK, Json(board.role_view(&role))).into_response(),
                 Ok(None) => (StatusCode::NOT_FOUND, "Blackboard not found").into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -437,7 +762,9 @@ async fn get_run_lessons(
             match read_optional_json::<Vec<LessonRecord>>(&run_dir.join("lessons.json")).await {
                 Ok(Some(lessons)) => (StatusCode::OK, Json(lessons)).into_response(),
                 Ok(None) => (StatusCode::OK, Json(Vec::<LessonRecord>::new())).into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -453,17 +780,246 @@ async fn get_run_state(Path(id): Path<String>, State(app): State<AppContext>) ->
     }
 }
 
+async fn get_run_mission_board(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match build_mission_board(&app, &id).await {
+        Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_action_board(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match build_action_board(&app, &id).await {
+        Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_evidence_board(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match build_evidence_board(&app, &id).await {
+        Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_memory_board(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match build_memory_board(&app, &id).await {
+        Ok(Some(board)) => (StatusCode::OK, Json(board)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_checkpoints(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app.list_run_checkpoints(&id).await {
+            Ok(checkpoints) => (StatusCode::OK, Json(checkpoints)).into_response(),
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_run_checkpoint_reply(
+    Path((id, checkpoint_id)): Path<(String, String)>,
+    State(app): State<AppContext>,
+    Json(request): Json<CheckpointReplyRequest>,
+) -> impl IntoResponse {
+    let answered_by = request
+        .answered_by
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("operator");
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app
+            .reply_to_checkpoint(
+                &id,
+                &checkpoint_id,
+                answered_by,
+                &request.answer_text,
+                request.decision_json,
+                request.resolve,
+            )
+            .await
+        {
+            Ok(checkpoint) => (StatusCode::OK, Json(checkpoint)).into_response(),
+            Err(error) => {
+                let message = error.to_string();
+                let status = if message.contains("not found") {
+                    StatusCode::NOT_FOUND
+                } else if message.contains("need answer_text or decision_json") {
+                    StatusCode::BAD_REQUEST
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                (status, message).into_response()
+            }
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_chat(
+    State(app): State<AppContext>,
+    Json(request): Json<CoobieQueryRequest>,
+) -> impl IntoResponse {
+    match execute_coobie_query(&app, request.run_id.as_deref(), &request.message).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_coobie_query(
+    State(app): State<AppContext>,
+    Json(request): Json<CoobieQueryRequest>,
+) -> impl IntoResponse {
+    match execute_coobie_query(&app, request.run_id.as_deref(), &request.message).await {
+        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_agent_chat(
+    Path(agent): Path<String>,
+    State(app): State<AppContext>,
+    Json(request): Json<AgentChatRequest>,
+) -> impl IntoResponse {
+    if agent.eq_ignore_ascii_case("coobie") {
+        match execute_coobie_query(&app, request.run_id.as_deref(), &request.message).await {
+            Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        }
+    } else {
+        let label = agent.to_lowercase();
+        let response = CoobieQueryResponse {
+            agent: label.clone(),
+            response: format!(
+                "{} direct chat is not live yet. Coobie can still answer pack-level causal and memory questions in the meantime.",
+                title_case_agent(&label)
+            ),
+            retrieval_path: vec!["working_memory".to_string()],
+            confidence: 0.35,
+            sources: Vec::new(),
+        };
+        (StatusCode::OK, Json(response)).into_response()
+    }
+}
+
+async fn post_agent_unblock(
+    Path(agent): Path<String>,
+    State(app): State<AppContext>,
+    Json(request): Json<AgentUnblockRequest>,
+) -> impl IntoResponse {
+    let answered_by = request
+        .answered_by
+        .as_deref()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or("operator");
+    match app.get_run(&request.run_id).await {
+        Ok(Some(_)) => match app
+            .unblock_agent_checkpoints(
+                &request.run_id,
+                &agent,
+                request.checkpoint_id.as_deref(),
+                answered_by,
+                request.answer_text.as_deref(),
+                request.decision_json,
+            )
+            .await
+        {
+            Ok(checkpoints) => (
+                StatusCode::OK,
+                Json(AgentUnblockResponse {
+                    run_id: request.run_id,
+                    agent,
+                    resolved: checkpoints.len(),
+                    checkpoints,
+                }),
+            )
+                .into_response(),
+            Err(error) => {
+                let message = error.to_string();
+                let status = if message.contains("not open") {
+                    StatusCode::NOT_FOUND
+                } else {
+                    StatusCode::INTERNAL_SERVER_ERROR
+                };
+                (status, message).into_response()
+            }
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_run_consolidate(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app.consolidate_run_for_operator(&id).await {
+            Ok(new_lessons) => match build_memory_board(&app, &id).await {
+                Ok(Some(memory_board)) => (
+                    StatusCode::OK,
+                    Json(ConsolidateRunResponse {
+                        run_id: id,
+                        total_new_lessons: new_lessons.len(),
+                        new_lessons,
+                        memory_board,
+                    }),
+                )
+                    .into_response(),
+                Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
+            },
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
 async fn get_coobie_briefing(
     Path(id): Path<String>,
     State(app): State<AppContext>,
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => {
-            let briefing_path = app.paths.workspaces.join(&id).join("run").join("coobie_briefing.json");
+            let briefing_path = app
+                .paths
+                .workspaces
+                .join(&id)
+                .join("run")
+                .join("coobie_briefing.json");
             match read_optional_json::<CoobieBriefing>(&briefing_path).await {
                 Ok(Some(briefing)) => (StatusCode::OK, Json(briefing)).into_response(),
-                Ok(None) => (StatusCode::NOT_FOUND, "Coobie briefing not yet generated").into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Ok(None) => {
+                    (StatusCode::NOT_FOUND, "Coobie briefing not yet generated").into_response()
+                }
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -478,17 +1034,28 @@ async fn get_coobie_response(
     match app.get_run(&id).await {
         Ok(Some(_)) => {
             let run_dir = app.paths.workspaces.join(&id).join("run");
-            let response = match read_optional_text(&run_dir.join("coobie_report_response.md")).await {
+            let response = match read_optional_text(&run_dir.join("coobie_report_response.md"))
+                .await
+            {
                 Ok(Some(text)) => Some(text),
-                Ok(None) => match read_optional_text(&run_dir.join("coobie_preflight_response.md")).await {
-                    Ok(text) => text,
-                    Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
-                },
-                Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Ok(None) => {
+                    match read_optional_text(&run_dir.join("coobie_preflight_response.md")).await {
+                        Ok(text) => text,
+                        Err(error) => {
+                            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string())
+                                .into_response()
+                        }
+                    }
+                }
+                Err(error) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             };
             match response {
                 Some(text) => (StatusCode::OK, text).into_response(),
-                None => (StatusCode::NOT_FOUND, "Coobie response not yet generated").into_response(),
+                None => {
+                    (StatusCode::NOT_FOUND, "Coobie response not yet generated").into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -505,7 +1072,9 @@ async fn get_coobie_signals(
             let run_dir = app.paths.workspaces.join(&id).join("run");
             match load_coobie_translations(&run_dir).await {
                 Ok(translations) => (StatusCode::OK, Json(translations)).into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -528,7 +1097,10 @@ async fn get_evidence_bundle(
     Query(query): Query<EvidenceBundleQuery>,
     State(app): State<AppContext>,
 ) -> impl IntoResponse {
-    match app.load_project_evidence_bundle(&query.project_root, &name).await {
+    match app
+        .load_project_evidence_bundle(&query.project_root, &name)
+        .await
+    {
         Ok(Some(bundle)) => (StatusCode::OK, Json(bundle)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Evidence bundle not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
@@ -683,11 +1255,20 @@ async fn get_causal_report(
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => {
-            let report_path = app.paths.workspaces.join(&id).join("run").join("causal_report.json");
+            let report_path = app
+                .paths
+                .workspaces
+                .join(&id)
+                .join("run")
+                .join("causal_report.json");
             match read_optional_json::<CausalReport>(&report_path).await {
                 Ok(Some(report)) => (StatusCode::OK, Json(report)).into_response(),
-                Ok(None) => (StatusCode::NOT_FOUND, "Causal report not yet generated").into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Ok(None) => {
+                    (StatusCode::NOT_FOUND, "Causal report not yet generated").into_response()
+                }
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -701,11 +1282,22 @@ async fn get_run_evidence_match_report(
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => {
-            let report_path = app.paths.workspaces.join(&id).join("run").join("evidence_match_report.json");
+            let report_path = app
+                .paths
+                .workspaces
+                .join(&id)
+                .join("run")
+                .join("evidence_match_report.json");
             match read_optional_json::<EvidenceMatchReport>(&report_path).await {
                 Ok(Some(report)) => (StatusCode::OK, Json(report)).into_response(),
-                Ok(None) => (StatusCode::NOT_FOUND, "Evidence match report not yet generated").into_response(),
-                Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+                Ok(None) => (
+                    StatusCode::NOT_FOUND,
+                    "Evidence match report not yet generated",
+                )
+                    .into_response(),
+                Err(error) => {
+                    (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                }
             }
         }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -746,10 +1338,12 @@ async fn post_evidence_match_report(
             push_unique_string(&mut sources, source);
         }
         if time_span_ms.is_none() {
-            time_span_ms = window.time_span_ms.or_else(|| match (window.start_ms, window.end_ms) {
-                (Some(start), Some(end)) if end >= start => Some(end - start),
-                _ => None,
-            });
+            time_span_ms = window
+                .time_span_ms
+                .or_else(|| match (window.start_ms, window.end_ms) {
+                    (Some(start), Some(end)) if end >= start => Some(end - start),
+                    _ => None,
+                });
         }
         selected_window_summary = Some(render_selected_window_summary(&window, time_span_ms));
     }
@@ -774,6 +1368,880 @@ async fn post_evidence_match_report(
     }
 }
 
+async fn execute_coobie_query(
+    app: &AppContext,
+    requested_run_id: Option<&str>,
+    message: &str,
+) -> anyhow::Result<CoobieQueryResponse> {
+    let query = message.trim();
+    if query.is_empty() {
+        return Ok(CoobieQueryResponse {
+            agent: "coobie".to_string(),
+            response: "Ask me about the current run, recalled lessons, stale memory, recoveries, or interventions.".to_string(),
+            retrieval_path: vec!["working_memory".to_string()],
+            confidence: 0.3,
+            sources: Vec::new(),
+        });
+    }
+
+    let target_run = resolve_query_run(app, requested_run_id).await?;
+    let normalized = query.to_ascii_lowercase();
+
+    if normalized.contains("memory-bearing")
+        || (normalized.contains("memory") && normalized.contains("event"))
+    {
+        return answer_memory_events_query(app, target_run.as_deref(), query).await;
+    }
+    if normalized.contains("intervention")
+        || normalized.contains("recover")
+        || normalized.contains("recovery")
+    {
+        return answer_recovery_query(app, target_run.as_deref(), query).await;
+    }
+    if normalized.contains("stale")
+        || normalized.contains("lesson")
+        || normalized.contains("recalled")
+    {
+        return answer_memory_status_query(app, target_run.as_deref(), query).await;
+    }
+
+    answer_general_coobie_query(app, target_run.as_deref(), query).await
+}
+
+async fn resolve_query_run(
+    app: &AppContext,
+    requested_run_id: Option<&str>,
+) -> anyhow::Result<Option<String>> {
+    if let Some(run_id) = requested_run_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+    {
+        if app.get_run(run_id).await?.is_some() {
+            return Ok(Some(run_id.to_string()));
+        }
+    }
+    Ok(app
+        .list_runs(1)
+        .await?
+        .into_iter()
+        .next()
+        .map(|run| run.run_id))
+}
+
+async fn answer_general_coobie_query(
+    app: &AppContext,
+    run_id: Option<&str>,
+    query: &str,
+) -> anyhow::Result<CoobieQueryResponse> {
+    let mut retrieval_path = Vec::new();
+    let mut sources = Vec::new();
+    if let Some(run_id) = run_id {
+        retrieval_path.push("working_memory".to_string());
+        retrieval_path.push("blackboard".to_string());
+        let mission = build_mission_board(app, run_id).await?;
+        let action = build_action_board(app, run_id).await?;
+        let evidence = build_evidence_board(app, run_id).await?;
+        let memory = build_memory_board(app, run_id).await?;
+        if let Some(board) = mission.as_ref() {
+            sources.push(source_ref(
+                "mission_board",
+                &board.title,
+                Some(run_id),
+                board.current_phase.as_deref(),
+                Some("spec.yaml"),
+            ));
+        }
+        if let Some(board) = action.as_ref() {
+            sources.push(source_ref(
+                "action_board",
+                board.active_goal.as_deref().unwrap_or("action-board"),
+                Some(run_id),
+                board.current_phase.as_deref(),
+                Some("blackboard.json"),
+            ));
+        }
+        if let Some(board) = evidence.as_ref() {
+            sources.push(source_ref(
+                "evidence_board",
+                "evidence-board",
+                Some(run_id),
+                None,
+                Some("validation.json"),
+            ));
+            if board.causal_report.is_some() {
+                sources.push(source_ref(
+                    "causal_report",
+                    "causal-report",
+                    Some(run_id),
+                    Some("memory"),
+                    Some("causal_report.json"),
+                ));
+            }
+        }
+        if let Some(board) = memory.as_ref() {
+            sources.push(source_ref(
+                "memory_board",
+                "memory-board",
+                Some(run_id),
+                board.current_phase.as_deref(),
+                Some("coobie_briefing.json"),
+            ));
+        }
+
+        let response = format_general_query_response(
+            query,
+            mission.as_ref(),
+            action.as_ref(),
+            evidence.as_ref(),
+            memory.as_ref(),
+        );
+        return Ok(CoobieQueryResponse {
+            agent: "coobie".to_string(),
+            response,
+            retrieval_path,
+            confidence: 0.72,
+            sources,
+        });
+    }
+
+    Ok(CoobieQueryResponse {
+        agent: "coobie".to_string(),
+        response: "I do not have a run in working memory yet. Commission a run or pass a run_id and I can answer from the blackboard, lessons, and causal history.".to_string(),
+        retrieval_path: vec!["working_memory".to_string()],
+        confidence: 0.42,
+        sources,
+    })
+}
+
+async fn answer_memory_status_query(
+    app: &AppContext,
+    run_id: Option<&str>,
+    _query: &str,
+) -> anyhow::Result<CoobieQueryResponse> {
+    let Some(run_id) = run_id else {
+        return Ok(CoobieQueryResponse {
+            agent: "coobie".to_string(),
+            response: "I do not have an active run to inspect for recalled lessons or stale memory. Pass a run_id or commission a run first.".to_string(),
+            retrieval_path: vec!["working_memory".to_string()],
+            confidence: 0.4,
+            sources: Vec::new(),
+        });
+    };
+
+    let board = build_memory_board(app, run_id).await?;
+    let Some(board) = board else {
+        return Ok(CoobieQueryResponse {
+            agent: "coobie".to_string(),
+            response: format!("Run {run_id} was not found."),
+            retrieval_path: vec!["working_memory".to_string()],
+            confidence: 0.2,
+            sources: Vec::new(),
+        });
+    };
+
+    let active_lessons = board
+        .active_recalled_lessons
+        .iter()
+        .take(3)
+        .map(|entry| {
+            format!(
+                "{} [{}]",
+                entry.lesson.lesson_id,
+                entry.used_in_phases.join(", ")
+            )
+        })
+        .collect::<Vec<_>>();
+    let stale = board
+        .stale_memory_entries
+        .iter()
+        .take(3)
+        .map(|entry| {
+            format!(
+                "{}:{}:{}",
+                entry.memory_id,
+                entry.severity,
+                entry.mitigation_status.as_deref().unwrap_or("unresolved")
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let mut response = format!(
+        "Memory Board for run {}: {} active recalled lessons, {} stale-risk entries, active risk score {}.",
+        run_id,
+        board.active_recalled_lessons.len(),
+        board.stale_risk_summary.stale_risk_count,
+        board.stale_risk_summary.active_risk_score,
+    );
+    if !active_lessons.is_empty() {
+        response.push_str(&format!(" Active lessons: {}.", active_lessons.join("; ")));
+    }
+    if !stale.is_empty() {
+        response.push_str(&format!(" Top stale memory entries: {}.", stale.join("; ")));
+    }
+
+    Ok(CoobieQueryResponse {
+        agent: "coobie".to_string(),
+        response,
+        retrieval_path: vec![
+            "working_memory".to_string(),
+            "blackboard".to_string(),
+            "typed_lessons".to_string(),
+        ],
+        confidence: 0.83,
+        sources: vec![
+            source_ref(
+                "memory_board",
+                "memory-board",
+                Some(run_id),
+                board.current_phase.as_deref(),
+                Some("coobie_briefing.json"),
+            ),
+            source_ref(
+                "memory_board",
+                "stale-memory",
+                Some(run_id),
+                Some("memory"),
+                Some("stale_memory_mitigation_status.json"),
+            ),
+        ],
+    })
+}
+
+async fn answer_memory_events_query(
+    app: &AppContext,
+    run_id: Option<&str>,
+    _query: &str,
+) -> anyhow::Result<CoobieQueryResponse> {
+    let Some(run_id) = run_id else {
+        return Ok(CoobieQueryResponse {
+            agent: "coobie".to_string(),
+            response: "I need a run in scope to return memory-bearing events. Pass a run_id or open a run first.".to_string(),
+            retrieval_path: vec!["working_memory".to_string()],
+            confidence: 0.38,
+            sources: Vec::new(),
+        });
+    };
+
+    let attributions = app.list_phase_attributions_for_run(run_id).await?;
+    let memory_events = attributions
+        .into_iter()
+        .filter(|record| {
+            !record.memory_hits.is_empty()
+                || !record.core_memory_ids.is_empty()
+                || !record.project_memory_ids.is_empty()
+                || !record.relevant_lesson_ids.is_empty()
+                || record.phase == "memory"
+        })
+        .collect::<Vec<_>>();
+
+    let summary = if memory_events.is_empty() {
+        format!("I found no memory-bearing phase attributions for run {run_id}.")
+    } else {
+        let lines = memory_events
+            .iter()
+            .take(8)
+            .map(|record| {
+                format!(
+                    "{}:{} outcome={} memories={} core={} project={} lessons={}",
+                    record.phase,
+                    record.agent_name,
+                    record.outcome,
+                    record.memory_hits.len(),
+                    record.core_memory_ids.len(),
+                    record.project_memory_ids.len(),
+                    record.relevant_lesson_ids.len(),
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "I found {} memory-bearing phase events for run {}. {}",
+            memory_events.len(),
+            run_id,
+            lines,
+        )
+    };
+
+    let sources = memory_events
+        .iter()
+        .take(8)
+        .map(|record| {
+            source_ref(
+                "phase_attribution",
+                &record.agent_name,
+                Some(run_id),
+                Some(&record.phase),
+                Some("phase_attributions.json"),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    Ok(CoobieQueryResponse {
+        agent: "coobie".to_string(),
+        response: summary,
+        retrieval_path: vec![
+            "working_memory".to_string(),
+            "blackboard".to_string(),
+            "typed_lessons".to_string(),
+        ],
+        confidence: 0.87,
+        sources,
+    })
+}
+
+async fn answer_recovery_query(
+    app: &AppContext,
+    run_id: Option<&str>,
+    query: &str,
+) -> anyhow::Result<CoobieQueryResponse> {
+    let lower = query.to_ascii_lowercase();
+    let ask_mason = lower.contains("mason");
+    let ask_validation = lower.contains("validation");
+    let mut recovery_rows = Vec::new();
+    let mut interventions = HashMap::<String, usize>::new();
+
+    for run in app.list_runs(40).await? {
+        let events = app.list_run_events(&run.run_id).await?;
+        let Some(first_validation_issue) = events.iter().find(|event| {
+            (!ask_validation || event.phase == "validation")
+                && matches!(event.status.as_str(), "warning" | "failed" | "blocked")
+        }) else {
+            continue;
+        };
+
+        let later_mason = events.iter().any(|event| {
+            event.event_id > first_validation_issue.event_id
+                && event.agent.eq_ignore_ascii_case("mason")
+                && matches!(event.status.as_str(), "running" | "complete" | "info")
+        });
+        if ask_mason && !later_mason {
+            continue;
+        }
+        if !matches!(run.status.as_str(), "completed" | "completed_with_issues") {
+            continue;
+        }
+
+        let run_dir = app.paths.workspaces.join(&run.run_id).join("run");
+        let report =
+            read_optional_json::<CausalReport>(&run_dir.join("causal_report.json")).await?;
+        if let Some(report) = report.as_ref() {
+            tally_interventions(&mut interventions, &report.recommended_interventions);
+        }
+
+        recovery_rows.push((
+            run,
+            first_validation_issue.phase.clone(),
+            later_mason,
+            report,
+        ));
+    }
+
+    let mut response = if recovery_rows.is_empty() {
+        "I did not find matching recovery runs in the last 40 runs.".to_string()
+    } else {
+        let rows = recovery_rows
+            .iter()
+            .take(6)
+            .map(|(run, phase, later_mason, _)| {
+                format!(
+                    "{} status={} phase={} mason_recovery={}",
+                    run.run_id,
+                    run.status,
+                    phase,
+                    if *later_mason { "yes" } else { "no" }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("; ");
+        format!(
+            "I found {} recovery runs in the last 40 runs. {}",
+            recovery_rows.len(),
+            rows,
+        )
+    };
+
+    if !interventions.is_empty() {
+        let mut ranked = interventions.into_iter().collect::<Vec<_>>();
+        ranked.sort_by(|left, right| right.1.cmp(&left.1).then_with(|| left.0.cmp(&right.0)));
+        let top = ranked
+            .into_iter()
+            .take(3)
+            .map(|(label, count)| format!("{} x{}", label, count))
+            .collect::<Vec<_>>()
+            .join("; ");
+        response.push_str(&format!(
+            " Most common recommended interventions before recovery: {}.",
+            top
+        ));
+    }
+
+    let mut sources = recovery_rows
+        .iter()
+        .take(6)
+        .map(|(run, phase, _, _)| {
+            source_ref(
+                "run_event",
+                &run.run_id,
+                Some(&run.run_id),
+                Some(phase),
+                Some("run_events"),
+            )
+        })
+        .collect::<Vec<_>>();
+    if let Some(run_id) = run_id {
+        sources.push(source_ref(
+            "query_scope",
+            "query-scope",
+            Some(run_id),
+            None,
+            None,
+        ));
+    }
+
+    Ok(CoobieQueryResponse {
+        agent: "coobie".to_string(),
+        response,
+        retrieval_path: vec!["working_memory".to_string(), "causal_lookup".to_string()],
+        confidence: if recovery_rows.is_empty() { 0.45 } else { 0.74 },
+        sources,
+    })
+}
+
+fn format_general_query_response(
+    query: &str,
+    mission: Option<&MissionBoardResponse>,
+    action: Option<&ActionBoardResponse>,
+    evidence: Option<&EvidenceBoardResponse>,
+    memory: Option<&MemoryBoardResponse>,
+) -> String {
+    let mut parts = vec![format!("For \"{}\"", query)];
+    if let Some(mission) = mission {
+        parts.push(format!(
+            "run {} is {} in phase {} with goal {}",
+            mission.run_id,
+            mission.run_status,
+            mission.current_phase.as_deref().unwrap_or("unknown"),
+            mission.active_goal.as_deref().unwrap_or("unspecified")
+        ));
+    }
+    if let Some(action) = action {
+        parts.push(format!(
+            "{} blockers and {} open checkpoints are active",
+            action.open_blockers.len(),
+            action.open_checkpoints.len()
+        ));
+    }
+    if let Some(memory) = memory {
+        parts.push(format!(
+            "Coobie has {} active recalled lessons and stale risk score {}",
+            memory.active_recalled_lessons.len(),
+            memory.stale_risk_summary.active_risk_score
+        ));
+    }
+    if let Some(evidence) = evidence {
+        parts.push(format!(
+            "evidence includes validation={}, hidden_scenarios={}, causal_report={}",
+            evidence
+                .validation
+                .as_ref()
+                .map(|summary| if summary.passed { "passed" } else { "failed" })
+                .unwrap_or("missing"),
+            evidence
+                .hidden_scenarios
+                .as_ref()
+                .map(|summary| if summary.passed { "passed" } else { "failed" })
+                .unwrap_or("missing"),
+            if evidence.causal_report.is_some() {
+                "present"
+            } else {
+                "missing"
+            }
+        ));
+    }
+    parts.join("; ") + "."
+}
+
+fn source_ref(
+    kind: &str,
+    label: &str,
+    run_id: Option<&str>,
+    phase: Option<&str>,
+    artifact: Option<&str>,
+) -> CoobieQuerySource {
+    CoobieQuerySource {
+        kind: kind.to_string(),
+        label: label.to_string(),
+        run_id: run_id.map(|value| value.to_string()),
+        phase: phase.map(|value| value.to_string()),
+        artifact: artifact.map(|value| value.to_string()),
+    }
+}
+
+fn tally_interventions(counts: &mut HashMap<String, usize>, interventions: &[InterventionPlan]) {
+    for intervention in interventions {
+        let label = format!("{} -> {}", intervention.target, intervention.action);
+        *counts.entry(label).or_insert(0) += 1;
+    }
+}
+
+fn title_case_agent(value: &str) -> String {
+    let mut chars = value.chars();
+    match chars.next() {
+        Some(first) => first.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+async fn build_mission_board(
+    app: &AppContext,
+    id: &str,
+) -> anyhow::Result<Option<MissionBoardResponse>> {
+    let Some(run) = app.get_run(id).await? else {
+        return Ok(None);
+    };
+
+    let run_dir = app.paths.workspaces.join(id).join("run");
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let spec = read_optional_spec(&run_dir.join("spec.yaml")).await?;
+
+    let (title, purpose, scope, constraints, acceptance_criteria, forbidden_behaviors) =
+        if let Some(spec) = spec {
+            (
+                spec.title,
+                spec.purpose,
+                spec.scope,
+                spec.constraints,
+                spec.acceptance_criteria,
+                spec.forbidden_behaviors,
+            )
+        } else {
+            (
+                run.spec_id.clone(),
+                String::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+                Vec::new(),
+            )
+        };
+
+    Ok(Some(MissionBoardResponse {
+        run_id: run.run_id,
+        spec_id: run.spec_id,
+        title,
+        purpose,
+        product: run.product,
+        run_status: run.status,
+        current_phase: blackboard.as_ref().map(|board| board.current_phase.clone()),
+        active_goal: blackboard.as_ref().map(|board| board.active_goal.clone()),
+        scope,
+        constraints,
+        acceptance_criteria,
+        forbidden_behaviors,
+        open_blockers: blackboard
+            .as_ref()
+            .map(|board| board.open_blockers.clone())
+            .unwrap_or_default(),
+        resolved_items: blackboard
+            .as_ref()
+            .map(|board| board.resolved_items.clone())
+            .unwrap_or_default(),
+    }))
+}
+
+async fn build_action_board(
+    app: &AppContext,
+    id: &str,
+) -> anyhow::Result<Option<ActionBoardResponse>> {
+    let Some(_run) = app.get_run(id).await? else {
+        return Ok(None);
+    };
+
+    let run_dir = app.paths.workspaces.join(id).join("run");
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let checkpoints = app.list_run_checkpoints(id).await?;
+    let open_checkpoints = checkpoints
+        .into_iter()
+        .filter(|checkpoint| matches!(checkpoint.status.as_str(), "open" | "answered"))
+        .collect::<Vec<_>>();
+    let mut recent_events = app.list_run_events(id).await?;
+    if recent_events.len() > 12 {
+        recent_events = recent_events.split_off(recent_events.len() - 12);
+    }
+    let mut latest_agent_executions =
+        read_optional_json::<Vec<AgentExecution>>(&run_dir.join("agent_executions.json"))
+            .await?
+            .unwrap_or_default();
+    latest_agent_executions.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+    if latest_agent_executions.len() > 8 {
+        latest_agent_executions =
+            latest_agent_executions.split_off(latest_agent_executions.len() - 8);
+    }
+
+    Ok(Some(ActionBoardResponse {
+        run_id: id.to_string(),
+        current_phase: blackboard.as_ref().map(|board| board.current_phase.clone()),
+        active_goal: blackboard.as_ref().map(|board| board.active_goal.clone()),
+        agent_claims: blackboard
+            .as_ref()
+            .map(|board| board.agent_claims.clone())
+            .unwrap_or_default(),
+        open_blockers: blackboard
+            .as_ref()
+            .map(|board| board.open_blockers.clone())
+            .unwrap_or_default(),
+        open_checkpoints,
+        recent_events,
+        latest_agent_executions,
+    }))
+}
+
+async fn build_evidence_board(
+    app: &AppContext,
+    id: &str,
+) -> anyhow::Result<Option<EvidenceBoardResponse>> {
+    let Some(_run) = app.get_run(id).await? else {
+        return Ok(None);
+    };
+
+    let run_dir = app.paths.workspaces.join(id).join("run");
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let validation =
+        read_optional_json::<ValidationSummary>(&run_dir.join("validation.json")).await?;
+    let hidden_scenarios =
+        read_optional_json::<HiddenScenarioSummary>(&run_dir.join("hidden_scenarios.json")).await?;
+    let evidence_match_report =
+        read_optional_json::<EvidenceMatchReport>(&run_dir.join("evidence_match_report.json"))
+            .await?;
+    let causal_report =
+        read_optional_json::<CausalReport>(&run_dir.join("causal_report.json")).await?;
+    let recent_evidence_events = app
+        .list_run_events(id)
+        .await?
+        .into_iter()
+        .filter(|event| {
+            matches!(
+                event.phase.as_str(),
+                "validation" | "hidden_scenarios" | "memory" | "artifacts"
+            )
+        })
+        .collect::<Vec<_>>();
+
+    Ok(Some(EvidenceBoardResponse {
+        run_id: id.to_string(),
+        artifact_refs: blackboard
+            .as_ref()
+            .map(|board| board.artifact_refs.clone())
+            .unwrap_or_default(),
+        validation,
+        hidden_scenarios,
+        evidence_match_report,
+        causal_report,
+        recent_evidence_events,
+    }))
+}
+
+async fn build_memory_board(
+    app: &AppContext,
+    id: &str,
+) -> anyhow::Result<Option<MemoryBoardResponse>> {
+    let Some(_run) = app.get_run(id).await? else {
+        return Ok(None);
+    };
+
+    let run_dir = app.paths.workspaces.join(id).join("run");
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let phase_attributions =
+        read_optional_json::<Vec<PhaseAttributionRecord>>(&run_dir.join("phase_attributions.json"))
+            .await?
+            .unwrap_or_default();
+    let coobie_briefing =
+        read_optional_json::<CoobieBriefing>(&run_dir.join("coobie_briefing.json")).await?;
+    let stale_status = read_optional_json::<MemoryBoardStaleStatusArtifact>(
+        &run_dir.join("stale_memory_mitigation_status.json"),
+    )
+    .await?;
+
+    let mut active_lessons = Vec::new();
+    let mut policy_reminders = Vec::new();
+    let mut causal_precedents = Vec::new();
+    let mut project_memory_root = None;
+    let mut stale_entries = Vec::new();
+
+    if let Some(briefing) = coobie_briefing.as_ref() {
+        for reminder in &briefing.recommended_guardrails {
+            push_unique_string(&mut policy_reminders, reminder);
+        }
+        for reminder in &briefing.required_checks {
+            push_unique_string(&mut policy_reminders, reminder);
+        }
+        if let Some(board) = blackboard.as_ref() {
+            for flag in &board.policy_flags {
+                push_unique_string(&mut policy_reminders, flag);
+            }
+        }
+        causal_precedents = briefing.prior_causes.clone();
+        project_memory_root = briefing.project_memory_root.clone();
+
+        for lesson in &briefing.relevant_lessons {
+            let mut used_in_phases = Vec::new();
+            let mut used_by_agents = Vec::new();
+            let mut outcomes = Vec::new();
+
+            for attribution in phase_attributions
+                .iter()
+                .filter(|attribution| attribution.relevant_lesson_ids.contains(&lesson.lesson_id))
+            {
+                push_unique_string(&mut used_in_phases, &attribution.phase);
+                push_unique_string(&mut used_by_agents, &attribution.agent_name);
+                push_unique_string(&mut outcomes, &attribution.outcome);
+            }
+
+            active_lessons.push(MemoryBoardLessonView {
+                lesson: lesson.clone(),
+                used_in_phases,
+                used_by_agents,
+                outcomes,
+            });
+        }
+
+        let mut stale_status_by_id = HashMap::new();
+        if let Some(status) = stale_status.as_ref() {
+            for entry in &status.entries {
+                stale_status_by_id.insert(entry.memory_id.clone(), entry.clone());
+            }
+        }
+
+        for risk in &briefing.resume_packet_risks {
+            let status = stale_status_by_id.remove(&risk.memory_id);
+            stale_entries.push(MemoryBoardRiskView {
+                memory_id: risk.memory_id.clone(),
+                summary: risk.summary.clone(),
+                severity: if let Some(status) = status.as_ref() {
+                    if status.severity.is_empty() {
+                        risk.severity.clone()
+                    } else {
+                        status.severity.clone()
+                    }
+                } else {
+                    risk.severity.clone()
+                },
+                severity_score: status
+                    .as_ref()
+                    .map(|entry| entry.severity_score)
+                    .unwrap_or(risk.severity_score),
+                reasons: risk.reasons.clone(),
+                mitigation_status: status.as_ref().map(|entry| entry.status.clone()),
+                mitigation_steps: status
+                    .as_ref()
+                    .map(|entry| entry.mitigation_steps.clone())
+                    .unwrap_or_default(),
+                related_checks: status
+                    .as_ref()
+                    .map(|entry| entry.related_checks.clone())
+                    .unwrap_or_default(),
+                evidence: status
+                    .as_ref()
+                    .map(|entry| entry.evidence.clone())
+                    .unwrap_or_default(),
+                previous_severity_score: status
+                    .as_ref()
+                    .and_then(|entry| entry.previous_severity_score),
+                risk_reduced_from_previous: status
+                    .as_ref()
+                    .and_then(|entry| entry.risk_reduced_from_previous),
+            });
+        }
+
+        for status in stale_status_by_id.into_values() {
+            stale_entries.push(MemoryBoardRiskView {
+                memory_id: status.memory_id,
+                summary: String::new(),
+                severity: status.severity,
+                severity_score: status.severity_score,
+                reasons: Vec::new(),
+                mitigation_status: Some(status.status),
+                mitigation_steps: status.mitigation_steps,
+                related_checks: status.related_checks,
+                evidence: status.evidence,
+                previous_severity_score: status.previous_severity_score,
+                risk_reduced_from_previous: status.risk_reduced_from_previous,
+            });
+        }
+    } else if let Some(board) = blackboard.as_ref() {
+        for flag in &board.policy_flags {
+            push_unique_string(&mut policy_reminders, flag);
+        }
+    }
+
+    stale_entries.sort_by(|left, right| {
+        right
+            .severity_score
+            .cmp(&left.severity_score)
+            .then_with(|| left.memory_id.cmp(&right.memory_id))
+    });
+
+    let phase_memory_usage = phase_attributions
+        .iter()
+        .map(|attribution| MemoryBoardPhaseUsage {
+            phase: attribution.phase.clone(),
+            agent_name: attribution.agent_name.clone(),
+            outcome: attribution.outcome.clone(),
+            prompt_bundle_provider: attribution.prompt_bundle_provider.clone(),
+            memory_hits: attribution.memory_hits.clone(),
+            core_memory_ids: attribution.core_memory_ids.clone(),
+            project_memory_ids: attribution.project_memory_ids.clone(),
+            relevant_lesson_ids: attribution.relevant_lesson_ids.clone(),
+            required_checks: attribution.required_checks.clone(),
+            guardrails: attribution.guardrails.clone(),
+        })
+        .collect::<Vec<_>>();
+
+    let satisfied_count = stale_entries
+        .iter()
+        .filter(|entry| entry.mitigation_status.as_deref() == Some("satisfied"))
+        .count();
+    let partially_satisfied_count = stale_entries
+        .iter()
+        .filter(|entry| entry.mitigation_status.as_deref() == Some("partially_satisfied"))
+        .count();
+    let unresolved_count = stale_entries
+        .iter()
+        .filter(|entry| {
+            entry.mitigation_status.as_deref() == Some("unresolved")
+                || entry.mitigation_status.is_none()
+        })
+        .count();
+    let active_risk_score = stale_entries
+        .iter()
+        .filter(|entry| entry.mitigation_status.as_deref() != Some("satisfied"))
+        .map(|entry| entry.severity_score)
+        .sum();
+
+    Ok(Some(MemoryBoardResponse {
+        run_id: id.to_string(),
+        current_phase: blackboard.as_ref().map(|board| board.current_phase.clone()),
+        active_recalled_lessons: active_lessons,
+        phase_memory_usage,
+        causal_precedents,
+        policy_reminders,
+        project_memory_root,
+        stale_risk_summary: MemoryBoardRiskSummary {
+            stale_risk_count: stale_entries.len(),
+            satisfied_count,
+            partially_satisfied_count,
+            unresolved_count,
+            active_risk_score,
+        },
+        stale_memory_entries: stale_entries,
+        consolidate_available: true,
+    }))
+}
+
 async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<RunStateResponse>> {
     let Some(run) = app.get_run(id).await? else {
         return Ok(None);
@@ -781,18 +2249,30 @@ async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<Ru
 
     let events = app.list_run_events(id).await?;
     let run_dir = app.paths.workspaces.join(id).join("run");
-    let blackboard = read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
     let lessons = read_optional_json::<Vec<LessonRecord>>(&run_dir.join("lessons.json"))
         .await?
         .unwrap_or_default();
-    let agent_executions = read_optional_json::<Vec<AgentExecution>>(&run_dir.join("agent_executions.json"))
-        .await?
-        .unwrap_or_default();
-    let coobie_briefing = read_optional_json::<CoobieBriefing>(&run_dir.join("coobie_briefing.json")).await?;
-    let causal_report = read_optional_json::<CausalReport>(&run_dir.join("causal_report.json")).await?;
-    let coobie_preflight_response = read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
-    let coobie_report_response = read_optional_text(&run_dir.join("coobie_report_response.md")).await?;
-    let evidence_match_report = read_optional_json::<EvidenceMatchReport>(&run_dir.join("evidence_match_report.json")).await?;
+    let agent_executions =
+        read_optional_json::<Vec<AgentExecution>>(&run_dir.join("agent_executions.json"))
+            .await?
+            .unwrap_or_default();
+    let phase_attributions =
+        read_optional_json::<Vec<PhaseAttributionRecord>>(&run_dir.join("phase_attributions.json"))
+            .await?
+            .unwrap_or_default();
+    let coobie_briefing =
+        read_optional_json::<CoobieBriefing>(&run_dir.join("coobie_briefing.json")).await?;
+    let causal_report =
+        read_optional_json::<CausalReport>(&run_dir.join("causal_report.json")).await?;
+    let coobie_preflight_response =
+        read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
+    let coobie_report_response =
+        read_optional_text(&run_dir.join("coobie_report_response.md")).await?;
+    let evidence_match_report =
+        read_optional_json::<EvidenceMatchReport>(&run_dir.join("evidence_match_report.json"))
+            .await?;
     let coobie_translations = load_coobie_translations(&run_dir).await?;
 
     Ok(Some(RunStateResponse {
@@ -801,6 +2281,7 @@ async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<Ru
         blackboard,
         lessons,
         agent_executions,
+        phase_attributions,
         coobie_briefing,
         causal_report,
         coobie_preflight_response,
@@ -818,6 +2299,14 @@ async fn read_optional_json<T: DeserializeOwned>(path: &FsPath) -> anyhow::Resul
     Ok(Some(serde_json::from_str::<T>(&raw)?))
 }
 
+async fn read_optional_spec(path: &FsPath) -> anyhow::Result<Option<Spec>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw = tokio::fs::read_to_string(path).await?;
+    Ok(Some(serde_yaml::from_str::<Spec>(&raw)?))
+}
+
 fn split_csv_field(raw: Option<&str>) -> Vec<String> {
     raw.unwrap_or_default()
         .split(',')
@@ -832,12 +2321,18 @@ fn push_unique_string(values: &mut Vec<String>, candidate: &str) {
     if trimmed.is_empty() {
         return;
     }
-    if !values.iter().any(|existing| existing.eq_ignore_ascii_case(trimmed)) {
+    if !values
+        .iter()
+        .any(|existing| existing.eq_ignore_ascii_case(trimmed))
+    {
         values.push(trimmed.to_string());
     }
 }
 
-fn render_selected_window_summary(window: &EvidenceMatchWindowInput, time_span_ms: Option<i64>) -> String {
+fn render_selected_window_summary(
+    window: &EvidenceMatchWindowInput,
+    time_span_ms: Option<i64>,
+) -> String {
     let title = window
         .title
         .as_deref()
@@ -856,7 +2351,10 @@ fn render_selected_window_summary(window: &EvidenceMatchWindowInput, time_span_m
     let span = time_span_ms
         .map(|value| format!("{} ms", value))
         .unwrap_or_else(|| "unspecified".to_string());
-    format!("{} [{}] labels={} span={}", title, annotation_type, labels, span)
+    format!(
+        "{} [{}] labels={} span={}",
+        title, annotation_type, labels, span
+    )
 }
 
 async fn read_optional_text(path: &FsPath) -> anyhow::Result<Option<String>> {
@@ -913,7 +2411,10 @@ fn default_assignments_state() -> AssignmentsState {
 }
 
 fn coordination_json_path(app: &AppContext) -> PathBuf {
-    app.paths.factory.join("coordination").join("assignments.json")
+    app.paths
+        .factory
+        .join("coordination")
+        .join("assignments.json")
 }
 
 fn assignments_markdown_path(app: &AppContext) -> PathBuf {
@@ -921,7 +2422,10 @@ fn assignments_markdown_path(app: &AppContext) -> PathBuf {
 }
 
 fn coordination_policy_events_path(app: &AppContext) -> PathBuf {
-    app.paths.factory.join("coordination").join("policy_events.json")
+    app.paths
+        .factory
+        .join("coordination")
+        .join("policy_events.json")
 }
 
 async fn load_assignments(app: &AppContext) -> anyhow::Result<AssignmentsState> {
@@ -942,7 +2446,10 @@ async fn load_policy_events(app: &AppContext) -> anyhow::Result<Vec<Coordination
     Ok(serde_json::from_str(&raw)?)
 }
 
-async fn save_policy_events(app: &AppContext, events: &[CoordinationPolicyEvent]) -> anyhow::Result<()> {
+async fn save_policy_events(
+    app: &AppContext,
+    events: &[CoordinationPolicyEvent],
+) -> anyhow::Result<()> {
     let path = coordination_policy_events_path(app);
     if let Some(parent) = path.parent() {
         tokio::fs::create_dir_all(parent).await?;
@@ -951,7 +2458,10 @@ async fn save_policy_events(app: &AppContext, events: &[CoordinationPolicyEvent]
     Ok(())
 }
 
-async fn append_policy_event(app: &AppContext, event: CoordinationPolicyEvent) -> anyhow::Result<()> {
+async fn append_policy_event(
+    app: &AppContext,
+    event: CoordinationPolicyEvent,
+) -> anyhow::Result<()> {
     let mut events = load_policy_events(app).await?;
     events.push(event);
     save_policy_events(app, &events).await
@@ -964,7 +2474,11 @@ async fn save_assignments(app: &AppContext, state: &AssignmentsState) -> anyhow:
     }
 
     tokio::fs::write(&json_path, serde_json::to_string_pretty(state)?).await?;
-    tokio::fs::write(assignments_markdown_path(app), render_assignments_markdown(state)).await?;
+    tokio::fs::write(
+        assignments_markdown_path(app),
+        render_assignments_markdown(state),
+    )
+    .await?;
     Ok(())
 }
 
@@ -975,10 +2489,16 @@ fn parse_utc(raw: &str) -> Option<DateTime<Utc>> {
 }
 
 fn has_file_conflict(requested_files: &[String], existing_files: &[String]) -> bool {
-    requested_files.iter().any(|file| existing_files.contains(file))
+    requested_files
+        .iter()
+        .any(|file| existing_files.contains(file))
 }
 
-fn normalize_assignment(assignment: &mut Assignment, now: DateTime<Utc>, stale_after_seconds: i64) -> bool {
+fn normalize_assignment(
+    assignment: &mut Assignment,
+    now: DateTime<Utc>,
+    stale_after_seconds: i64,
+) -> bool {
     let mut changed = false;
     if assignment.last_heartbeat_at.trim().is_empty() {
         assignment.last_heartbeat_at = assignment.claimed_at.clone();
@@ -999,7 +2519,10 @@ fn normalize_assignment(assignment: &mut Assignment, now: DateTime<Utc>, stale_a
     changed
 }
 
-async fn normalize_assignments(app: &AppContext, mut state: AssignmentsState) -> anyhow::Result<AssignmentsState> {
+async fn normalize_assignments(
+    app: &AppContext,
+    mut state: AssignmentsState,
+) -> anyhow::Result<AssignmentsState> {
     let now = Utc::now();
     let mut changed = false;
     let mut events = Vec::new();
@@ -1063,12 +2586,16 @@ async fn ensure_assignments_state(app: &AppContext) -> anyhow::Result<Assignment
 
 fn render_assignments_markdown(state: &AssignmentsState) -> String {
     let mut out = String::new();
-    out.push_str("# Assignments
+    out.push_str(
+        "# Assignments
 
-");
-    out.push_str("This is the fallback coordination document when the Harkonnen API server is not running.
+",
+    );
+    out.push_str(
+        "This is the fallback coordination document when the Harkonnen API server is not running.
 
-");
+",
+    );
     out.push_str(&format!(
         "Keeper manages file-claim policy for this repo.
 Policy mode: {}
@@ -1077,67 +2604,112 @@ Heartbeat timeout: {} seconds
 ",
         state.policy_mode, state.stale_after_seconds
     ));
-    out.push_str("Preferred live source once the server is up: `GET /api/coordination/assignments`.
+    out.push_str(
+        "Preferred live source once the server is up: `GET /api/coordination/assignments`.
 
-");
-    out.push_str("Policy event stream: `GET /api/coordination/policy-events`.
+",
+    );
+    out.push_str(
+        "Policy event stream: `GET /api/coordination/policy-events`.
 
-");
+",
+    );
     out.push_str("Claim work with `POST /api/coordination/claim`, heartbeat with `POST /api/coordination/heartbeat`, and release it with `POST /api/coordination/release`.
 
 ");
-    out.push_str(&format!("Last updated: {}
+    out.push_str(&format!(
+        "Last updated: {}
 
-", state.updated_at));
-    out.push_str("## Active Claims
+",
+        state.updated_at
+    ));
+    out.push_str(
+        "## Active Claims
 
-");
+",
+    );
 
     if state.active.is_empty() {
-        out.push_str("No active claims.
+        out.push_str(
+            "No active claims.
 
-");
+",
+        );
     } else {
         let mut claims: Vec<_> = state.active.values().cloned().collect();
         claims.sort_by(|a, b| a.agent.cmp(&b.agent));
         for claim in claims {
-            out.push_str(&format!("### {}
-", claim.agent));
-            out.push_str(&format!("Task: {}
-", claim.task));
-            out.push_str(&format!("Status: {}
-", claim.status));
-            out.push_str(&format!("Claimed: {}
-", claim.claimed_at));
-            out.push_str(&format!("Last heartbeat: {}
-", claim.last_heartbeat_at));
+            out.push_str(&format!(
+                "### {}
+",
+                claim.agent
+            ));
+            out.push_str(&format!(
+                "Task: {}
+",
+                claim.task
+            ));
+            out.push_str(&format!(
+                "Status: {}
+",
+                claim.status
+            ));
+            out.push_str(&format!(
+                "Claimed: {}
+",
+                claim.claimed_at
+            ));
+            out.push_str(&format!(
+                "Last heartbeat: {}
+",
+                claim.last_heartbeat_at
+            ));
             if claim.files.is_empty() {
-                out.push_str("Files: none declared
+                out.push_str(
+                    "Files: none declared
 
-");
+",
+                );
             } else {
-                out.push_str(&format!("Files:
+                out.push_str(&format!(
+                    "Files:
 - {}
 
-", claim.files.join("
-- ")));
+",
+                    claim.files.join(
+                        "
+- "
+                    )
+                ));
             }
         }
     }
 
-    out.push_str("## How To Use This Fallback
+    out.push_str(
+        "## How To Use This Fallback
 
-");
-    out.push_str("1. Before assigning work, read the relevant active claim section.
-");
-    out.push_str("2. Paste only the relevant section into the AI's context.
-");
-    out.push_str("3. If you are actively holding files, send a heartbeat about once per minute.
-");
-    out.push_str("4. Keeper may reap stale conflicting claims when another agent needs the same files.
-");
-    out.push_str("5. Once the server is running, switch all agents to the live coordination endpoint.
-");
+",
+    );
+    out.push_str(
+        "1. Before assigning work, read the relevant active claim section.
+",
+    );
+    out.push_str(
+        "2. Paste only the relevant section into the AI's context.
+",
+    );
+    out.push_str(
+        "3. If you are actively holding files, send a heartbeat about once per minute.
+",
+    );
+    out.push_str(
+        "4. Keeper may reap stale conflicting claims when another agent needs the same files.
+",
+    );
+    out.push_str(
+        "5. Once the server is running, switch all agents to the live coordination endpoint.
+",
+    );
     out
 }
 
@@ -1161,7 +2733,9 @@ async fn claim_task(
 ) -> impl IntoResponse {
     let mut state = match ensure_assignments_state(&app).await {
         Ok(state) => state,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     };
 
     let now = Utc::now();
@@ -1202,7 +2776,9 @@ async fn claim_task(
                     ),
                     created_at: now.to_rfc3339(),
                 },
-            ).await {
+            )
+            .await
+            {
                 return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response();
             }
         }
@@ -1217,7 +2793,10 @@ async fn claim_task(
                 .filter(|file| existing.files.contains(file))
                 .collect();
             if !conflict.is_empty() {
-                let message = format!("Keeper blocked claim: {} already owns {:?}", owner, conflict);
+                let message = format!(
+                    "Keeper blocked claim: {} already owns {:?}",
+                    owner, conflict
+                );
                 let event = CoordinationPolicyEvent {
                     event_id: uuid::Uuid::new_v4().to_string(),
                     managed_by: state.managed_by.clone(),
@@ -1276,7 +2855,8 @@ async fn claim_task(
             message: format!("Keeper granted claim for {}", agent),
             created_at: now.to_rfc3339(),
         },
-    ).await;
+    )
+    .await;
 
     match save_assignments(&app, &state).await {
         Ok(()) => (StatusCode::OK, Json(state)).into_response(),
@@ -1290,7 +2870,9 @@ async fn heartbeat_task(
 ) -> impl IntoResponse {
     let mut state = match ensure_assignments_state(&app).await {
         Ok(state) => state,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     };
 
     let now = Utc::now().to_rfc3339();
@@ -1317,7 +2899,8 @@ async fn heartbeat_task(
                 message: format!("Keeper revived claim for {} after a heartbeat", req.agent),
                 created_at: now.clone(),
             },
-        ).await;
+        )
+        .await;
     }
 
     match save_assignments(&app, &state).await {
@@ -1332,7 +2915,9 @@ async fn release_task(
 ) -> impl IntoResponse {
     let mut state = match ensure_assignments_state(&app).await {
         Ok(state) => state,
-        Err(error) => return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        Err(error) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+        }
     };
 
     state.active.remove(&req.agent);
@@ -1351,7 +2936,8 @@ async fn release_task(
             message: format!("Keeper recorded release for {}", req.agent),
             created_at: Utc::now().to_rfc3339(),
         },
-    ).await;
+    )
+    .await;
 
     match save_assignments(&app, &state).await {
         Ok(()) => (StatusCode::OK, Json(state)).into_response(),
@@ -1395,17 +2981,22 @@ async fn scout_draft(
         return (StatusCode::BAD_REQUEST, "intent and product are required").into_response();
     }
 
-    let spec_id = format!("{}-draft-{}", slugify(&product), &uuid::Uuid::new_v4().to_string()[..8]);
+    let spec_id = format!(
+        "{}-draft-{}",
+        slugify(&product),
+        &uuid::Uuid::new_v4().to_string()[..8]
+    );
 
     // Build a structured spec from the intent text.
     // Lines starting with verbs become acceptance_criteria; everything else is purpose.
-    let lines: Vec<&str> = intent.lines().map(str::trim).filter(|l| !l.is_empty()).collect();
+    let lines: Vec<&str> = intent
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .collect();
     let purpose = lines.first().copied().unwrap_or(&intent);
 
-    let criteria: Vec<String> = lines.iter()
-        .skip(1)
-        .map(|l| format!("  - {l}"))
-        .collect();
+    let criteria: Vec<String> = lines.iter().skip(1).map(|l| format!("  - {l}")).collect();
 
     let criteria_block = if criteria.is_empty() {
         "  - run completes without errors".to_string()
@@ -1419,7 +3010,7 @@ async fn scout_draft(
         .unwrap_or_else(|| format!("  - \"product directory: products/{product}/\""));
 
     let spec_yaml = format!(
-r#"id: {spec_id}
+        r#"id: {spec_id}
 title: {title}
 purpose: >
   {purpose}
@@ -1468,11 +3059,15 @@ security_expectations:
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
     }
 
-    (StatusCode::OK, Json(ScoutDraftResponse {
-        spec_yaml,
-        spec_path: spec_path_rel,
-        spec_id,
-    })).into_response()
+    (
+        StatusCode::OK,
+        Json(ScoutDraftResponse {
+            spec_yaml,
+            spec_path: spec_path_rel,
+            spec_id,
+        }),
+    )
+        .into_response()
 }
 
 fn slugify(s: &str) -> String {
@@ -1492,7 +3087,7 @@ fn title_case(s: &str) -> String {
         .map(|w| {
             let mut c = w.chars();
             match c.next() {
-                None    => String::new(),
+                None => String::new(),
                 Some(f) => f.to_uppercase().collect::<String>() + c.as_str(),
             }
         })
@@ -1517,6 +3112,166 @@ struct StartRunRequest {
 
 fn default_true() -> bool {
     true
+}
+
+async fn get_setup_check(State(app): State<AppContext>) -> impl IntoResponse {
+    let setup = &app.paths.setup;
+    let providers = [
+        ("claude", setup.providers.claude.as_ref()),
+        ("gemini", setup.providers.gemini.as_ref()),
+        ("codex", setup.providers.codex.as_ref()),
+    ]
+    .into_iter()
+    .filter_map(|(name, provider)| {
+        provider.map(|provider| SetupCheckProviderStatus {
+            name: name.to_string(),
+            enabled: provider.enabled,
+            api_key_env: provider.api_key_env.clone(),
+            configured: std::env::var(&provider.api_key_env).is_ok(),
+            model: provider.model.clone(),
+        })
+    })
+    .collect::<Vec<_>>();
+
+    let agent_routes = [
+        "scout", "keeper", "mason", "piper", "ash", "bramble", "sable", "flint", "coobie",
+    ]
+    .into_iter()
+    .map(|agent| {
+        (
+            agent.to_string(),
+            setup.resolve_agent_provider_name(agent, "default"),
+        )
+    })
+    .collect::<HashMap<_, _>>();
+
+    let mcp_servers = setup
+        .mcp
+        .as_ref()
+        .map(|mcp| {
+            mcp.servers
+                .iter()
+                .map(|server| SetupCheckMcpStatus {
+                    name: server.name.clone(),
+                    command: server.command.clone(),
+                    available: command_available(&server.command),
+                    aliases: server.tool_aliases.clone().unwrap_or_default(),
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+
+    (
+        StatusCode::OK,
+        Json(SetupCheckResponse {
+            setup_name: setup.setup.name.clone(),
+            platform: setup.setup.platform.clone(),
+            default_provider: setup.providers.default.clone(),
+            providers,
+            agent_routes,
+            mcp_servers,
+        }),
+    )
+        .into_response()
+}
+
+async fn post_spec_validate(
+    State(app): State<AppContext>,
+    Json(req): Json<SpecValidateRequest>,
+) -> impl IntoResponse {
+    let spec_yaml = req
+        .spec_yaml
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+    let spec_path = req
+        .path
+        .as_deref()
+        .map(str::trim)
+        .filter(|value| !value.is_empty());
+
+    let spec = if let Some(spec_yaml) = spec_yaml {
+        match serde_yaml::from_str::<Spec>(spec_yaml) {
+            Ok(spec) => spec,
+            Err(error) => {
+                return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+            }
+        }
+    } else if let Some(spec_path) = spec_path {
+        let resolved = resolve_spec_path(&app, spec_path);
+        match crate::spec::load_spec(&resolved) {
+            Ok(spec) => spec,
+            Err(error) => {
+                return (StatusCode::BAD_REQUEST, error.to_string()).into_response();
+            }
+        }
+    } else {
+        return (StatusCode::BAD_REQUEST, "path or spec_yaml is required").into_response();
+    };
+
+    (
+        StatusCode::OK,
+        Json(SpecValidateResponse {
+            valid: true,
+            spec_id: spec.id,
+            title: spec.title,
+        }),
+    )
+        .into_response()
+}
+
+async fn post_memory_init(State(app): State<AppContext>) -> impl IntoResponse {
+    match app.memory_store.init(&app.paths.setup).await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(SimpleOperationResponse {
+                ok: true,
+                message: "Memory initialized".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_memory_index(State(app): State<AppContext>) -> impl IntoResponse {
+    match app.memory_store.reindex().await {
+        Ok(()) => (
+            StatusCode::OK,
+            Json(SimpleOperationResponse {
+                ok: true,
+                message: "Memory reindexed".to_string(),
+            }),
+        )
+            .into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_report(
+    State(app): State<AppContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match reporting::build_report(&app, &id).await {
+        Ok(report) => (StatusCode::OK, Json(RunReportResponse { report })).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn post_run_package(
+    State(app): State<AppContext>,
+    Path(id): Path<String>,
+) -> impl IntoResponse {
+    match app.package_artifacts(&id).await {
+        Ok(path) => (
+            StatusCode::OK,
+            Json(RunPackageResponse {
+                path: path.display().to_string(),
+            }),
+        )
+            .into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
 }
 
 async fn start_run(
@@ -1547,7 +3302,11 @@ async fn start_run(
         return (StatusCode::BAD_REQUEST, "spec is required").into_response();
     }
     if product.is_none() && product_path.is_none() {
-        return (StatusCode::BAD_REQUEST, "product or product_path is required").into_response();
+        return (
+            StatusCode::BAD_REQUEST,
+            "product or product_path is required",
+        )
+            .into_response();
     }
 
     let spec_path = resolve_spec_path(&app, spec_ref);
@@ -1581,7 +3340,11 @@ async fn start_run(
 
     let run_req = RunRequest {
         spec_path,
-        product: if product_path.is_some() { None } else { product },
+        product: if product_path.is_some() {
+            None
+        } else {
+            product
+        },
         product_path,
         run_hidden_scenarios: req.run_hidden_scenarios,
         failure_harness: None,
@@ -1599,11 +3362,21 @@ fn resolve_spec_path(app: &AppContext, spec: &str) -> String {
         return spec.to_string();
     }
     // Otherwise treat it as a spec id: look in drafts first, then examples
-    let drafts = app.paths.factory.join("specs").join("drafts").join(format!("{spec}.yaml"));
+    let drafts = app
+        .paths
+        .factory
+        .join("specs")
+        .join("drafts")
+        .join(format!("{spec}.yaml"));
     if drafts.exists() {
         return drafts.to_string_lossy().into_owned();
     }
-    let examples = app.paths.factory.join("specs").join("examples").join(format!("{spec}.yaml"));
+    let examples = app
+        .paths
+        .factory
+        .join("specs")
+        .join("examples")
+        .join(format!("{spec}.yaml"));
     if examples.exists() {
         return examples.to_string_lossy().into_owned();
     }
@@ -1628,14 +3401,27 @@ async fn add_memory_note(
     }
 
     // Write note as a markdown file in factory/memory/ so Coobie picks it up on next retrieval
-    let note_id = format!("run-note-{}-{}", &run_id[..8], &uuid::Uuid::new_v4().to_string()[..6]);
-    let summary = req.note.lines().next().unwrap_or("Human run note").to_string();
+    let note_id = format!(
+        "run-note-{}-{}",
+        &run_id[..8],
+        &uuid::Uuid::new_v4().to_string()[..6]
+    );
+    let summary = req
+        .note
+        .lines()
+        .next()
+        .unwrap_or("Human run note")
+        .to_string();
 
     let mut all_tags = req.tags.clone();
     all_tags.push("human-note".to_string());
     all_tags.push(format!("run:{}", &run_id[..8]));
 
-    let tags_yaml = all_tags.iter().map(|t| format!("  - {t}")).collect::<Vec<_>>().join("\n");
+    let tags_yaml = all_tags
+        .iter()
+        .map(|t| format!("  - {t}"))
+        .collect::<Vec<_>>()
+        .join("\n");
 
     let content = format!(
         "---\nid: {note_id}\ntags:\n{tags_yaml}\nsummary: {summary}\n---\n\n{note}\n",
@@ -1645,7 +3431,11 @@ async fn add_memory_note(
         note = req.note.trim(),
     );
 
-    let note_path = app.paths.factory.join("memory").join(format!("{note_id}.md"));
+    let note_path = app
+        .paths
+        .factory
+        .join("memory")
+        .join(format!("{note_id}.md"));
 
     if let Err(e) = tokio::fs::create_dir_all(note_path.parent().unwrap()).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -1658,7 +3448,11 @@ async fn add_memory_note(
     // Rebuild the memory index so the note is immediately searchable
     let _ = app.memory_store.reindex().await;
 
-    (StatusCode::OK, Json(serde_json::json!({ "id": note_id, "path": note_path }))).into_response()
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({ "id": note_id, "path": note_path })),
+    )
+        .into_response()
 }
 
 async fn get_tesseract_scene(State(app): State<AppContext>) -> impl IntoResponse {
@@ -1669,11 +3463,15 @@ async fn get_tesseract_scene(State(app): State<AppContext>) -> impl IntoResponse
 
     let mut run_reports: Vec<(RunRecord, Option<CausalReport>)> = Vec::new();
     for run in runs {
-        let report_path = app.paths.workspaces
+        let report_path = app
+            .paths
+            .workspaces
             .join(&run.run_id)
             .join("run")
             .join("causal_report.json");
-        let report = read_optional_json::<CausalReport>(&report_path).await.unwrap_or(None);
+        let report = read_optional_json::<CausalReport>(&report_path)
+            .await
+            .unwrap_or(None);
         run_reports.push((run, report));
     }
 
@@ -1711,7 +3509,10 @@ async fn list_run_artifacts(
                 files.push(serde_json::json!({ "name": name, "ext": ext, "size": size }));
             }
             files.sort_by(|a, b| {
-                a["name"].as_str().unwrap_or("").cmp(b["name"].as_str().unwrap_or(""))
+                a["name"]
+                    .as_str()
+                    .unwrap_or("")
+                    .cmp(b["name"].as_str().unwrap_or(""))
             });
             (StatusCode::OK, Json(files)).into_response()
         }

@@ -244,7 +244,6 @@ impl SystemDiscovery {
         }
     }
 
-
     pub fn recommended_setup_name_for_role(&self, role: &str) -> &'static str {
         match role {
             "ci" | "build" | "runner" => "ci",
@@ -415,11 +414,7 @@ pub fn available_template_names(root: &Path) -> Result<Vec<String>> {
     Ok(names)
 }
 
-pub fn compose_setup_id(
-    machine_name: &str,
-    role: &str,
-    organization: Option<&str>,
-) -> String {
+pub fn compose_setup_id(machine_name: &str, role: &str, organization: Option<&str>) -> String {
     let mut parts = Vec::new();
     if let Some(organization) = organization {
         let organization = slugify_machine_name(organization);

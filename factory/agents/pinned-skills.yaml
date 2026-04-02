@@ -1,0 +1,73 @@
+sources:
+  anthropic:
+    repo: https://github.com/anthropics/skills
+    commit: 98669c11ca63e9c81c11501e1437e5c47b556621
+  openai:
+    repo: https://github.com/openai/skills
+    commit: 736f600bf6ecbc000c04f1d2710b990899f28903
+skills:
+  - id: anthropic/doc-coauthoring
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/doc-coauthoring
+    agents: [scout, coobie, flint]
+    rationale: Structured spec, briefing, and handoff document co-authoring.
+  - id: anthropic/claude-api
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/claude-api
+    agents: [mason, piper]
+    rationale: Anthropic API and SDK implementation guidance for Claude-routed work.
+  - id: anthropic/mcp-builder
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/mcp-builder
+    agents: [piper, mason, ash]
+    rationale: MCP server and tool-surface design guidance.
+  - id: anthropic/webapp-testing
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/webapp-testing
+    agents: [bramble, sable, piper]
+    rationale: Local web application testing and debugging workflow.
+  - id: anthropic/pdf
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/pdf
+    agents: [coobie, flint]
+    rationale: Evidence ingestion, report processing, and PDF artifact handling.
+  - id: anthropic/frontend-design
+    source: anthropic
+    vendor_path: factory/agents/pinned-skills/anthropic/frontend-design
+    agents: [mason, ash]
+    rationale: Higher-quality frontend implementation and UI refinement guidance.
+  - id: openai/doc
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/doc
+    agents: [scout, flint]
+    rationale: DOCX-oriented documentation output and formatting guidance.
+  - id: openai/openai-docs
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/openai-docs
+    agents: [piper, mason]
+    rationale: Official OpenAI platform guidance for Codex/OpenAI-routed work.
+  - id: openai/playwright
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/playwright
+    agents: [bramble, sable, piper]
+    rationale: Browser automation and UI-flow verification.
+  - id: openai/security-best-practices
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/security-best-practices
+    agents: [keeper]
+    rationale: Secure-by-default review guidance for policy and safety decisions.
+  - id: openai/security-threat-model
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/security-threat-model
+    agents: [keeper, scout]
+    rationale: Threat modeling and abuse-path thinking for risky changes.
+  - id: openai/spreadsheet
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/spreadsheet
+    agents: [coobie, flint, ash]
+    rationale: Corpus, metrics, and tabular evidence handling.
+  - id: openai/frontend-skill
+    source: openai
+    vendor_path: factory/agents/pinned-skills/openai/frontend-skill
+    agents: [mason, ash]
+    rationale: Production-grade frontend composition and presentation quality.

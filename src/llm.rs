@@ -16,10 +16,16 @@ pub struct Message {
 
 impl Message {
     pub fn system(content: impl Into<String>) -> Self {
-        Self { role: "system".into(), content: content.into() }
+        Self {
+            role: "system".into(),
+            content: content.into(),
+        }
     }
     pub fn user(content: impl Into<String>) -> Self {
-        Self { role: "user".into(), content: content.into() }
+        Self {
+            role: "user".into(),
+            content: content.into(),
+        }
     }
 }
 
@@ -171,14 +177,21 @@ struct AnthropicContent {
 #[async_trait::async_trait]
 impl LlmProvider for AnthropicClient {
     async fn complete(&self, req: LlmRequest) -> Result<LlmResponse> {
-        let system = req.messages.iter()
+        let system = req
+            .messages
+            .iter()
             .find(|m| m.role == "system")
             .map(|m| m.content.as_str())
             .unwrap_or("");
 
-        let messages: Vec<AnthropicMessage> = req.messages.iter()
+        let messages: Vec<AnthropicMessage> = req
+            .messages
+            .iter()
             .filter(|m| m.role != "system")
-            .map(|m| AnthropicMessage { role: &m.role, content: &m.content })
+            .map(|m| AnthropicMessage {
+                role: &m.role,
+                content: &m.content,
+            })
             .collect();
 
         let body = AnthropicRequest {
@@ -189,7 +202,8 @@ impl LlmProvider for AnthropicClient {
             messages,
         };
 
-        let resp = self.http
+        let resp = self
+            .http
             .post("https://api.anthropic.com/v1/messages")
             .header("x-api-key", &self.api_key)
             .header("anthropic-version", "2023-06-01")
@@ -205,10 +219,11 @@ impl LlmProvider for AnthropicClient {
             bail!("Anthropic API error {}: {}", status, body);
         }
 
-        let parsed: AnthropicResponse = resp.json().await
-            .context("parsing Anthropic response")?;
+        let parsed: AnthropicResponse = resp.json().await.context("parsing Anthropic response")?;
 
-        let content = parsed.content.into_iter()
+        let content = parsed
+            .content
+            .into_iter()
             .map(|c| c.text)
             .collect::<Vec<_>>()
             .join("");
@@ -275,7 +290,9 @@ struct GeminiResponsePart {
 #[async_trait::async_trait]
 impl LlmProvider for GeminiClient {
     async fn complete(&self, req: LlmRequest) -> Result<LlmResponse> {
-        let system_text = req.messages.iter()
+        let system_text = req
+            .messages
+            .iter()
             .find(|m| m.role == "system")
             .map(|m| m.content.clone());
 
@@ -284,13 +301,21 @@ impl LlmProvider for GeminiClient {
             parts: vec![GeminiPart { text }],
         });
 
-        let contents: Vec<GeminiContent> = req.messages.iter()
+        let contents: Vec<GeminiContent> = req
+            .messages
+            .iter()
             .filter(|m| m.role != "system")
             .map(|m| {
-                let role = if m.role == "assistant" { "model" } else { "user" };
+                let role = if m.role == "assistant" {
+                    "model"
+                } else {
+                    "user"
+                };
                 GeminiContent {
                     role: role.to_string(),
-                    parts: vec![GeminiPart { text: m.content.clone() }],
+                    parts: vec![GeminiPart {
+                        text: m.content.clone(),
+                    }],
                 }
             })
             .collect();
@@ -311,7 +336,8 @@ impl LlmProvider for GeminiClient {
             model, self.api_key
         );
 
-        let resp = self.http
+        let resp = self
+            .http
             .post(&url)
             .header("content-type", "application/json")
             .json(&body)
@@ -325,10 +351,11 @@ impl LlmProvider for GeminiClient {
             bail!("Gemini API error {}: {}", status, body);
         }
 
-        let parsed: GeminiResponse = resp.json().await
-            .context("parsing Gemini response")?;
+        let parsed: GeminiResponse = resp.json().await.context("parsing Gemini response")?;
 
-        let content = parsed.candidates.into_iter()
+        let content = parsed
+            .candidates
+            .into_iter()
             .flat_map(|c| c.content.parts)
             .map(|p| p.text)
             .collect::<Vec<_>>()
@@ -378,8 +405,13 @@ struct OpenAiChoiceMessage {
 #[async_trait::async_trait]
 impl LlmProvider for OpenAiClient {
     async fn complete(&self, req: LlmRequest) -> Result<LlmResponse> {
-        let messages: Vec<OpenAiMessage> = req.messages.iter()
-            .map(|m| OpenAiMessage { role: &m.role, content: &m.content })
+        let messages: Vec<OpenAiMessage> = req
+            .messages
+            .iter()
+            .map(|m| OpenAiMessage {
+                role: &m.role,
+                content: &m.content,
+            })
             .collect();
 
         let body = OpenAiRequest {
@@ -389,7 +421,8 @@ impl LlmProvider for OpenAiClient {
             messages,
         };
 
-        let resp = self.http
+        let resp = self
+            .http
             .post("https://api.openai.com/v1/chat/completions")
             .header("Authorization", format!("Bearer {}", self.api_key))
             .header("content-type", "application/json")
@@ -404,10 +437,11 @@ impl LlmProvider for OpenAiClient {
             bail!("OpenAI API error {}: {}", status, body);
         }
 
-        let parsed: OpenAiResponse = resp.json().await
-            .context("parsing OpenAI response")?;
+        let parsed: OpenAiResponse = resp.json().await.context("parsing OpenAI response")?;
 
-        let content = parsed.choices.into_iter()
+        let content = parsed
+            .choices
+            .into_iter()
             .map(|c| c.message.content)
             .collect::<Vec<_>>()
             .join("");

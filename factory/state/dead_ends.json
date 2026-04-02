@@ -38,6 +38,19 @@
       "surviving_structure": "none",
       "reformulation": "hidden_scenarios phase failed; preserve surviving structure and change strategy on retry",
       "created_at": "2026-04-01T21:28:44.571190469+00:00"
+    },
+    {
+      "registry_id": "5c8682ee-9c9d-47c2-b9e8-37b772bc223f:hidden_scenarios-79eaefb5-545a-4724-90f5-efd30b27496f",
+      "run_id": "5c8682ee-9c9d-47c2-b9e8-37b772bc223f",
+      "spec_id": "ceres-station-draft-bc6289ce",
+      "product": "ceres-station",
+      "phase": "hidden_scenarios",
+      "agent": "sable",
+      "strategy": "sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios",
+      "failure_constraint": "thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)",
+      "surviving_structure": "none",
+      "reformulation": "hidden_scenarios phase failed; preserve surviving structure and change strategy on retry",
+      "created_at": "2026-04-02T00:24:16.791939430+00:00"
     }
   ]
 }

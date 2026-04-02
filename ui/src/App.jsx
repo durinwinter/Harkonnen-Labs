@@ -4,20 +4,60 @@ import CoobieSignalPanel from './components/CoobieSignalPanel';
 import CausalTesseract from './visualization/tesseract/CausalTesseract';
 import CausalWorkbench from './components/CausalWorkbench';
 import FactoryFloor from './components/FactoryFloor';
-import NewRunFlow from './components/NewRunFlow';
+import AttributionPanel from './components/AttributionPanel';
+import OperationsDeck from './components/OperationsDeck';
+import PackChat from './components/PackChat';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
+// Agent roster — source of truth, kept in sync with AGENTS.md
+// pinned: 'claude' means trust-critical, always routed to Claude
 const AGENT_DEFS = [
-  { id: 'scout', name: 'Scout', role: 'Spec Retriever', group: 'planning', accentColor: '#c4922a' },
-  { id: 'keeper', name: 'Keeper', role: 'Boundary Retriever', group: 'planning', accentColor: '#8a7a3a' },
-  { id: 'mason', name: 'Mason', role: 'Build Retriever', group: 'action', accentColor: '#c4662a' },
-  { id: 'piper', name: 'Piper', role: 'Tool Retriever', group: 'action', accentColor: '#5a7a5a' },
-  { id: 'ash', name: 'Ash', role: 'Twin Retriever', group: 'action', accentColor: '#2a7a7a' },
-  { id: 'bramble', name: 'Bramble', role: 'Test Retriever', group: 'verification', accentColor: '#a89a2a' },
-  { id: 'sable', name: 'Sable', role: 'Scenario Retriever', group: 'verification', accentColor: '#3a4a5a' },
-  { id: 'flint', name: 'Flint', role: 'Artifact Retriever', group: 'verification', accentColor: '#8a6a3a' },
-  { id: 'coobie', name: 'Coobie', role: 'Memory Retriever', group: 'memory', accentColor: '#7a2a3a' },
+  {
+    id: 'scout', name: 'Scout', role: 'Spec Retriever', group: 'planning', accentColor: '#c4922a',
+    pinned: 'claude',
+    desc: 'Parse specs, flag ambiguity, produce intent package',
+  },
+  {
+    id: 'keeper', name: 'Keeper', role: 'Boundary Retriever', group: 'planning', accentColor: '#8a7a3a',
+    pinned: 'claude',
+    desc: 'Enforce policy, guard boundaries, and manage file-claim coordination',
+  },
+  {
+    id: 'mason', name: 'Mason', role: 'Build Retriever', group: 'action', accentColor: '#c4662a',
+    pinned: null,
+    desc: 'Generate and modify code, multi-file changes',
+  },
+  {
+    id: 'piper', name: 'Piper', role: 'Tool Retriever', group: 'action', accentColor: '#5a7a5a',
+    pinned: null,
+    desc: 'Run build tools, fetch docs, execute helpers',
+  },
+  {
+    id: 'ash', name: 'Ash', role: 'Twin Retriever', group: 'action', accentColor: '#2a7a7a',
+    pinned: null,
+    desc: 'Provision digital twins, mock dependencies',
+  },
+  {
+    id: 'bramble', name: 'Bramble', role: 'Test Retriever', group: 'verification', accentColor: '#a89a2a',
+    pinned: null,
+    desc: 'Generate tests, run lint/build/visible tests',
+  },
+  {
+    id: 'sable', name: 'Sable', role: 'Scenario Retriever', group: 'verification', accentColor: '#3a4a5a',
+    pinned: 'claude',
+    desc: 'Execute hidden scenarios, produce eval reports',
+  },
+  {
+    id: 'flint', name: 'Flint', role: 'Artifact Retriever', group: 'verification', accentColor: '#8a6a3a',
+    pinned: null,
+    desc: 'Collect outputs, package artifact bundles',
+  },
+  {
+    id: 'coobie', name: 'Coobie', role: 'Memory Retriever', group: 'memory', accentColor: '#7a2a3a',
+    pinned: null,
+    desc: 'Coordinate pack memory: working context, episodic capture, causal graph, consolidation, and cross-agent blackboard health',
+  },
 ];
 
 function titleCase(value) {
@@ -73,6 +113,11 @@ function deriveAgents(events, blackboard, executions) {
       latestPhase: latest ? titleCase(latest.phase) : 'Awaiting signal',
       ownership,
       engine: execution ? `${execution.provider}/${execution.model}` : 'unassigned',
+      bundleProvider: execution?.prompt_bundle_provider || null,
+      bundleFingerprint: execution?.prompt_bundle_fingerprint || null,
+      pinnedSkillIds: execution?.pinned_skill_ids || [],
+      desc: definition.desc,
+      pinned: definition.pinned,
     };
   });
 }
@@ -108,7 +153,7 @@ function App() {
   const [capacity, setCapacity] = useState(null);
   const [showTesseract, setShowTesseract] = useState(false);
   const [showWorkbench, setShowWorkbench] = useState(false);
-  const [showNewRun, setShowNewRun] = useState(false);
+  const [showSystem, setShowSystem] = useState(false);
   const [causalReport, setCausalReport] = useState(null);
   const [error, setError] = useState('');
 
@@ -272,6 +317,7 @@ function App() {
   const blackboard = runState?.blackboard || null;
   const lessons = runState?.lessons || [];
   const agentExecutions = runState?.agent_executions || [];
+  const phaseAttributions = runState?.phase_attributions || [];
   const coobieTranslations = runState?.coobie_translations || [];
   const agents = deriveAgents(events, blackboard, agentExecutions);
   const planningAgents = agents.filter((agent) => agent.group === 'planning');
@@ -290,24 +336,30 @@ function App() {
     <div className="pack-board-shell">
       <header className="run-header glass-panel">
         <div>
-          <div className="eyebrow">Harkonnen Labs / Pack Board</div>
-          <h1>{run ? `${run.product} · ${run.spec_id}` : 'Factory offline'}</h1>
+          <div className="eyebrow">Harkonnen Labs · Pack Board</div>
+          <h1>{run ? `${run.product} · ${run.spec_id}` : 'The pack is ready.'}</h1>
           <div className="header-meta">
-            <span>Run: {run?.run_id?.slice(0, 8) || 'none'}</span>
-            <span>Phase: {titleCase(blackboard?.current_phase || run?.status || 'idle')}</span>
-            <span>Status: {(run?.status || 'idle').toUpperCase()}</span>
+            {run && <span>Run: {run.run_id.slice(0, 8)}</span>}
+            {run && <span>Phase: {titleCase(blackboard?.current_phase || run.status || 'idle')}</span>}
+            <span className={`status-pill status-${run?.status || 'idle'}`}>{run?.status || 'idle'}</span>
+            <div className="pack-pins">
+              {AGENT_DEFS.filter(a => a.pinned).map(a => (
+                <span key={a.id} className="pack-pin" title={`${a.name} — pinned to Claude`}>{a.name}</span>
+              ))}
+              <span className="pack-pin-label">pinned to Claude</span>
+            </div>
           </div>
         </div>
 
         <div className="header-controls">
           <label className="run-selector-label">
-            Recent runs
+            Active run
             <select
               className="run-selector"
               value={activeRunId}
               onChange={(event) => setActiveRunId(event.target.value)}
             >
-              {runs.length === 0 ? <option value="">No runs</option> : null}
+              {runs.length === 0 ? <option value="">No runs yet</option> : null}
               {runs.map((candidate) => (
                 <option key={candidate.run_id} value={candidate.run_id}>
                   {candidate.run_id.slice(0, 8)} · {candidate.product} · {candidate.status}
@@ -315,16 +367,6 @@ function App() {
               ))}
             </select>
           </label>
-          <div className={`status-pill status-${run?.status || 'idle'}`}>
-            {run?.status || 'idle'}
-          </div>
-          <button
-            className="tesseract-toggle new-run-btn"
-            onClick={() => setShowNewRun(true)}
-            title="Start a new factory run"
-          >
-            + New Run
-          </button>
           <div className="header-btn-row">
             <button
               className="tesseract-toggle"
@@ -344,12 +386,6 @@ function App() {
         </div>
       </header>
 
-      {showNewRun && (
-        <NewRunFlow
-          onClose={() => setShowNewRun(false)}
-          onRunStarted={(runId) => { setActiveRunId(runId); setShowNewRun(false); }}
-        />
-      )}
       {showTesseract && <CausalTesseract onClose={() => setShowTesseract(false)} />}
       {showWorkbench && (
         <CausalWorkbench
@@ -364,11 +400,23 @@ function App() {
 
       <main className="dashboard-grid">
         <section className="main-column">
-          <Panel title="Factory Floor">
+          <Panel title="Pack Chat">
+            <PackChat
+              activeRunId={activeRunId}
+              agents={agents}
+              onRunStarted={(runId) => setActiveRunId(runId)}
+            />
+          </Panel>
+
+          <Panel title="Action Board">
             <FactoryFloor
               agents={agents}
               onOpenWorkbench={() => setShowWorkbench(true)}
             />
+          </Panel>
+
+          <Panel title="Attribution Board">
+            <AttributionPanel phaseAttributions={phaseAttributions} />
           </Panel>
 
           <Panel title="Run Timeline">
@@ -393,6 +441,33 @@ function App() {
         </section>
 
         <aside className="side-column">
+          <Panel title="Memory Board" compact>
+            {memoryAgent ? <AgentCard agent={memoryAgent} isSingleton /> : null}
+            <div className="info-stack top-gap">
+              <div className="info-row"><span>Lesson refs</span><strong>{blackboard?.lesson_refs?.length || 0}</strong></div>
+              <div className="info-row"><span>Promoted lessons</span><strong>{lessons.length}</strong></div>
+              <div className="info-row"><span>Recent recalls</span><strong>{agentExecutions.length}</strong></div>
+              <div className="info-row"><span>Live pidgin signals</span><strong>{coobieTranslations.reduce((sum, item) => sum + (item.signals?.length || 0), 0)}</strong></div>
+            </div>
+            <div className="top-gap">
+              <CoobieSignalPanel translations={coobieTranslations} compact />
+            </div>
+            <div className="list-block top-gap">
+              {(lessons || []).length === 0 ? (
+                <div className="empty-state">No lessons promoted for this run yet.</div>
+              ) : (
+                lessons.map((lesson) => (
+                  <div key={lesson.lesson_id} className="list-item">
+                    <div className="list-item-title">{lesson.pattern}</div>
+                    <div className="list-item-subtle">
+                      intervention: {lesson.intervention || 'none recorded'}
+                    </div>
+                  </div>
+                ))
+              )}
+            </div>
+          </Panel>
+
           <Panel title="Mission Board" compact>
             <div className="info-stack">
               <div className="info-row"><span>Current phase</span><strong>{titleCase(blackboard?.current_phase || 'idle')}</strong></div>
@@ -427,33 +502,6 @@ function App() {
             </div>
           </Panel>
 
-          <Panel title="Coobie Memory Vault" compact>
-            {memoryAgent ? <AgentCard agent={memoryAgent} isSingleton /> : null}
-            <div className="info-stack top-gap">
-              <div className="info-row"><span>Lesson refs</span><strong>{blackboard?.lesson_refs?.length || 0}</strong></div>
-              <div className="info-row"><span>Promoted lessons</span><strong>{lessons.length}</strong></div>
-              <div className="info-row"><span>Recent recalls</span><strong>{agentExecutions.length}</strong></div>
-              <div className="info-row"><span>Live pidgin signals</span><strong>{coobieTranslations.reduce((sum, item) => sum + (item.signals?.length || 0), 0)}</strong></div>
-            </div>
-            <div className="top-gap">
-              <CoobieSignalPanel translations={coobieTranslations} compact />
-            </div>
-            <div className="list-block top-gap">
-              {(lessons || []).length === 0 ? (
-                <div className="empty-state">No lessons promoted for this run yet.</div>
-              ) : (
-                lessons.map((lesson) => (
-                  <div key={lesson.lesson_id} className="list-item">
-                    <div className="list-item-title">{lesson.pattern}</div>
-                    <div className="list-item-subtle">
-                      intervention: {lesson.intervention || 'none recorded'}
-                    </div>
-                  </div>
-                ))
-              )}
-            </div>
-          </Panel>
-
           <Panel title="Evidence Board" compact>
             <div className="list-block compact-list">
               {(blackboard?.artifact_refs || []).length === 0 ? (
@@ -466,6 +514,15 @@ function App() {
             </div>
           </Panel>
 
+          <div className="system-section">
+            <button
+              className="system-toggle"
+              onClick={() => setShowSystem(s => !s)}
+            >
+              <span>⚙ System</span>
+              <span className="system-toggle-chevron">{showSystem ? '▲' : '▼'}</span>
+            </button>
+            {showSystem && <>
           <Panel title="Provider Capacity" compact>
             {!capacity ? (
               <div className="empty-state">capacity.json not loaded</div>
@@ -495,7 +552,11 @@ function App() {
             )}
           </Panel>
 
-          <Panel title="Keeper Policy Board" compact>
+          <Panel title="Operations Deck" compact>
+                <OperationsDeck activeRunId={activeRunId} />
+              </Panel>
+
+              <Panel title="Keeper Policy Board" compact>
             <div className="info-stack">
               <div className="info-row"><span>Managed by</span><strong>{coordination?.managed_by || 'keeper'}</strong></div>
               <div className="info-row"><span>Policy mode</span><strong>{coordination?.policy_mode || 'exclusive_file_claims'}</strong></div>
@@ -561,6 +622,8 @@ function App() {
               </div>
             </div>
           </Panel>
+            </>}
+          </div>
         </aside>
       </main>
 
@@ -634,6 +697,35 @@ function App() {
           padding: 0.28rem 0.65rem;
           border: 1px solid rgba(255, 255, 255, 0.08);
           background: rgba(255, 255, 255, 0.03);
+        }
+
+        .pack-pins {
+          display: flex;
+          align-items: center;
+          gap: 0.35rem;
+          flex-wrap: wrap;
+        }
+
+        .pack-pin {
+          font-size: 0.62rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          color: #c4922a;
+          background: rgba(196, 146, 42, 0.12);
+          border: 1px solid rgba(196, 146, 42, 0.28);
+          border-radius: 999px;
+          padding: 0.15rem 0.5rem;
+        }
+
+        .pack-pin-label {
+          font-size: 0.58rem;
+          color: rgba(255, 255, 255, 0.22);
+          letter-spacing: 0.06em;
+          text-transform: uppercase;
+          background: none !important;
+          border: none !important;
+          padding: 0 !important;
         }
 
         .header-controls {
@@ -966,16 +1058,38 @@ function App() {
           cursor: default;
         }
 
-        .new-run-btn {
-          background: rgba(143,174,124,0.1);
-          border-color: rgba(143,174,124,0.4);
-          color: #8fae7c;
-          font-size: 0.78rem;
+        .system-section {
+          display: flex;
+          flex-direction: column;
+          gap: 0.75rem;
         }
 
-        .new-run-btn:hover {
-          background: rgba(143,174,124,0.18);
-          border-color: rgba(143,174,124,0.65);
+        .system-toggle {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+          width: 100%;
+          background: rgba(255, 255, 255, 0.03);
+          border: 1px solid rgba(255, 255, 255, 0.07);
+          border-radius: 10px;
+          color: rgba(255, 255, 255, 0.35);
+          font-size: 0.72rem;
+          font-weight: 800;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          padding: 0.55rem 0.8rem;
+          cursor: pointer;
+          transition: background 0.12s, color 0.12s;
+        }
+
+        .system-toggle:hover {
+          background: rgba(255, 255, 255, 0.06);
+          color: rgba(255, 255, 255, 0.55);
+        }
+
+        .system-toggle-chevron {
+          font-size: 0.6rem;
+          opacity: 0.6;
         }
 
         .timeline-list {

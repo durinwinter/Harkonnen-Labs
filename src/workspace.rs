@@ -39,7 +39,10 @@ fn copy_dir_all(source: &Path, destination: &Path) -> Result<()> {
 
         if file_type.is_dir() {
             fs::create_dir_all(&destination_path).with_context(|| {
-                format!("creating destination directory {}", destination_path.display())
+                format!(
+                    "creating destination directory {}",
+                    destination_path.display()
+                )
             })?;
             copy_dir_all(&source_path, &destination_path)?;
         } else if file_type.is_file() {
@@ -60,7 +63,17 @@ fn should_skip_entry(name: &str, is_dir: bool) -> bool {
     if is_dir {
         matches!(
             name,
-            ".git" | "node_modules" | "target" | "dist" | "build" | "coverage" | ".next" | ".turbo" | ".venv" | "venv" | "__pycache__"
+            ".git"
+                | "node_modules"
+                | "target"
+                | "dist"
+                | "build"
+                | "coverage"
+                | ".next"
+                | ".turbo"
+                | ".venv"
+                | "venv"
+                | "__pycache__"
         )
     } else {
         matches!(name, ".DS_Store")

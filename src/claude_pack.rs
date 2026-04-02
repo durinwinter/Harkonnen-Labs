@@ -73,7 +73,6 @@ struct ProjectScan {
     stack_signals: Vec<String>,
 }
 
-
 #[derive(Debug, Clone, Serialize, Default)]
 struct EngineRoutingSnapshot {
     machine_scope: String,
@@ -159,7 +158,10 @@ pub fn export_claude_pack(paths: &Paths, req: ClaudePackRequest) -> Result<Claud
     let machine_scope = engine_routing.machine_scope.clone();
     let machine_dir = pack_root.join("machines").join(&machine_scope);
 
-    write_text_file(&pack_root.join("README.md"), &build_pack_readme(&profile, paths))?;
+    write_text_file(
+        &pack_root.join("README.md"),
+        &build_pack_readme(&profile, paths),
+    )?;
     write_text_file(
         &pack_root.join("project-context.md"),
         &build_project_context(&profile, paths, &scan),
@@ -438,8 +440,10 @@ Constraints:
 "#,
         );
         for item in &profile.constraints {
-            out.push_str(&format!("- {item}
-"));
+            out.push_str(&format!(
+                "- {item}
+"
+            ));
         }
     }
 
@@ -473,10 +477,7 @@ Files to read first:
  - `.harkonnen/context/agent-roster.yaml`
  - `.harkonnen/memory/index.json`
 "#,
-        engine_rel,
-        state_rel,
-        engine_rel,
-        state_rel,
+        engine_rel, state_rel, engine_rel, state_rel,
     ));
 
     if !scan.stack_signals.is_empty() {
@@ -486,8 +487,10 @@ Detected stack signals:
 "#,
         );
         for item in &scan.stack_signals {
-            out.push_str(&format!("- {item}
-"));
+            out.push_str(&format!(
+                "- {item}
+"
+            ));
         }
     }
 
@@ -498,8 +501,10 @@ Detected project roots:
 "#,
         );
         for item in &scan.detected_roots {
-            out.push_str(&format!("- {item}
-"));
+            out.push_str(&format!(
+                "- {item}
+"
+            ));
         }
     }
 
@@ -510,8 +515,10 @@ Local project files to read early:
 "#,
         );
         for item in scan.read_first_files.iter().take(8) {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
@@ -528,56 +535,78 @@ This file captures auto-detected local signals for `{}` so the Labrador pack can
     );
 
     if scan.detected_roots.is_empty() {
-        out.push_str("
+        out.push_str(
+            "
 No nested project roots were detected beyond the target root.
-");
+",
+        );
     } else {
-        out.push_str("
+        out.push_str(
+            "
 Detected roots:
-");
+",
+        );
         for item in &scan.detected_roots {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
     if !scan.stack_signals.is_empty() {
-        out.push_str("
+        out.push_str(
+            "
 Detected stack signals:
-");
+",
+        );
         for item in &scan.stack_signals {
-            out.push_str(&format!("- {item}
-"));
+            out.push_str(&format!(
+                "- {item}
+"
+            ));
         }
     }
 
     if !scan.read_first_files.is_empty() {
-        out.push_str("
+        out.push_str(
+            "
 Read-first local files:
-");
+",
+        );
         for item in &scan.read_first_files {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
     if !scan.launch_commands.is_empty() {
-        out.push_str("
+        out.push_str(
+            "
 Launch commands:
-");
+",
+        );
         for item in &scan.launch_commands {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
     if !scan.validation_commands.is_empty() {
-        out.push_str("
+        out.push_str(
+            "
 Validation commands:
-");
+",
+        );
         for item in &scan.validation_commands {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
@@ -604,10 +633,7 @@ This project has a Harkonnen Labrador pack for `{}`.
 Suggested opener:
 `Use Scout to draft a Harkonnen spec for the next {} change, then confirm the active coordinator and agent routes from .harkonnen/context/engine-routing.md before implementation starts.`
 "#,
-        profile.name,
-        engine_rel,
-        state_rel,
-        profile.name,
+        profile.name, engine_rel, state_rel, profile.name,
     );
 
     if !scan.read_first_files.is_empty() {
@@ -617,8 +643,10 @@ Project read-first files:
 "#,
         );
         for item in scan.read_first_files.iter().take(6) {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
@@ -629,8 +657,10 @@ Local launch commands:
 "#,
         );
         for item in &scan.launch_commands {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
@@ -641,8 +671,10 @@ Local validation commands:
 "#,
         );
         for item in &scan.validation_commands {
-            out.push_str(&format!("- `{item}`
-"));
+            out.push_str(&format!(
+                "- `{item}`
+"
+            ));
         }
     }
 
@@ -815,10 +847,13 @@ fn load_agent_personality_addendum(profile: &AgentProfile, paths: &Paths) -> Res
     Ok(if raw.trim().is_empty() {
         String::new()
     } else {
-        format!("Agent-specific addendum:
+        format!(
+            "Agent-specific addendum:
 {}
 
-", raw.trim())
+",
+            raw.trim()
+        )
     })
 }
 
@@ -1076,14 +1111,7 @@ fn server_to_settings_json(server: &McpServerConfig) -> Value {
     object.insert("command".to_string(), Value::String(server.command.clone()));
     object.insert(
         "args".to_string(),
-        Value::Array(
-            server
-                .args
-                .iter()
-                .cloned()
-                .map(Value::String)
-                .collect(),
-        ),
+        Value::Array(server.args.iter().cloned().map(Value::String).collect()),
     );
     if let Some(env) = &server.env {
         let env_object: Map<String, Value> = env
@@ -1303,10 +1331,7 @@ Base agent assignments:
             out.push_str(&format!(
                 "- `{}` -> `{}` via `{}` ({})
 ",
-                assignment.agent,
-                assignment.provider,
-                assignment.surface,
-                assignment.source,
+                assignment.agent, assignment.provider, assignment.surface, assignment.source,
             ));
         }
     }
@@ -1318,8 +1343,10 @@ Notes:
 "#,
         );
         for note in &routing.notes {
-            out.push_str(&format!("- {note}
-"));
+            out.push_str(&format!(
+                "- {note}
+"
+            ));
         }
     }
 
@@ -1347,8 +1374,7 @@ provider_state:
     operational_state: {}
     notes: []
 ",
-            provider.name,
-            provider.operational_state,
+            provider.name, provider.operational_state,
         ));
     }
 
@@ -1371,14 +1397,18 @@ fn scan_target_project(target_root: &Path) -> Result<ProjectScan> {
     let mut launch_commands = Vec::new();
     let mut validation_commands = Vec::new();
 
-    for rel in discover_paths(target_root, 3, &[
-        "Cargo.toml",
-        "package.json",
-        "pyproject.toml",
-        "go.mod",
-        "docker-compose.yml",
-        "compose.yml",
-    ])? {
+    for rel in discover_paths(
+        target_root,
+        3,
+        &[
+            "Cargo.toml",
+            "package.json",
+            "pyproject.toml",
+            "go.mod",
+            "docker-compose.yml",
+            "compose.yml",
+        ],
+    )? {
         if let Some(parent) = Path::new(&rel).parent() {
             let parent_str = normalize_rel(parent);
             match Path::new(&rel).file_name().and_then(|value| value.to_str()) {
@@ -1387,23 +1417,38 @@ fn scan_target_project(target_root: &Path) -> Result<ProjectScan> {
                         continue;
                     }
                     push_unique_string(&mut roots, parent_str.clone());
-                    push_unique_string(&mut stack_signals, format!("Rust workspace or crate at `{parent_str}`"));
-                    push_unique_string(&mut validation_commands, scoped_command(&parent_str, "cargo test -q"));
+                    push_unique_string(
+                        &mut stack_signals,
+                        format!("Rust workspace or crate at `{parent_str}`"),
+                    );
+                    push_unique_string(
+                        &mut validation_commands,
+                        scoped_command(&parent_str, "cargo test -q"),
+                    );
                 }
                 Some("package.json") => {
                     if has_ancestor_manifest(target_root, &parent_str, "package.json") {
                         continue;
                     }
                     push_unique_string(&mut roots, parent_str.clone());
-                    push_unique_string(&mut stack_signals, format!("Node/Svelte/Vite package at `{parent_str}`"));
-                    push_unique_string(&mut validation_commands, scoped_command(&parent_str, "npm run build"));
+                    push_unique_string(
+                        &mut stack_signals,
+                        format!("Node/Svelte/Vite package at `{parent_str}`"),
+                    );
+                    push_unique_string(
+                        &mut validation_commands,
+                        scoped_command(&parent_str, "npm run build"),
+                    );
                 }
                 Some("pyproject.toml") => {
                     if has_ancestor_manifest(target_root, &parent_str, "pyproject.toml") {
                         continue;
                     }
                     push_unique_string(&mut roots, parent_str.clone());
-                    push_unique_string(&mut stack_signals, format!("Python project at `{parent_str}`"));
+                    push_unique_string(
+                        &mut stack_signals,
+                        format!("Python project at `{parent_str}`"),
+                    );
                 }
                 Some("go.mod") => {
                     if has_ancestor_manifest(target_root, &parent_str, "go.mod") {
@@ -1419,8 +1464,14 @@ fn scan_target_project(target_root: &Path) -> Result<ProjectScan> {
                         continue;
                     }
                     push_unique_string(&mut roots, parent_str.clone());
-                    push_unique_string(&mut stack_signals, format!("Docker Compose runtime at `{parent_str}`"));
-                    push_unique_string(&mut launch_commands, scoped_command(&parent_str, "docker compose up"));
+                    push_unique_string(
+                        &mut stack_signals,
+                        format!("Docker Compose runtime at `{parent_str}`"),
+                    );
+                    push_unique_string(
+                        &mut launch_commands,
+                        scoped_command(&parent_str, "docker compose up"),
+                    );
                 }
                 _ => {}
             }
@@ -1449,7 +1500,10 @@ fn scan_target_project(target_root: &Path) -> Result<ProjectScan> {
 
         let launch_script = join_rel(root, "scripts/launch.sh");
         if target_root.join(&launch_script).exists() {
-            push_unique_string(&mut launch_commands, scoped_command(root, "./scripts/launch.sh up"));
+            push_unique_string(
+                &mut launch_commands,
+                scoped_command(root, "./scripts/launch.sh up"),
+            );
         }
     }
 
@@ -1468,9 +1522,20 @@ fn scan_target_project(target_root: &Path) -> Result<ProjectScan> {
     })
 }
 
-fn discover_paths(target_root: &Path, max_depth: usize, file_names: &[&str]) -> Result<Vec<String>> {
+fn discover_paths(
+    target_root: &Path,
+    max_depth: usize,
+    file_names: &[&str],
+) -> Result<Vec<String>> {
     let mut found = Vec::new();
-    scan_dir(target_root, target_root, 0, max_depth, file_names, &mut found)?;
+    scan_dir(
+        target_root,
+        target_root,
+        0,
+        max_depth,
+        file_names,
+        &mut found,
+    )?;
     found.sort();
     Ok(found)
 }
@@ -1496,7 +1561,13 @@ fn scan_dir(
         if path.is_dir() {
             if matches!(
                 name.as_ref(),
-                ".git" | "node_modules" | "target" | ".harkonnen" | ".claude" | ".svelte-kit" | "dist"
+                ".git"
+                    | "node_modules"
+                    | "target"
+                    | ".harkonnen"
+                    | ".claude"
+                    | ".svelte-kit"
+                    | "dist"
             ) {
                 continue;
             }
@@ -1504,7 +1575,10 @@ fn scan_dir(
             continue;
         }
 
-        if file_names.iter().any(|candidate| *candidate == name.as_ref()) {
+        if file_names
+            .iter()
+            .any(|candidate| *candidate == name.as_ref())
+        {
             let rel = path
                 .strip_prefix(root)
                 .unwrap_or(&path)
@@ -1609,8 +1683,8 @@ fn merge_json_object_at_path(path: &Path, key: &str, new_value: Value) -> Result
 
 fn merge_claude_md_block(path: &Path, block: &str) -> Result<()> {
     let merged = if path.exists() {
-        let existing = fs::read_to_string(path)
-            .with_context(|| format!("reading {}", path.display()))?;
+        let existing =
+            fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
         upsert_marked_block(&existing, block)
     } else {
         block.to_string()

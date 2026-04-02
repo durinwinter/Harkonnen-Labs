@@ -60,11 +60,10 @@ surface      = "vscode"
 # files control routing.
 
 [routing.agents]
-# Spec interpretation and policy stay on Claude.
+# Spec interpretation, implementation, and policy stay on Claude for now.
 coobie = "claude"
-# High-volume implementation work uses Codex on the home Linux stack.
-mason  = "codex"
-# bramble, piper, ash, and flint inherit providers.default = "claude" while Gemini quota is constrained on this machine
+mason  = "claude"
+# scout, sable, keeper, bramble, piper, ash, and flint all resolve to Claude in this setup
 
 # ── MCP Servers ───────────────────────────────────────────────────────────────
 # Each entry maps a named MCP server into the agent tool boundary.

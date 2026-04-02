@@ -116,6 +116,8 @@ worker_harness:
     - parity_report
   max_iterations: 6
   continuity_file: trail-state.json
+  # Opt in to Mason-authored file writes inside the staged workspace.
+  llm_edits: true
 test_commands:
   - python3 products/ceres-station/ceres-station/scripts/lamdet_parity.py --output-dir products/ceres-station/ceres-station/tmp/lamdet-parity
 acceptance_criteria:

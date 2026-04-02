@@ -30,8 +30,11 @@ pub fn prepend_pidgin(pidgin: &str, detail: &str) -> String {
         (true, true) => String::new(),
         (false, true) => pidgin.to_string(),
         (true, false) => detail.to_string(),
-        (false, false) => format!("{}
-{}", pidgin, detail),
+        (false, false) => format!(
+            "{}
+{}",
+            pidgin, detail
+        ),
     }
 }
 
@@ -64,7 +67,10 @@ pub fn pidgin_summary(event: &FactoryEvent) -> String {
             if event.status == "running" {
                 phrases.push("coobie smells somethin");
             } else if event.status == "complete" {
-                if lower.contains("briefing") || lower.contains("causal") || lower.contains("memory") {
+                if lower.contains("briefing")
+                    || lower.contains("causal")
+                    || lower.contains("memory")
+                {
                     phrases.push("coobie found the trail");
                 }
                 if lower.contains("required check") || lower.contains("guardrail") {
@@ -141,14 +147,29 @@ pub fn pidgin_summary(event: &FactoryEvent) -> String {
 
 pub fn pidgin_for_agent_result(agent_name: &str, summary: &str, output: &str) -> String {
     let mut phrases = Vec::new();
-    let lower = format!("{}
-{}", summary, output).to_lowercase();
+    let lower = format!(
+        "{}
+{}",
+        summary, output
+    )
+    .to_lowercase();
 
-    if contains_any(&lower, &["failed", "failure", "missing", "warning", "blocked"]) {
+    if contains_any(
+        &lower,
+        &["failed", "failure", "missing", "warning", "blocked"],
+    ) {
         phrases.push("thasnotgrate");
     } else if contains_any(
         &lower,
-        &["prepared", "captured", "ready", "provisioned", "stored", "packaged", "passed"],
+        &[
+            "prepared",
+            "captured",
+            "ready",
+            "provisioned",
+            "stored",
+            "packaged",
+            "passed",
+        ],
     ) {
         phrases.push("thassgrate");
     }
@@ -160,7 +181,10 @@ pub fn pidgin_for_agent_result(agent_name: &str, summary: &str, output: &str) ->
             } else {
                 phrases.push("coobie smells somethin");
             }
-            if contains_any(&lower, &["guardrail", "required check", "intervention", "recommend"]) {
+            if contains_any(
+                &lower,
+                &["guardrail", "required check", "intervention", "recommend"],
+            ) {
                 phrases.push("coobie would try this jerry");
             }
         }
@@ -188,16 +212,20 @@ pub fn pidgin_for_agent_result(agent_name: &str, summary: &str, output: &str) ->
             "field is clean"
         }),
         "flint" => phrases.push("brought it back jerry"),
-        "piper" => phrases.push(if contains_any(&lower, &["gap", "missing", "unsupported"]) {
-            "need different stick"
-        } else {
-            "this stick better"
-        }),
-        "keeper" => phrases.push(if contains_any(&lower, &["policy", "risk", "deny", "violation"]) {
-            "keeper says no"
-        } else {
-            "keeper is a real geed dawg"
-        }),
+        "piper" => phrases.push(
+            if contains_any(&lower, &["gap", "missing", "unsupported"]) {
+                "need different stick"
+            } else {
+                "this stick better"
+            },
+        ),
+        "keeper" => phrases.push(
+            if contains_any(&lower, &["policy", "risk", "deny", "violation"]) {
+                "keeper says no"
+            } else {
+                "keeper is a real geed dawg"
+            },
+        ),
         _ => {}
     }
 
@@ -516,7 +544,13 @@ fn translate_pidgin_line(line: &str, line_index: usize) -> Option<PidginSignal> 
     };
 
     if signal.agent.is_none() && signal.kind == "behavior" {
-        signal.agent = Some(phrase.split_whitespace().next().unwrap_or_default().to_lowercase());
+        signal.agent = Some(
+            phrase
+                .split_whitespace()
+                .next()
+                .unwrap_or_default()
+                .to_lowercase(),
+        );
     }
 
     Some(signal)
@@ -560,6 +594,8 @@ fn dedupe_join(phrases: &[&str]) -> String {
             out.push((*phrase).to_string());
         }
     }
-    out.join("
-")
+    out.join(
+        "
+",
+    )
 }

@@ -61,16 +61,17 @@ impl CapacityState {
             .map(|p| p.available != available)
             .unwrap_or(true);
 
-        let entry = self.providers.entry(provider.to_string()).or_insert_with(|| {
-            ProviderCapacity {
+        let entry = self
+            .providers
+            .entry(provider.to_string())
+            .or_insert_with(|| ProviderCapacity {
                 available: true,
                 status: "ok".to_string(),
                 priority: 99,
                 note: None,
                 updated_at: now.clone(),
                 updated_by: by.to_string(),
-            }
-        });
+            });
         entry.available = available;
         entry.status = status.to_string();
         entry.note = note;

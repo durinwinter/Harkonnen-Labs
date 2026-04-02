@@ -1,10 +1,10 @@
-mod api;
 mod agents;
+mod api;
 mod capacity;
 mod claude_pack;
-mod coobie;
 mod cli;
 mod config;
+mod coobie;
 mod db;
 mod llm;
 mod memory;

@@ -28,7 +28,7 @@ use deep_causality::prelude::{
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
 use std::cmp::Ordering;
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::models::{
@@ -118,6 +118,8 @@ pub struct EpisodeScores {
     pub test_coverage_score: f32,
     /// Whether Coobie retrieved relevant prior memory before the run.
     pub memory_retrieval_score: f32,
+    /// Fraction of attributed Labrador phases that completed successfully.
+    pub phase_success_score: f32,
     pub scenario_passed: bool,
     pub validation_passed: bool,
 }
@@ -224,8 +226,25 @@ const CAUSAL_RULES: &[CausalRule] = &[
             }
         },
     },
+    CausalRule {
+        id: "PACK_BREAKDOWN",
+        description: "One or more Labrador phases failed or degraded before the run stabilized — \
+                       the pack execution chain likely broke down before the product was sound.",
+        intervention_target: "pack",
+        intervention_action: "Inspect the failed phase attribution records, prompt bundles, provider route, \
+                              and pinned skills; rerun the weakest Labrador phase before attempting a broad retry.",
+        intervention_impact: "Improves retries by targeting the weakest phase instead of repeating the full run blindly.",
+        evaluate: |s| {
+            if (!s.validation_passed || !s.scenario_passed) && s.phase_success_score < 0.70 {
+                Some((0.55 * (1.0 - s.phase_success_score)).max(0.20))
+            } else if !s.scenario_passed && s.phase_success_score < 0.85 {
+                Some((0.35 * (1.0 - s.phase_success_score)).max(0.10))
+            } else {
+                None
+            }
+        },
+    },
 ];
-
 
 struct DeepSignalSpec {
     cause_id: &'static str,
@@ -277,6 +296,15 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         observe: broad_scope_observation,
         verify: broad_scope_causality,
     },
+    DeepSignalSpec {
+        cause_id: "PACK_BREAKDOWN",
+        question:
+            "Did Labrador phase failures indicate the pack broke down before the run stabilized?",
+        description: "Deep Causality signal for Labrador phase breakdown.",
+        threshold: 0.35,
+        observe: phase_breakdown_observation,
+        verify: phase_breakdown_causality,
+    },
 ];
 
 fn threshold_causality(obs: f64, threshold: f64) -> Result<bool, CausalityError> {
@@ -306,6 +334,10 @@ fn broad_scope_causality(obs: f64) -> Result<bool, CausalityError> {
     threshold_causality(obs, 0.75)
 }
 
+fn phase_breakdown_causality(obs: f64) -> Result<bool, CausalityError> {
+    threshold_causality(obs, 0.35)
+}
+
 fn spec_ambiguity_observation(scores: &EpisodeScores) -> f64 {
     (1.0 - scores.spec_clarity_score as f64).clamp(0.0, 1.0)
 }
@@ -332,6 +364,10 @@ fn broad_scope_observation(scores: &EpisodeScores) -> f64 {
     (scores.change_scope_score as f64).clamp(0.0, 1.0)
 }
 
+fn phase_breakdown_observation(scores: &EpisodeScores) -> f64 {
+    (1.0 - scores.phase_success_score as f64).clamp(0.0, 1.0)
+}
+
 fn run_effect_score(scores: &EpisodeScores) -> f64 {
     match (scores.validation_passed, scores.scenario_passed) {
         (true, false) => 1.0,
@@ -342,9 +378,9 @@ fn run_effect_score(scores: &EpisodeScores) -> f64 {
 }
 
 fn deep_signal_id(cause_id: &str) -> u64 {
-    cause_id
-        .bytes()
-        .fold(17_u64, |acc, byte| acc.wrapping_mul(31).wrapping_add(byte as u64 + 1))
+    cause_id.bytes().fold(17_u64, |acc, byte| {
+        acc.wrapping_mul(31).wrapping_add(byte as u64 + 1)
+    })
 }
 
 fn deep_confidence(signal: &DeepCausalitySignal) -> f32 {
@@ -390,7 +426,7 @@ fn build_deep_signal(spec: &DeepSignalSpec, scores: &EpisodeScores) -> DeepCausa
     let activation_strength = if activated {
         ((inference.observation() - inference.threshold())
             / (inference.target() - inference.threshold()).max(0.0001))
-            .clamp(0.0, 1.0) as f32
+        .clamp(0.0, 1.0) as f32
     } else {
         0.0
     };
@@ -457,8 +493,10 @@ fn render_bullet_lines(items: &[String], empty_line: &str) -> String {
             .iter()
             .map(|item| format!("- {}", item))
             .collect::<Vec<_>>()
-            .join("
-")
+            .join(
+                "
+",
+            )
     }
 }
 
@@ -497,22 +535,37 @@ fn render_blueprint_lines(blueprint: Option<&ScenarioBlueprint>) -> String {
         lines.push(format!("objective={}", blueprint.objective.trim()));
     }
     if !blueprint.code_under_test.is_empty() {
-        lines.push(format!("code_under_test={}", blueprint.code_under_test.join(", ")));
+        lines.push(format!(
+            "code_under_test={}",
+            blueprint.code_under_test.join(", ")
+        ));
     }
     if !blueprint.hidden_oracles.is_empty() {
-        lines.push(format!("hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+        lines.push(format!(
+            "hidden_oracles={}",
+            blueprint.hidden_oracles.join(", ")
+        ));
     }
     if !blueprint.datasets.is_empty() {
         lines.push(format!("datasets={}", blueprint.datasets.join(", ")));
     }
     if !blueprint.runtime_surfaces.is_empty() {
-        lines.push(format!("runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+        lines.push(format!(
+            "runtime_surfaces={}",
+            blueprint.runtime_surfaces.join(", ")
+        ));
     }
     if !blueprint.coobie_memory_topics.is_empty() {
-        lines.push(format!("coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+        lines.push(format!(
+            "coobie_memory_topics={}",
+            blueprint.coobie_memory_topics.join(", ")
+        ));
     }
     if !blueprint.required_artifacts.is_empty() {
-        lines.push(format!("required_artifacts={}", blueprint.required_artifacts.join(", ")));
+        lines.push(format!(
+            "required_artifacts={}",
+            blueprint.required_artifacts.join(", ")
+        ));
     }
     render_bullet_lines(&lines, "No explicit scenario blueprint was declared yet.")
 }
@@ -550,7 +603,8 @@ fn render_citations(citations: &[CoobieEvidenceCitation], empty_line: &str) -> S
 
 fn render_resume_risks(risks: &[ProjectResumeRisk]) -> String {
     if risks.is_empty() {
-        return "- No project-memory entries are currently flagged as stale or contradicted.".to_string();
+        return "- No project-memory entries are currently flagged as stale or contradicted."
+            .to_string();
     }
 
     risks
@@ -612,8 +666,10 @@ pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
                 )
             })
             .collect::<Vec<_>>()
-            .join("
-")
+            .join(
+                "
+",
+            )
     };
 
     let pidgin = crate::pidgin::coobie_briefing_pidgin(briefing);
@@ -738,11 +794,20 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             &briefing.core_memory_hits,
             "No Harkonnen core memory hits were retrieved yet.",
         ),
-        render_bullet_lines(&briefing.domain_signals, "No domain signals were detected yet."),
+        render_bullet_lines(
+            &briefing.domain_signals,
+            "No domain signals were detected yet."
+        ),
         render_component_lines(&briefing.project_components),
         render_blueprint_lines(briefing.scenario_blueprint.as_ref()),
-        render_bullet_lines(&briefing.application_risks, "No application risks were highlighted yet."),
-        render_bullet_lines(&briefing.environment_risks, "No environment risks were highlighted yet."),
+        render_bullet_lines(
+            &briefing.application_risks,
+            "No application risks were highlighted yet."
+        ),
+        render_bullet_lines(
+            &briefing.environment_risks,
+            "No environment risks were highlighted yet."
+        ),
         render_bullet_lines(
             &briefing.regulatory_considerations,
             "No explicit regulatory considerations were recorded yet.",
@@ -797,7 +862,10 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             &briefing.recommended_guardrails,
             "No extra guardrails were generated yet.",
         ),
-        render_bullet_lines(&briefing.required_checks, "No required checks were generated yet."),
+        render_bullet_lines(
+            &briefing.required_checks,
+            "No required checks were generated yet."
+        ),
         render_bullet_lines(&briefing.open_questions, "No open questions were raised."),
     )
 }
@@ -815,8 +883,10 @@ pub fn render_coobie_report_response(report: &CausalReport) -> String {
             .iter()
             .map(|cause| format!("- {}", cause))
             .collect::<Vec<_>>()
-            .join("
-")
+            .join(
+                "
+",
+            )
     };
     let interventions = if report.recommended_interventions.is_empty() {
         "- No concrete interventions were recommended.".to_string()
@@ -824,10 +894,17 @@ pub fn render_coobie_report_response(report: &CausalReport) -> String {
         report
             .recommended_interventions
             .iter()
-            .map(|plan| format!("- [{}] {} -> {}", plan.target, plan.action, plan.expected_impact))
+            .map(|plan| {
+                format!(
+                    "- [{}] {} -> {}",
+                    plan.target, plan.action, plan.expected_impact
+                )
+            })
             .collect::<Vec<_>>()
-            .join("
-")
+            .join(
+                "
+",
+            )
     };
     let deep_signals = report
         .deep_causality
@@ -849,8 +926,10 @@ pub fn render_coobie_report_response(report: &CausalReport) -> String {
                         )
                     })
                     .collect::<Vec<_>>()
-                    .join("
-")
+                    .join(
+                        "
+",
+                    )
             }
         })
         .unwrap_or_else(|| "- DeepCausality analysis was not available.".to_string());
@@ -917,34 +996,52 @@ impl SqliteCoobie {
     // ── Scoring ───────────────────────────────────────────────────────────────
 
     fn score_episode(ep: &FactoryEpisode) -> EpisodeScores {
-        // spec_clarity_score: presence of key spec fields
+        let max_required_checks = ep
+            .phase_attributions
+            .iter()
+            .map(|record| record.required_checks.len())
+            .max()
+            .unwrap_or(0);
+
+        // spec_clarity_score: presence of key spec fields plus whether Coobie surfaced checks.
         let spec_clarity = {
             let mut score: f32 = 0.0;
-            // features is Vec<String> on FactoryEpisode — proxy for spec field coverage
             let n = ep.features.len();
-            // Each feature present adds weight; cap at 1.0
             score += (n as f32 * 0.12).min(0.6);
-            // bonus if validation exists and has results
             if let Some(v) = &ep.validation {
                 if !v.results.is_empty() {
                     score += 0.2;
                 }
             }
-            // bonus if human_decision is recorded (implies full run)
             if ep.decision.is_some() {
                 score += 0.2;
+            }
+            if max_required_checks > 0 {
+                score += ((max_required_checks.min(4) as f32) * 0.05).min(0.2);
             }
             score.min(1.0)
         };
 
-        // change_scope_score: proxy from agent_events breadth
         let change_scope = {
-            let n = ep.agent_events.len() as f32;
-            // 0 events = 0.0; 10+ events = 1.0
-            (n / 10.0).min(1.0)
+            let event_breadth = (ep.agent_events.len() as f32 / 10.0).min(1.0);
+            let attributed_phase_breadth = if ep.phase_attributions.is_empty() {
+                0.0
+            } else {
+                let phase_count = ep
+                    .phase_attributions
+                    .iter()
+                    .map(|record| record.phase.as_str())
+                    .collect::<HashSet<_>>()
+                    .len() as f32;
+                (phase_count / 8.0).min(1.0)
+            };
+            if ep.phase_attributions.is_empty() {
+                event_breadth
+            } else {
+                ((attributed_phase_breadth * 0.7) + (event_breadth * 0.3)).min(1.0)
+            }
         };
 
-        // twin_fidelity_score: from twin_env service count and status
         let twin_fidelity = match &ep.twin_env {
             None => 0.1,
             Some(twin) => {
@@ -957,18 +1054,32 @@ impl SqliteCoobie {
                         twin_fidelity_score: 0.1,
                         test_coverage_score: 0.0,
                         memory_retrieval_score: 0.0,
+                        phase_success_score: if ep.phase_attributions.is_empty() {
+                            0.0
+                        } else {
+                            ep.phase_attributions
+                                .iter()
+                                .filter(|record| record.outcome == "success")
+                                .count() as f32
+                                / ep.phase_attributions.len() as f32
+                        },
                         scenario_passed: ep.scenarios.as_ref().map(|s| s.passed).unwrap_or(false),
-                        validation_passed: ep.validation.as_ref().map(|v| v.passed).unwrap_or(false),
+                        validation_passed: ep
+                            .validation
+                            .as_ref()
+                            .map(|v| v.passed)
+                            .unwrap_or(false),
                     };
                 }
-                let ready = twin.services.iter()
+                let ready = twin
+                    .services
+                    .iter()
                     .filter(|s| s.status == "ready" || s.status == "running")
                     .count() as f32;
                 (ready / total).min(1.0)
             }
         };
 
-        // test_coverage_score: fraction of visible validation checks passed
         let test_coverage = match &ep.validation {
             None => 0.0,
             Some(v) => {
@@ -981,11 +1092,58 @@ impl SqliteCoobie {
             }
         };
 
-        // memory_retrieval_score: crude proxy — 1.0 if prior agent events show memory phase
-        let memory_score = {
-            let has_memory_phase = ep.agent_events.iter()
+        let memory_score = if ep.phase_attributions.is_empty() {
+            let has_memory_phase = ep
+                .agent_events
+                .iter()
                 .any(|e| e.phase == "memory" && e.status == "complete");
-            if has_memory_phase { 1.0 } else { 0.0 }
+            if has_memory_phase {
+                1.0
+            } else {
+                0.0
+            }
+        } else {
+            let mut supporting_ids = HashSet::new();
+            let mut has_query_context = false;
+            for record in &ep.phase_attributions {
+                for id in record
+                    .project_memory_ids
+                    .iter()
+                    .chain(record.core_memory_ids.iter())
+                    .chain(record.relevant_lesson_ids.iter())
+                {
+                    supporting_ids.insert(id.clone());
+                }
+                if !record.query_terms.is_empty() {
+                    has_query_context = true;
+                }
+            }
+            if !supporting_ids.is_empty() {
+                (0.35 + supporting_ids.len() as f32 * 0.1).min(1.0)
+            } else if has_query_context {
+                0.6
+            } else {
+                0.0
+            }
+        };
+
+        let phase_success_score = if ep.phase_attributions.is_empty() {
+            match (
+                ep.validation.as_ref().map(|v| v.passed).unwrap_or(false),
+                ep.scenarios.as_ref().map(|s| s.passed).unwrap_or(false),
+            ) {
+                (true, true) => 1.0,
+                (false, false) if ep.agent_events.is_empty() => 0.0,
+                (true, false) => 0.7,
+                (false, true) => 0.75,
+                (false, false) => 0.4,
+            }
+        } else {
+            ep.phase_attributions
+                .iter()
+                .filter(|record| record.outcome == "success")
+                .count() as f32
+                / ep.phase_attributions.len() as f32
         };
 
         EpisodeScores {
@@ -995,6 +1153,7 @@ impl SqliteCoobie {
             twin_fidelity_score: twin_fidelity,
             test_coverage_score: test_coverage,
             memory_retrieval_score: memory_score,
+            phase_success_score,
             scenario_passed: ep.scenarios.as_ref().map(|s| s.passed).unwrap_or(false),
             validation_passed: ep.validation.as_ref().map(|v| v.passed).unwrap_or(false),
         }
@@ -1007,15 +1166,16 @@ impl SqliteCoobie {
             r#"
             INSERT INTO coobie_episode_scores
                 (run_id, spec_clarity_score, change_scope_score, twin_fidelity_score,
-                 test_coverage_score, memory_retrieval_score, scenario_passed,
-                 validation_passed, human_accepted, scored_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
+                 test_coverage_score, memory_retrieval_score, phase_success_score,
+                 scenario_passed, validation_passed, human_accepted, scored_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, NULL, ?10)
             ON CONFLICT(run_id) DO UPDATE SET
                 spec_clarity_score      = excluded.spec_clarity_score,
                 change_scope_score      = excluded.change_scope_score,
                 twin_fidelity_score     = excluded.twin_fidelity_score,
                 test_coverage_score     = excluded.test_coverage_score,
                 memory_retrieval_score  = excluded.memory_retrieval_score,
+                phase_success_score     = excluded.phase_success_score,
                 scenario_passed         = excluded.scenario_passed,
                 validation_passed       = excluded.validation_passed,
                 scored_at               = excluded.scored_at
@@ -1027,6 +1187,7 @@ impl SqliteCoobie {
         .bind(scores.twin_fidelity_score as f64)
         .bind(scores.test_coverage_score as f64)
         .bind(scores.memory_retrieval_score as f64)
+        .bind(scores.phase_success_score as f64)
         .bind(scores.scenario_passed as i64)
         .bind(scores.validation_passed as i64)
         .bind(Utc::now().to_rfc3339())
@@ -1036,7 +1197,11 @@ impl SqliteCoobie {
         Ok(())
     }
 
-    async fn persist_hypotheses(&self, run_id: &str, hypotheses: &[CausalHypothesis]) -> Result<()> {
+    async fn persist_hypotheses(
+        &self,
+        run_id: &str,
+        hypotheses: &[CausalHypothesis],
+    ) -> Result<()> {
         for h in hypotheses {
             let supporting = serde_json::to_string(&h.supporting_runs)?;
             let counterfactuals = serde_json::to_string(&h.counterfactuals)?;
@@ -1067,7 +1232,8 @@ impl SqliteCoobie {
         let row = sqlx::query(
             r#"
             SELECT run_id, spec_clarity_score, change_scope_score, twin_fidelity_score,
-                   test_coverage_score, memory_retrieval_score, scenario_passed, validation_passed
+                   test_coverage_score, memory_retrieval_score, phase_success_score,
+                   scenario_passed, validation_passed
             FROM coobie_episode_scores WHERE run_id = ?1
             "#,
         )
@@ -1085,6 +1251,7 @@ impl SqliteCoobie {
                 twin_fidelity_score: r.get::<f64, _>("twin_fidelity_score") as f32,
                 test_coverage_score: r.get::<f64, _>("test_coverage_score") as f32,
                 memory_retrieval_score: r.get::<f64, _>("memory_retrieval_score") as f32,
+                phase_success_score: r.get::<f64, _>("phase_success_score") as f32,
                 scenario_passed: r.get::<i64, _>("scenario_passed") != 0,
                 validation_passed: r.get::<i64, _>("validation_passed") != 0,
             }
@@ -1093,11 +1260,7 @@ impl SqliteCoobie {
 
     /// Find prior episodes where the same rule fired AND the scenario later passed.
     /// Used for counterfactual confidence estimation.
-    async fn find_supporting_runs(
-        &self,
-        cause_id: &str,
-        limit: i64,
-    ) -> Result<Vec<String>> {
+    async fn find_supporting_runs(&self, cause_id: &str, limit: i64) -> Result<Vec<String>> {
         let rows = sqlx::query(
             r#"
             SELECT DISTINCT h.run_id
@@ -1127,12 +1290,11 @@ impl SqliteCoobie {
     ) -> Result<CounterfactualEstimate> {
         // Count runs where this cause was diagnosed
         let total: i64 = {
-            let row = sqlx::query(
-                "SELECT COUNT(*) as cnt FROM causal_hypotheses WHERE cause_id = ?1",
-            )
-            .bind(cause_id)
-            .fetch_one(&self.pool)
-            .await?;
+            let row =
+                sqlx::query("SELECT COUNT(*) as cnt FROM causal_hypotheses WHERE cause_id = ?1")
+                    .bind(cause_id)
+                    .fetch_one(&self.pool)
+                    .await?;
             use sqlx::Row;
             row.get("cnt")
         };
@@ -1154,7 +1316,11 @@ impl SqliteCoobie {
             row.get("cnt")
         };
 
-        let baseline_pass_rate = if total > 0 { improved as f32 / total as f32 } else { 0.0 };
+        let baseline_pass_rate = if total > 0 {
+            improved as f32 / total as f32
+        } else {
+            0.0
+        };
         // Assume intervention raises pass rate toward the model's built-in estimate
         let predicted_rate = (baseline_pass_rate + 0.35).min(0.95);
 
@@ -1209,7 +1375,10 @@ impl CoobieReasoner for SqliteCoobie {
                 continue;
             }
 
-            let supporting = self.find_supporting_runs(rule.id, 10).await.unwrap_or_default();
+            let supporting = self
+                .find_supporting_runs(rule.id, 10)
+                .await
+                .unwrap_or_default();
             let support_boost = (supporting.len() as f32 * 0.03).min(0.15);
             let final_confidence = (base_confidence + support_boost).min(0.95);
             let description = if heuristic_confidence <= 0.0 {
@@ -1251,8 +1420,13 @@ impl CoobieReasoner for SqliteCoobie {
         let hypotheses = self.diagnose(run_id).await?;
 
         // Map each hypothesis to its rule's intervention
-        let plans: Vec<InterventionPlan> = CAUSAL_RULES.iter()
-            .filter(|rule| hypotheses.iter().any(|h| h.cause_id == rule.id && h.confidence >= 0.4))
+        let plans: Vec<InterventionPlan> = CAUSAL_RULES
+            .iter()
+            .filter(|rule| {
+                hypotheses
+                    .iter()
+                    .any(|h| h.cause_id == rule.id && h.confidence >= 0.4)
+            })
             .map(|rule| InterventionPlan {
                 target: rule.intervention_target.to_string(),
                 action: rule.intervention_action.to_string(),
@@ -1269,7 +1443,8 @@ impl CoobieReasoner for SqliteCoobie {
         intervention: &InterventionPlan,
     ) -> Result<CounterfactualOutcome> {
         // Find which rule maps to this intervention target
-        let cause_id = CAUSAL_RULES.iter()
+        let cause_id = CAUSAL_RULES
+            .iter()
             .find(|r| r.intervention_target == intervention.target)
             .map(|r| r.id)
             .unwrap_or("UNKNOWN");
@@ -1294,7 +1469,10 @@ impl CoobieReasoner for SqliteCoobie {
                     action: rule.intervention_action.to_string(),
                     expected_impact: rule.intervention_impact.to_string(),
                 };
-                if let Ok(est) = self.counterfactual_estimate(h.cause_id.as_str(), &plan).await {
+                if let Ok(est) = self
+                    .counterfactual_estimate(h.cause_id.as_str(), &plan)
+                    .await
+                {
                     h.counterfactuals = vec![est];
                 }
             }
@@ -1317,16 +1495,20 @@ impl CoobieReasoner for SqliteCoobie {
             None => None,
         };
 
-        let scores = self.load_scores(run_id).await?.unwrap_or_else(|| EpisodeScores {
-            run_id: run_id.to_string(),
-            spec_clarity_score: 0.0,
-            change_scope_score: 0.0,
-            twin_fidelity_score: 0.0,
-            test_coverage_score: 0.0,
-            memory_retrieval_score: 0.0,
-            scenario_passed: false,
-            validation_passed: false,
-        });
+        let scores = self
+            .load_scores(run_id)
+            .await?
+            .unwrap_or_else(|| EpisodeScores {
+                run_id: run_id.to_string(),
+                spec_clarity_score: 0.0,
+                change_scope_score: 0.0,
+                twin_fidelity_score: 0.0,
+                test_coverage_score: 0.0,
+                memory_retrieval_score: 0.0,
+                phase_success_score: 0.0,
+                scenario_passed: false,
+                validation_passed: false,
+            });
         let deep_causality = build_deep_causality_analysis(&scores);
 
         Ok(CausalReport {
@@ -1342,7 +1524,6 @@ impl CoobieReasoner for SqliteCoobie {
         })
     }
 }
-
 
 // ── Phase 2 stub ──────────────────────────────────────────────────────────────
 //
@@ -1363,6 +1544,7 @@ mod tests {
             twin_fidelity_score: 0.80,
             test_coverage_score: 0.95,
             memory_retrieval_score: 0.0,
+            phase_success_score: 0.40,
             scenario_passed: false,
             validation_passed: true,
         };
@@ -1390,6 +1572,7 @@ mod tests {
             twin_fidelity_score: 0.95,
             test_coverage_score: 0.80,
             memory_retrieval_score: 1.0,
+            phase_success_score: 1.0,
             scenario_passed: true,
             validation_passed: true,
         };

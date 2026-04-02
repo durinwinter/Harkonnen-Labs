@@ -17,6 +17,8 @@ import LabradorIcon from './LabradorIcon';
  *   Ash     — saddle bags / backpack (upper left)
  */
 
+// Agent meta — keep in sync with AGENTS.md roster
+// pinned: true means trust-critical, always routed to Claude
 const AGENT_META = [
   {
     id: 'scout',
@@ -25,8 +27,9 @@ const AGENT_META = [
     group: 'planning',
     color: '#c4922a',
     emblem: '🏅',
-    desc: 'Finds and drafts specs. First into the field.',
+    desc: 'Parse specs, flag ambiguity, produce intent package.',
     collarGlow: '#c4922a',
+    pinned: true,
   },
   {
     id: 'keeper',
@@ -35,8 +38,9 @@ const AGENT_META = [
     group: 'planning',
     color: '#8a7a3a',
     emblem: '📜',
-    desc: 'Holds the policy scroll. Guards the boundary.',
+    desc: 'Enforce policy, guard boundaries, and manage file-claim coordination.',
     collarGlow: '#8a7a3a',
+    pinned: true,
   },
   {
     id: 'mason',
@@ -45,8 +49,9 @@ const AGENT_META = [
     group: 'action',
     color: '#c4662a',
     emblem: '⛑',
-    desc: 'Wears the hard hat. Builds the implementation plan.',
+    desc: 'Generate and modify code, multi-file changes.',
     collarGlow: '#c4662a',
+    pinned: false,
   },
   {
     id: 'piper',
@@ -55,8 +60,9 @@ const AGENT_META = [
     group: 'action',
     color: '#5a7a5a',
     emblem: '🔧',
-    desc: 'Carries the tool vest. Wires up integrations.',
+    desc: 'Run build tools, fetch docs, execute helpers.',
     collarGlow: '#5a7a5a',
+    pinned: false,
   },
   {
     id: 'ash',
@@ -65,8 +71,9 @@ const AGENT_META = [
     group: 'action',
     color: '#2a7a7a',
     emblem: '🎒',
-    desc: 'Bears the saddle bags. Mirrors the digital twin.',
+    desc: 'Provision digital twins, mock dependencies.',
     collarGlow: '#2a7a7a',
+    pinned: false,
   },
   {
     id: 'bramble',
@@ -75,8 +82,9 @@ const AGENT_META = [
     group: 'verification',
     color: '#a89a2a',
     emblem: '📋',
-    desc: 'Holds the clipboard. Runs the test checklist.',
+    desc: 'Generate tests, run lint/build/visible tests.',
     collarGlow: '#a89a2a',
+    pinned: false,
   },
   {
     id: 'sable',
@@ -85,8 +93,9 @@ const AGENT_META = [
     group: 'verification',
     color: '#3a4a5a',
     emblem: '🥽',
-    desc: 'Wears the goggles. Dives into hidden scenarios.',
+    desc: 'Execute hidden scenarios, produce eval reports.',
     collarGlow: '#3a4a5a',
+    pinned: true,
   },
   {
     id: 'flint',
@@ -95,8 +104,9 @@ const AGENT_META = [
     group: 'verification',
     color: '#8a6a3a',
     emblem: '📦',
-    desc: 'Carries the packages. Bundles and delivers artifacts.',
+    desc: 'Collect outputs, package artifact bundles.',
     collarGlow: '#8a6a3a',
+    pinned: false,
   },
   {
     id: 'coobie',
@@ -105,17 +115,19 @@ const AGENT_META = [
     group: 'memory',
     color: '#7a2a3a',
     emblem: '💡',
-    desc: 'Glowing LED collar. Active memory — always watching.',
+    desc: 'Coordinate pack memory: working context, episodic capture, causal graph, consolidation, and cross-agent blackboard health.',
     collarGlow: '#e04060',
+    pinned: false,
     isCoobie: true,
   },
 ];
 
+// Blackboard slice labels — mirror AGENTS.md panel names exactly
 const GROUP_LABELS = {
-  planning:     '01 · Intake & Planning',
-  action:       '02 · Implementation',
-  verification: '03 · Verification',
-  memory:       '04 · Memory',
+  planning:     'Intake & Planning',
+  action:       'Action Board',
+  verification: 'Verification',
+  memory:       'Memory Board',
 };
 
 function statusLabel(status) {
@@ -156,6 +168,9 @@ function AgentFloorCard({ agent, onOpenWorkbench }) {
         <div className="floor-name-row">
           <span className="floor-name">{agent.name}</span>
           <span className="floor-emblem">{agent.emblem}</span>
+          {agent.pinned && (
+            <span className="floor-pinned-badge" title="Pinned to Claude — trust-critical role">Claude</span>
+          )}
           <span className={`floor-status-chip ${agent.status || 'idle'}`}>
             {statusLabel(agent.status)}
           </span>
@@ -414,6 +429,18 @@ export default function FactoryFloor({ agents, onOpenWorkbench }) {
         }
         .floor-emblem {
           font-size: 0.85rem;
+        }
+        .floor-pinned-badge {
+          font-size: 0.54rem;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.1em;
+          color: #c4922a;
+          background: rgba(196, 146, 42, 0.12);
+          border: 1px solid rgba(196, 146, 42, 0.3);
+          border-radius: 999px;
+          padding: 0.1rem 0.38rem;
+          white-space: nowrap;
         }
         .floor-status-chip {
           font-size: 0.58rem;

@@ -56,6 +56,8 @@ pub struct WorkerHarnessConfig {
     pub max_iterations: Option<u32>,
     #[serde(default)]
     pub continuity_file: Option<String>,
+    #[serde(default)]
+    pub llm_edits: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -341,6 +343,36 @@ pub struct RunEvent {
 pub type FactoryEvent = RunEvent;
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CheckpointAnswerRecord {
+    pub answer_id: String,
+    pub checkpoint_id: String,
+    pub answered_by: String,
+    pub answer_text: String,
+    #[serde(default)]
+    pub decision_json: Option<serde_json::Value>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunCheckpointRecord {
+    pub checkpoint_id: String,
+    pub run_id: String,
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub agent: Option<String>,
+    pub checkpoint_type: String,
+    pub status: String,
+    pub prompt: String,
+    pub context_json: serde_json::Value,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub resolved_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub answers: Vec<CheckpointAnswerRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct EpisodeRecord {
     pub episode_id: String,
     pub run_id: String,
@@ -350,6 +382,40 @@ pub struct EpisodeRecord {
     pub confidence: Option<f64>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PhaseAttributionRecord {
+    pub attribution_id: String,
+    pub run_id: String,
+    pub episode_id: String,
+    pub phase: String,
+    pub agent_name: String,
+    pub outcome: String,
+    pub confidence: Option<f64>,
+    #[serde(default)]
+    pub prompt_bundle_fingerprint: Option<String>,
+    #[serde(default)]
+    pub prompt_bundle_provider: Option<String>,
+    #[serde(default)]
+    pub prompt_bundle_artifact: Option<String>,
+    #[serde(default)]
+    pub pinned_skill_ids: Vec<String>,
+    #[serde(default)]
+    pub memory_hits: Vec<String>,
+    #[serde(default)]
+    pub core_memory_ids: Vec<String>,
+    #[serde(default)]
+    pub project_memory_ids: Vec<String>,
+    #[serde(default)]
+    pub relevant_lesson_ids: Vec<String>,
+    #[serde(default)]
+    pub required_checks: Vec<String>,
+    #[serde(default)]
+    pub guardrails: Vec<String>,
+    #[serde(default)]
+    pub query_terms: Vec<String>,
+    pub created_at: DateTime<Utc>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -567,6 +633,18 @@ pub struct AgentExecution {
     pub summary: String,
     pub output: String,
     pub allowed_tools: Vec<String>,
+    #[serde(default)]
+    pub phase: Option<String>,
+    #[serde(default)]
+    pub episode_id: Option<String>,
+    #[serde(default)]
+    pub prompt_bundle_fingerprint: Option<String>,
+    #[serde(default)]
+    pub prompt_bundle_artifact: Option<String>,
+    #[serde(default)]
+    pub prompt_bundle_provider: Option<String>,
+    #[serde(default)]
+    pub pinned_skill_ids: Vec<String>,
     pub created_at: DateTime<Utc>,
 }
 
@@ -636,6 +714,8 @@ pub struct FactoryEpisode {
     pub features: Vec<String>,
     pub agent_events: Vec<RunEvent>,
     pub tool_events: Vec<String>, // Placeholder for tool-specific events
+    #[serde(default)]
+    pub phase_attributions: Vec<PhaseAttributionRecord>,
     pub twin_env: Option<TwinEnvironment>,
     pub validation: Option<ValidationSummary>,
     pub scenarios: Option<HiddenScenarioSummary>,

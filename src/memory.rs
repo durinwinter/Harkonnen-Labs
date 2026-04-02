@@ -146,7 +146,10 @@ impl MemoryStore {
         self.reindex().await?;
 
         println!("Memory directory:  {}", self.root.display());
-        println!("Index built:       {}", self.root.join("index.json").display());
+        println!(
+            "Index built:       {}",
+            self.root.join("index.json").display()
+        );
         println!("Imports folder:    {}", self.root.join("imports").display());
         println!();
         println!("Coobie will auto-refresh her local index when memory files change.");
@@ -165,7 +168,9 @@ impl MemoryStore {
         println!("  Start: npx -y @modelcontextprotocol/server-memory");
         println!("  Seed:  ./scripts/coobie-seed-mcp.sh  (prints entity payloads)");
         println!();
-        println!("Coobie is ready. Manual markdown drops are picked up automatically on next retrieval.");
+        println!(
+            "Coobie is ready. Manual markdown drops are picked up automatically on next retrieval."
+        );
 
         Ok(())
     }
@@ -198,7 +203,7 @@ impl MemoryStore {
         let index_path = self.root.join("index.json");
         if !index_path.exists() {
             return Ok(vec![
-                "Memory not initialized. Run: harkonnen memory init".to_string(),
+                "Memory not initialized. Run: harkonnen memory init".to_string()
             ]);
         }
 
@@ -211,14 +216,22 @@ impl MemoryStore {
             .map(|entry| (memory_match_score(entry, &q), entry))
             .collect::<Vec<_>>();
 
-        hits.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| left.1.id.cmp(&right.1.id)));
+        hits.sort_by(|left, right| {
+            right
+                .0
+                .cmp(&left.0)
+                .then_with(|| left.1.id.cmp(&right.1.id))
+        });
 
         let rendered = hits
             .into_iter()
             .map(|(_, entry)| {
                 let snippet = &entry.content[..entry.content.len().min(400)];
-                format!("[{}] {}
-{}", entry.id, entry.summary, snippet)
+                format!(
+                    "[{}] {}
+{}",
+                    entry.id, entry.summary, snippet
+                )
             })
             .collect::<Vec<_>>();
 
@@ -279,7 +292,12 @@ impl MemoryStore {
         let raw = tokio::fs::read_to_string(&path).await?;
         let mut parsed = parse_frontmatter(&raw);
         annotate_memory_provenance_status(&mut parsed.provenance, status, related_id);
-        let doc = render_memory_document(&parsed.tags, &parsed.summary, &parsed.body, &parsed.provenance);
+        let doc = render_memory_document(
+            &parsed.tags,
+            &parsed.summary,
+            &parsed.body,
+            &parsed.provenance,
+        );
         tokio::fs::write(&path, doc).await?;
         self.reindex().await?;
         Ok(())
@@ -369,7 +387,10 @@ impl MemoryStore {
             .file_stem()
             .and_then(|value| value.to_str())
             .unwrap_or("memory-asset");
-        let ext = source.extension().and_then(|value| value.to_str()).unwrap_or("");
+        let ext = source
+            .extension()
+            .and_then(|value| value.to_str())
+            .unwrap_or("");
         if ext.eq_ignore_ascii_case("md") {
             bail!("markdown files can be copied directly into factory/memory; use memory import for PDFs, images, and other assets");
         }
@@ -472,12 +493,8 @@ impl MemoryStore {
         let imported_asset = if options.keep_asset {
             if let Some(asset_source_path) = extracted.asset_source_path.as_ref() {
                 Some(
-                    copy_asset_to_imports(
-                        &self.root.join("imports"),
-                        asset_source_path,
-                        &note_id,
-                    )
-                    .await?,
+                    copy_asset_to_imports(&self.root.join("imports"), asset_source_path, &note_id)
+                        .await?,
                 )
             } else {
                 None
@@ -509,7 +526,9 @@ impl MemoryStore {
             options.notes.as_deref(),
         );
         let note_doc = render_memory_document(&tags, &summary, &note_body, &provenance);
-        let note_path = self.root.join(format!("{}.md", sanitize_memory_id(&note_id)));
+        let note_path = self
+            .root
+            .join(format!("{}.md", sanitize_memory_id(&note_id)));
         tokio::fs::write(&note_path, note_doc).await?;
         self.reindex().await?;
 
@@ -552,7 +571,6 @@ impl MemoryStore {
     }
 }
 
-
 fn append_unique_tag(tags: &mut Vec<String>, tag: String) {
     let normalized = tag.trim();
     if normalized.is_empty() {
@@ -575,9 +593,16 @@ fn next_available_memory_id(root: &Path, raw: &str) -> String {
     format!("{}-{}", base, Utc::now().format("%Y%m%d%H%M%S"))
 }
 
-async fn copy_asset_to_imports(imports_dir: &Path, source: &Path, note_id: &str) -> Result<PathBuf> {
+async fn copy_asset_to_imports(
+    imports_dir: &Path,
+    source: &Path,
+    note_id: &str,
+) -> Result<PathBuf> {
     tokio::fs::create_dir_all(imports_dir).await?;
-    let ext = source.extension().and_then(|value| value.to_str()).unwrap_or("");
+    let ext = source
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or("");
     let mut path = asset_path_for(imports_dir, note_id, ext);
     if path.exists() {
         path = asset_path_for(
@@ -595,7 +620,10 @@ async fn copy_asset_to_imports(imports_dir: &Path, source: &Path, note_id: &str)
 fn default_ingest_summary(extracted: &ExtractedMemorySource) -> String {
     match extracted.source_kind.as_str() {
         "url" => format!("Ingested web knowledge: {}", extracted.title),
-        _ => format!("Ingested {} document: {}", extracted.media_kind, extracted.title),
+        _ => format!(
+            "Ingested {} document: {}",
+            extracted.media_kind, extracted.title
+        ),
     }
 }
 
@@ -661,7 +689,10 @@ fn summarize_extracted_text(text: &str, limit: usize) -> Vec<String> {
 fn truncate_for_memory(text: &str, max_chars: usize) -> String {
     let collected = text.chars().take(max_chars).collect::<String>();
     if text.chars().count() > max_chars {
-        format!("{}\n\n[truncated after {} chars during ingest]", collected, max_chars)
+        format!(
+            "{}\n\n[truncated after {} chars during ingest]",
+            collected, max_chars
+        )
     } else {
         collected
     }
@@ -721,11 +752,7 @@ async fn extract_memory_source_from_url(source: &str) -> Result<ExtractedMemoryS
     } else {
         derive_title_from_source(source)
     };
-    let text = if is_html {
-        html_to_text(&raw)
-    } else {
-        raw
-    };
+    let text = if is_html { html_to_text(&raw) } else { raw };
     let text = normalize_ingested_text(&text);
     if text.trim().is_empty() {
         bail!("no extractable text found at {}", source);
@@ -735,13 +762,25 @@ async fn extract_memory_source_from_url(source: &str) -> Result<ExtractedMemoryS
         source_kind: "url".to_string(),
         source_locator: source.to_string(),
         text,
-        media_kind: if is_html { "html".to_string() } else { "text".to_string() },
-        extension_tag: Some(if is_html { "html".to_string() } else { "txt".to_string() }),
+        media_kind: if is_html {
+            "html".to_string()
+        } else {
+            "text".to_string()
+        },
+        extension_tag: Some(if is_html {
+            "html".to_string()
+        } else {
+            "txt".to_string()
+        }),
         asset_source_path: None,
     })
 }
 
-async fn extract_remote_binary_to_text(source: &str, bytes: &[u8], ext: &str) -> Result<ExtractedMemorySource> {
+async fn extract_remote_binary_to_text(
+    source: &str,
+    bytes: &[u8],
+    ext: &str,
+) -> Result<ExtractedMemorySource> {
     let temp_path = std::env::temp_dir().join(format!(
         "harkonnen-memory-ingest-{}.{}",
         Uuid::new_v4(),
@@ -916,7 +955,12 @@ async fn extract_with_libreoffice(source: &Path) -> Result<String> {
         }
     }
     let _ = tokio::fs::remove_dir_all(&out_dir).await;
-    text.with_context(|| format!("libreoffice did not produce a txt output for {}", source.display()))
+    text.with_context(|| {
+        format!(
+            "libreoffice did not produce a txt output for {}",
+            source.display()
+        )
+    })
 }
 
 fn derive_title_from_path(source: &Path) -> String {
@@ -1088,7 +1132,10 @@ fn apply_memory_entry_stats(entry: &mut MemoryEntry, stats: Option<&MemoryEntryS
 
 fn memory_matches(entry: &MemoryEntry, query: &str) -> bool {
     entry.summary.to_lowercase().contains(query)
-        || entry.tags.iter().any(|tag| tag.to_lowercase().contains(query))
+        || entry
+            .tags
+            .iter()
+            .any(|tag| tag.to_lowercase().contains(query))
         || entry.content.to_lowercase().contains(query)
 }
 
@@ -1099,7 +1146,11 @@ fn memory_match_score(entry: &MemoryEntry, query: &str) -> i64 {
     if summary.contains(query) {
         score += 40;
     }
-    if entry.tags.iter().any(|tag| tag.to_lowercase().contains(query)) {
+    if entry
+        .tags
+        .iter()
+        .any(|tag| tag.to_lowercase().contains(query))
+    {
         score += 25;
     }
     if content.contains(query) {
@@ -1112,7 +1163,9 @@ fn memory_match_score(entry: &MemoryEntry, query: &str) -> i64 {
 }
 
 fn collect_entries(root: &Path, current: &Path, entries: &mut Vec<MemoryEntry>) -> Result<()> {
-    for dent in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
+    for dent in
+        std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))?
+    {
         let dent = dent?;
         let path = dent.path();
         let file_type = dent.file_type()?;
@@ -1149,7 +1202,10 @@ fn collect_entries(root: &Path, current: &Path, entries: &mut Vec<MemoryEntry>) 
             continue;
         }
         let media_kind = detect_media_kind(&path).to_string();
-        let filename = path.file_name().and_then(|value| value.to_str()).unwrap_or("asset");
+        let filename = path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .unwrap_or("asset");
         let rel = relative.display().to_string();
         entries.push(MemoryEntry {
             id: relative_entry_id(relative),
@@ -1177,12 +1233,17 @@ This asset is available to Coobie as reference material and can be synced to Any
 }
 
 fn should_skip_memory_file(path: &Path) -> bool {
-    matches!(path.file_name().and_then(|value| value.to_str()), Some("index.json") | Some("store.json"))
+    matches!(
+        path.file_name().and_then(|value| value.to_str()),
+        Some("index.json") | Some("store.json")
+    )
 }
 
 fn latest_relevant_mtime(root: &Path, current: &Path) -> Result<SystemTime> {
     let mut latest = SystemTime::UNIX_EPOCH;
-    for dent in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
+    for dent in
+        std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))?
+    {
         let dent = dent?;
         let path = dent.path();
         let file_type = dent.file_type()?;
@@ -1254,8 +1315,11 @@ fn detect_media_kind(path: &Path) -> &'static str {
         .as_deref()
     {
         Some("pdf") => "pdf",
-        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => "image",
-        Some("txt") | Some("csv") | Some("doc") | Some("docx") | Some("ppt") | Some("pptx") | Some("xls") | Some("xlsx") => "document",
+        Some("png") | Some("jpg") | Some("jpeg") | Some("gif") | Some("webp") | Some("svg") => {
+            "image"
+        }
+        Some("txt") | Some("csv") | Some("doc") | Some("docx") | Some("ppt") | Some("pptx")
+        | Some("xls") | Some("xlsx") => "document",
         _ => "asset",
     }
 }
@@ -1396,21 +1460,73 @@ fn render_memory_document(
         format!("summary: {}", summary),
     ];
 
-    push_frontmatter_scalar(&mut frontmatter, "source_label", provenance.source_label.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "source_kind", provenance.source_kind.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "source_path", provenance.source_path.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "source_run_id", provenance.source_run_id.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "source_spec_id", provenance.source_spec_id.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "git_branch", provenance.git_branch.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "git_commit", provenance.git_commit.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "git_remote", provenance.git_remote.as_deref());
-    push_frontmatter_list(&mut frontmatter, "evidence_run_ids", &provenance.evidence_run_ids);
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "source_label",
+        provenance.source_label.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "source_kind",
+        provenance.source_kind.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "source_path",
+        provenance.source_path.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "source_run_id",
+        provenance.source_run_id.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "source_spec_id",
+        provenance.source_spec_id.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "git_branch",
+        provenance.git_branch.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "git_commit",
+        provenance.git_commit.as_deref(),
+    );
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "git_remote",
+        provenance.git_remote.as_deref(),
+    );
+    push_frontmatter_list(
+        &mut frontmatter,
+        "evidence_run_ids",
+        &provenance.evidence_run_ids,
+    );
     push_frontmatter_list(&mut frontmatter, "stale_when", &provenance.stale_when);
-    push_frontmatter_list(&mut frontmatter, "observed_paths", &provenance.observed_paths);
-    push_frontmatter_list(&mut frontmatter, "code_under_test_paths", &provenance.code_under_test_paths);
-    push_frontmatter_list(&mut frontmatter, "observed_surfaces", &provenance.observed_surfaces);
+    push_frontmatter_list(
+        &mut frontmatter,
+        "observed_paths",
+        &provenance.observed_paths,
+    );
+    push_frontmatter_list(
+        &mut frontmatter,
+        "code_under_test_paths",
+        &provenance.code_under_test_paths,
+    );
+    push_frontmatter_list(
+        &mut frontmatter,
+        "observed_surfaces",
+        &provenance.observed_surfaces,
+    );
     push_frontmatter_scalar(&mut frontmatter, "status", provenance.status.as_deref());
-    push_frontmatter_scalar(&mut frontmatter, "superseded_by", provenance.superseded_by.as_deref());
+    push_frontmatter_scalar(
+        &mut frontmatter,
+        "superseded_by",
+        provenance.superseded_by.as_deref(),
+    );
     push_frontmatter_list(&mut frontmatter, "challenged_by", &provenance.challenged_by);
 
     format!("---\n{}\n---\n\n{}", frontmatter.join("\n"), content)
@@ -1560,7 +1676,8 @@ Implementation agents use the setup's default provider and can be swapped.
 
 factory/agents/profiles/<name>.yaml — one file per agent
 factory/agents/personality/labrador.md — shared personality
-"#.into(),
+"#
+            .into(),
         ),
         (
             "02-setup-guide.md".into(),
@@ -1670,7 +1787,8 @@ Platform: all
 2. Create factory/mcp/<name>.yaml with the server's documentation
 3. Add the tool_aliases that agents will use in their allowed_tools list
 4. Run: cargo run -- setup check  (verifies the command is on PATH)
-"#.into(),
+"#
+            .into(),
         ),
         (
             "04-spec-format.md".into(),
@@ -1757,7 +1875,8 @@ security_expectations:
 
     cargo run -- spec validate factory/specs/my-spec.yaml
     cargo run -- run start factory/specs/my-spec.yaml --product my-app
-"#.into(),
+"#
+            .into(),
         ),
     ]
 }

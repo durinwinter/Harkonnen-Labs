@@ -7,15 +7,15 @@ use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
 use crate::capacity::CapacityState;
-use crate::models::EvidenceAnnotationBundle;
-use crate::config::Paths;
 use crate::claude_pack::{export_claude_pack, ClaudePackRequest};
+use crate::config::Paths;
+use crate::models::EvidenceAnnotationBundle;
 use crate::orchestrator::{AppContext, FailureHarness, RunRequest};
 use crate::reporting;
 use crate::setup::{
     available_template_names, command_available, compose_setup_id, default_provider_config,
-    slugify_machine_name, MachineConfig, McpConfig, McpServerConfig, ProviderConfig,
-    RoutingConfig, SetupConfig, SystemDiscovery,
+    slugify_machine_name, MachineConfig, McpConfig, McpServerConfig, ProviderConfig, RoutingConfig,
+    SetupConfig, SystemDiscovery,
 };
 
 #[derive(Parser, Debug)]
@@ -361,7 +361,11 @@ pub async fn handle_run(command: RunCommands, app: AppContext) -> Result<()> {
                 );
                 run_ids.push(run.run_id);
             }
-            println!("Harness complete for phase '{}'. Run IDs: {}", args.phase, run_ids.join(", "));
+            println!(
+                "Harness complete for phase '{}'. Run IDs: {}",
+                args.phase,
+                run_ids.join(", ")
+            );
         }
         RunCommands::Status(args) => {
             let run = app
@@ -463,9 +467,14 @@ pub async fn handle_memory(command: MemoryCommands, app: AppContext) -> Result<(
 pub async fn handle_evidence(command: EvidenceCommands, app: AppContext) -> Result<()> {
     match command {
         EvidenceCommands::Init(args) => {
-            let evidence_root = app.init_project_evidence(Path::new(&args.project_root)).await?;
+            let evidence_root = app
+                .init_project_evidence(Path::new(&args.project_root))
+                .await?;
             println!("Project evidence root: {}", evidence_root.display());
-            println!("Annotation bundles: {}", evidence_root.join("annotations").display());
+            println!(
+                "Annotation bundles: {}",
+                evidence_root.join("annotations").display()
+            );
             println!("Causal records: {}", evidence_root.join("causal").display());
         }
         EvidenceCommands::Validate(args) => {
@@ -674,7 +683,8 @@ fn handle_setup_check(paths: &Paths) -> Result<()> {
 }
 
 fn handle_setup_init(paths: &Paths, args: SetupInitArgs) -> Result<()> {
-    let interactive = !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
+    let interactive =
+        !args.non_interactive && io::stdin().is_terminal() && io::stdout().is_terminal();
     let discovery = SystemDiscovery::discover();
 
     let detected_machine_name = discovery.default_machine_name();
@@ -696,7 +706,9 @@ fn handle_setup_init(paths: &Paths, args: SetupInitArgs) -> Result<()> {
     let organization = match args.organization {
         Some(organization) => normalize_optional_slug(&organization),
         None if interactive => prompt_optional_text("Organization or team (optional)", None)?,
-        None => normalize_optional_slug(&std::env::var("HARKONNEN_ORGANIZATION").unwrap_or_default()),
+        None => {
+            normalize_optional_slug(&std::env::var("HARKONNEN_ORGANIZATION").unwrap_or_default())
+        }
     };
 
     let template_names = available_template_names(&paths.root)?;
@@ -786,7 +798,10 @@ fn handle_setup_init(paths: &Paths, args: SetupInitArgs) -> Result<()> {
                     relative_display(&paths.root, &recommended_write_path)
                 ),
                 true,
-            )? => Some(recommended_write_path.clone()),
+            )? =>
+        {
+            Some(recommended_write_path.clone())
+        }
         _ => None,
     };
 
@@ -894,8 +909,8 @@ fn interview_runtime_features(config: &mut SetupConfig, discovery: &SystemDiscov
         openclaw_default,
     )?);
 
-    let anythingllm_default = config.setup.anythingllm.unwrap_or(false)
-        && discovery.platform != "windows";
+    let anythingllm_default =
+        config.setup.anythingllm.unwrap_or(false) && discovery.platform != "windows";
     config.setup.anythingllm = if discovery.platform == "windows" {
         Some(false)
     } else {
@@ -962,8 +977,8 @@ fn configure_provider_prompt(name: &str, slot: &mut Option<ProviderConfig>) -> R
         provider.enabled = false;
         provider
     });
-    let access_default = (had_provider && provider.enabled)
-        || std::env::var(&provider.api_key_env).is_ok();
+    let access_default =
+        (had_provider && provider.enabled) || std::env::var(&provider.api_key_env).is_ok();
     let has_access = prompt_bool(
         &format!("Do you have access to {name} on this machine?"),
         access_default,
@@ -1016,7 +1031,10 @@ fn select_default_provider(config: &mut SetupConfig) -> Result<()> {
     } else {
         enabled[0].clone()
     };
-    let chosen = prompt_text(&format!("Default provider ({})", enabled.join(", ")), &current)?;
+    let chosen = prompt_text(
+        &format!("Default provider ({})", enabled.join(", ")),
+        &current,
+    )?;
     if enabled.iter().any(|name| name == &chosen) {
         config.providers.default = chosen;
         Ok(())
@@ -1027,13 +1045,31 @@ fn select_default_provider(config: &mut SetupConfig) -> Result<()> {
 
 fn enabled_provider_names(config: &SetupConfig) -> Vec<String> {
     let mut names = Vec::new();
-    if config.providers.claude.as_ref().map(|p| p.enabled).unwrap_or(false) {
+    if config
+        .providers
+        .claude
+        .as_ref()
+        .map(|p| p.enabled)
+        .unwrap_or(false)
+    {
         names.push("claude".to_string());
     }
-    if config.providers.gemini.as_ref().map(|p| p.enabled).unwrap_or(false) {
+    if config
+        .providers
+        .gemini
+        .as_ref()
+        .map(|p| p.enabled)
+        .unwrap_or(false)
+    {
         names.push("gemini".to_string());
     }
-    if config.providers.codex.as_ref().map(|p| p.enabled).unwrap_or(false) {
+    if config
+        .providers
+        .codex
+        .as_ref()
+        .map(|p| p.enabled)
+        .unwrap_or(false)
+    {
         names.push("codex".to_string());
     }
     names
@@ -1049,7 +1085,8 @@ fn rebalance_agent_routing(config: &mut SetupConfig, interactive: bool) -> Resul
     let mut routing = config.routing.clone().unwrap_or_default();
 
     let judgment_default = preferred_provider(config, &["claude", &default_provider]);
-    let implementation_default = preferred_provider(config, &["codex", "gemini", &default_provider]);
+    let implementation_default =
+        preferred_provider(config, &["codex", "gemini", &default_provider]);
     let memory_default = preferred_provider(config, &["claude", &default_provider]);
 
     let judgment_provider = if interactive && enabled.len() > 1 {
@@ -1077,7 +1114,12 @@ fn rebalance_agent_routing(config: &mut SetupConfig, interactive: bool) -> Resul
     for agent in ["scout", "sable", "keeper"] {
         set_agent_route(&mut routing, agent, &judgment_provider, &default_provider);
     }
-    set_agent_route(&mut routing, "mason", &implementation_provider, &default_provider);
+    set_agent_route(
+        &mut routing,
+        "mason",
+        &implementation_provider,
+        &default_provider,
+    );
     set_agent_route(&mut routing, "coobie", &memory_provider, &default_provider);
 
     routing.agents.retain(|_, provider| {
@@ -1218,7 +1260,11 @@ fn common_mcp_templates(platform: &str) -> Vec<McpInterviewTemplate> {
             name: "sqlite",
             prompt: "sqlite MCP for run-state inspection",
             command: "npx",
-            args: &["-y", "@modelcontextprotocol/server-sqlite", "./factory/state.db"],
+            args: &[
+                "-y",
+                "@modelcontextprotocol/server-sqlite",
+                "./factory/state.db",
+            ],
             env: &[],
             aliases: &["db_read"],
             default_enabled: true,
@@ -1344,10 +1390,7 @@ fn prompt_custom_mcp_server() -> Result<McpServerConfig> {
     let command = prompt_text("Command for custom MCP", "npx")?;
     let args = prompt_csv("Args for custom MCP (comma separated)", &[])?;
     let aliases = prompt_csv("Tool aliases for custom MCP (comma separated)", &[])?;
-    let env_raw = prompt_text(
-        "Env bindings for custom MCP (KEY=VALUE,KEY2=VALUE2)",
-        "",
-    )?;
+    let env_raw = prompt_text("Env bindings for custom MCP (KEY=VALUE,KEY2=VALUE2)", "")?;
 
     if name.trim().is_empty() {
         bail!("custom MCP name cannot be empty");
@@ -1362,13 +1405,21 @@ fn prompt_custom_mcp_server() -> Result<McpServerConfig> {
         command,
         args,
         env: if env.is_empty() { None } else { Some(env) },
-        tool_aliases: if aliases.is_empty() { None } else { Some(aliases) },
+        tool_aliases: if aliases.is_empty() {
+            None
+        } else {
+            Some(aliases)
+        },
     })
 }
 
 fn parse_env_bindings(raw: &str) -> Result<HashMap<String, String>> {
     let mut env = HashMap::new();
-    for item in raw.split(',').map(str::trim).filter(|item| !item.is_empty()) {
+    for item in raw
+        .split(',')
+        .map(str::trim)
+        .filter(|item| !item.is_empty())
+    {
         let Some((key, value)) = item.split_once('=') else {
             bail!("invalid env binding: {item}; expected KEY=VALUE");
         };
@@ -1482,7 +1533,8 @@ fn print_agent_routing(paths: &Paths, setup: &SetupConfig) -> Result<()> {
             .with_context(|| format!("parsing agent profile: {}", path.display()))?;
 
         let base_provider = setup.resolve_provider_name(&profile.provider);
-        let effective_provider = setup.resolve_agent_provider_name(&profile.name, &profile.provider);
+        let effective_provider =
+            setup.resolve_agent_provider_name(&profile.name, &profile.provider);
         let override_note = if effective_provider != base_provider {
             format!("  override from {base_provider}")
         } else {
@@ -1550,7 +1602,11 @@ fn prompt_bool(label: &str, default: bool) -> Result<bool> {
 }
 
 fn bool_tag(value: bool) -> &'static str {
-    if value { "yes" } else { "no" }
+    if value {
+        "yes"
+    } else {
+        "no"
+    }
 }
 
 fn resolve_write_target(root: &Path, raw: &str) -> PathBuf {
@@ -1604,7 +1660,8 @@ pub async fn handle_capacity(command: CapacityCommands, paths: &Paths) -> Result
                 );
             }
             let mut state = CapacityState::load(&paths.root)?;
-            let availability_changed = state.set(&args.provider, &args.status, args.note.clone(), "human");
+            let availability_changed =
+                state.set(&args.provider, &args.status, args.note.clone(), "human");
             state.save(&paths.root)?;
             println!("capacity: {} → {}", args.provider, args.status);
             if availability_changed {
@@ -1681,8 +1738,12 @@ pub async fn handle_capacity(command: CapacityCommands, paths: &Paths) -> Result
             if reassigned.is_empty() {
                 println!("All active claims are on available providers — nothing to reassign.");
             } else {
-                assignments["updated_at"] = serde_json::Value::String(chrono::Utc::now().to_rfc3339());
-                std::fs::write(&assignments_path, serde_json::to_string_pretty(&assignments)?)?;
+                assignments["updated_at"] =
+                    serde_json::Value::String(chrono::Utc::now().to_rfc3339());
+                std::fs::write(
+                    &assignments_path,
+                    serde_json::to_string_pretty(&assignments)?,
+                )?;
                 println!("Reassigned {} claim(s):", reassigned.len());
                 for (agent, from, to) in &reassigned {
                     println!("  {agent}: {from} → {to}");

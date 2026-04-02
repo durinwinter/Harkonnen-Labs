@@ -1,0 +1,26 @@
+id: ceres-station-draft-f94b6762
+title: Ceres Station
+purpose: >
+  Valitdate the Lamdet Corpus
+scope:
+  - ceres-station
+constraints:
+  - remain within the ceres-station workspace boundary
+  - do not modify files outside the target product
+inputs:
+  - "product directory: products/ceres-station/"
+outputs:
+  - implementation artifacts in the run workspace
+  - validation.json with pass/fail verdict
+acceptance_criteria:
+  - run completes without errors
+forbidden_behaviors:
+  - deleting unrelated files
+  - reaching outside the workspace boundary
+rollback_requirements:
+  - retain prior artifacts unless explicitly cleaned up
+dependencies: []
+performance_expectations:
+  - commands should complete in a reasonable time
+security_expectations:
+  - secrets must not appear in logs or artifact bundles

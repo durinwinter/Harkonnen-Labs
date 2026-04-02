@@ -442,11 +442,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 0,
-      "last_recalled": null,
-      "loaded_for_run_count": 0,
-      "contributed_to_success_count": 0,
-      "contributed_to_failure_count": 0
+      "recall_count": 2,
+      "last_recalled": "2026-04-02T00:24:48.288448535+00:00",
+      "loaded_for_run_count": 2,
+      "contributed_to_success_count": 1,
+      "contributed_to_failure_count": 1
     },
     {
       "id": "lesson-hidden-scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c",
@@ -655,11 +655,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 6,
-      "last_recalled": "2026-04-01T19:31:49.204003451+00:00",
-      "loaded_for_run_count": 6,
-      "contributed_to_success_count": 4,
-      "contributed_to_failure_count": 2
+      "recall_count": 8,
+      "last_recalled": "2026-04-02T00:24:48.288448535+00:00",
+      "loaded_for_run_count": 8,
+      "contributed_to_success_count": 5,
+      "contributed_to_failure_count": 3
     },
     {
       "id": "run-28a77447-2921-4022-ac30-fc79e17a1742",

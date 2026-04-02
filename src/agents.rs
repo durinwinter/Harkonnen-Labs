@@ -84,6 +84,12 @@ pub fn build_execution(
         summary,
         output: output.to_string(),
         allowed_tools: profile.allowed_tools.clone(),
+        phase: None,
+        episode_id: None,
+        prompt_bundle_fingerprint: None,
+        prompt_bundle_artifact: None,
+        prompt_bundle_provider: None,
+        pinned_skill_ids: Vec::new(),
         created_at: Utc::now(),
     }
 }

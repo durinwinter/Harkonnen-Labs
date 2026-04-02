@@ -74,6 +74,97 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS phase_attributions (
+            attribution_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            episode_id TEXT NOT NULL UNIQUE,
+            phase TEXT NOT NULL,
+            agent_name TEXT NOT NULL,
+            outcome TEXT NOT NULL,
+            confidence REAL,
+            prompt_bundle_fingerprint TEXT,
+            prompt_bundle_provider TEXT,
+            prompt_bundle_artifact TEXT,
+            pinned_skill_ids TEXT NOT NULL DEFAULT '[]',
+            memory_hits TEXT NOT NULL DEFAULT '[]',
+            core_memory_ids TEXT NOT NULL DEFAULT '[]',
+            project_memory_ids TEXT NOT NULL DEFAULT '[]',
+            relevant_lesson_ids TEXT NOT NULL DEFAULT '[]',
+            required_checks TEXT NOT NULL DEFAULT '[]',
+            guardrails TEXT NOT NULL DEFAULT '[]',
+            query_terms TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (episode_id) REFERENCES episodes(episode_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_phase_attributions_run_id_phase
+        ON phase_attributions (run_id, phase)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS run_checkpoints (
+            checkpoint_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            phase TEXT,
+            agent TEXT,
+            checkpoint_type TEXT NOT NULL,
+            status TEXT NOT NULL,
+            prompt TEXT NOT NULL,
+            context_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            resolved_at TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_run_checkpoints_run_status
+        ON run_checkpoints (run_id, status, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS checkpoint_answers (
+            answer_id TEXT PRIMARY KEY,
+            checkpoint_id TEXT NOT NULL,
+            answered_by TEXT NOT NULL,
+            answer_text TEXT NOT NULL,
+            decision_json TEXT NOT NULL DEFAULT '{}',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (checkpoint_id) REFERENCES run_checkpoints(checkpoint_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_checkpoint_answers_checkpoint
+        ON checkpoint_answers (checkpoint_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS causal_links (
             link_id TEXT PRIMARY KEY,
             from_event INTEGER NOT NULL REFERENCES run_events(event_id),
@@ -152,6 +243,7 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
             twin_fidelity_score     REAL NOT NULL DEFAULT 0.5,
             test_coverage_score     REAL NOT NULL DEFAULT 0.0,
             memory_retrieval_score  REAL NOT NULL DEFAULT 0.0,
+            phase_success_score     REAL NOT NULL DEFAULT 1.0,
             scenario_passed         INTEGER NOT NULL DEFAULT 0,
             validation_passed       INTEGER NOT NULL DEFAULT 0,
             human_accepted          INTEGER,
@@ -160,6 +252,14 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
         "#,
     )
     .execute(&pool)
+    .await?;
+
+    ensure_column(
+        &pool,
+        "coobie_episode_scores",
+        "phase_success_score",
+        "ALTER TABLE coobie_episode_scores ADD COLUMN phase_success_score REAL NOT NULL DEFAULT 1.0",
+    )
     .await?;
 
     sqlx::query(
@@ -235,7 +335,12 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
     Ok(pool)
 }
 
-async fn ensure_column(pool: &SqlitePool, table: &str, column: &str, alter_sql: &str) -> Result<()> {
+async fn ensure_column(
+    pool: &SqlitePool,
+    table: &str,
+    column: &str,
+    alter_sql: &str,
+) -> Result<()> {
     let pragma = format!("PRAGMA table_info({table})");
     let rows = sqlx::query(&pragma).fetch_all(pool).await?;
     let exists = rows

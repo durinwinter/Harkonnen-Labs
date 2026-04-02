@@ -1,4 +1,5 @@
 import React from 'react';
+import LabradorIcon from './LabradorIcon';
 
 const STATUS_LABELS = {
   idle: 'idle',
@@ -32,12 +33,17 @@ const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
     engine,
     ownership,
     latestPhase,
+    bundleProvider,
+    bundleFingerprint,
+    pinnedSkillIds,
   } = agent;
+
+  const skills = (pinnedSkillIds || []).map(sid =>
+    sid.includes('/') ? sid.split('/').pop() : sid,
+  );
 
   const cardStatus = STATUS_LABELS[status] || 'idle';
   const statusColor = STATUS_COLORS[cardStatus] || STATUS_COLORS.idle;
-  const iconPath = `/icons/agents/${id}/icon.png`;
-
   return (
     <div
       className={`agent-card variant-${variant} status-${cardStatus} ${isSingleton ? 'singleton' : ''}`}
@@ -45,15 +51,11 @@ const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
     >
       <div className="agent-tile">
         <div className="agent-image-wrap">
-          <img
-            src={iconPath}
-            alt={name}
-            className="agent-image"
-            onError={(event) => {
-              event.currentTarget.style.display = 'none';
-            }}
+          <LabradorIcon
+            color={accentColor || 'var(--accent-gold, #c4922a)'}
+            size={isSingleton ? 72 : 80}
+            status={cardStatus}
           />
-          <div className="agent-fallback">{name[0]}</div>
         </div>
         <div className="agent-nameplate">
           <div className="agent-name">{name}</div>
@@ -86,9 +88,28 @@ const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
           <div className="info-value">{task}</div>
         </div>
 
+        {skills.length > 0 && (
+          <div className="info-block skills-block">
+            <div className="info-label">SKILLS</div>
+            <div className="skill-chips">
+              {skills.map(s => (
+                <span key={s} className="skill-chip">{s}</span>
+              ))}
+              {bundleProvider && (
+                <span className={`provider-chip provider-${bundleProvider}`}>{bundleProvider}</span>
+              )}
+            </div>
+          </div>
+        )}
+
         <div className="info-block log-block">
           <div className="info-label">LATEST LOG</div>
           <div className="info-value mono">{latestLog}</div>
+          {bundleFingerprint && (
+            <div className="bundle-fp" title={`Bundle: ${bundleFingerprint}`}>
+              bundle:{bundleFingerprint.slice(0, 10)}
+            </div>
+          )}
         </div>
       </div>
 
@@ -139,24 +160,6 @@ const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
           display: grid;
           place-items: center;
           padding: 16px;
-        }
-
-        .agent-image {
-          max-width: 100%;
-          max-height: 100%;
-          object-fit: contain;
-          z-index: 1;
-        }
-
-        .agent-fallback {
-          position: absolute;
-          inset: 0;
-          display: grid;
-          place-items: center;
-          font-size: 3rem;
-          font-weight: 900;
-          color: rgba(229, 225, 216, 0.16);
-          letter-spacing: 0.08em;
         }
 
         .agent-nameplate {
@@ -265,6 +268,62 @@ const AgentCard = ({ agent, variant = 'dark', isSingleton = false }) => {
 
         .log-block {
           flex: 1;
+        }
+
+        .skills-block {
+          padding-top: 0.55rem;
+          padding-bottom: 0.55rem;
+        }
+
+        .skill-chips {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.3rem;
+          margin-top: 0.2rem;
+        }
+
+        .skill-chip {
+          font-size: 0.6rem;
+          font-weight: 700;
+          color: rgba(194, 163, 114, 0.75);
+          background: rgba(194, 163, 114, 0.07);
+          border: 1px solid rgba(194, 163, 114, 0.15);
+          border-radius: 5px;
+          padding: 0.1rem 0.4rem;
+          font-family: var(--font-mono);
+          white-space: nowrap;
+        }
+
+        .provider-chip {
+          font-size: 0.58rem;
+          font-weight: 900;
+          text-transform: uppercase;
+          letter-spacing: 0.08em;
+          border-radius: 5px;
+          padding: 0.1rem 0.4rem;
+          border: 1px solid;
+        }
+
+        .provider-chip.provider-anthropic,
+        .provider-chip.provider-claude {
+          color: #c4922a;
+          background: rgba(196, 146, 42, 0.1);
+          border-color: rgba(196, 146, 42, 0.25);
+        }
+
+        .provider-chip.provider-openai,
+        .provider-chip.provider-codex {
+          color: #5a8acc;
+          background: rgba(90, 138, 204, 0.1);
+          border-color: rgba(90, 138, 204, 0.25);
+        }
+
+        .bundle-fp {
+          margin-top: 0.3rem;
+          font-family: var(--font-mono);
+          font-size: 0.6rem;
+          color: rgba(255, 255, 255, 0.18);
+          letter-spacing: 0.04em;
         }
 
         .mono {

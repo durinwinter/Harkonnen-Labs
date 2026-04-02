@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
 use std::collections::{hash_map::DefaultHasher, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
-use std::path::{Path, PathBuf};
+use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
 use tokio::io::AsyncWriteExt;
@@ -14,20 +14,22 @@ use uuid::Uuid;
 
 use crate::{
     agents::{self, AgentProfile},
-    coobie::CoobieReasoner,
     config::Paths,
+    coobie::CoobieReasoner,
     db,
-    llm::{self, LlmRequest},
+    llm::{self, LlmRequest, Message},
     memory::{MemoryEntry, MemoryIngestOptions, MemoryIngestResult, MemoryProvenance, MemoryStore},
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation, EpisodeRecord,
-        EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport, EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary,
-        IntentPackage, LessonRecord, PriorCauseSignal, ProjectResumeRisk, RunEvent, RunRecord, ScenarioResult,
-        Spec, TwinEnvironment, TwinService, ValidationSummary, WorkerHarnessConfig,
+        AgentExecution, BlackboardState, CheckpointAnswerRecord, CoobieBriefing,
+        CoobieEvidenceCitation, EpisodeRecord, EvidenceAnnotation, EvidenceAnnotationBundle,
+        EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
+        EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
+        HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord,
+        PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk, RunCheckpointRecord, RunEvent,
+        RunRecord, ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
+        WorkerHarnessConfig,
     },
-    pidgin,
-    policy,
-    scenarios,
+    pidgin, policy, scenarios,
     setup::command_available,
     spec, workspace,
 };
@@ -72,6 +74,16 @@ struct TargetSourceMetadata {
     source_kind: String,
     source_path: String,
     git: Option<TargetGitMetadata>,
+}
+
+#[derive(Debug, Clone)]
+struct CheckpointDraft {
+    checkpoint_id: String,
+    phase: Option<String>,
+    agent: Option<String>,
+    checkpoint_type: String,
+    prompt: String,
+    context_json: serde_json::Value,
 }
 
 impl RunRequest {
@@ -293,6 +305,8 @@ struct WorkerTaskEnvelope {
     preferred_commands: Vec<String>,
     guardrails: Vec<String>,
     required_checks: Vec<String>,
+    llm_edits: bool,
+    editable_paths: Vec<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -410,6 +424,122 @@ struct RetrieverExecutionArtifact {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasonContextFile {
+    path: String,
+    content: String,
+    truncated: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasonEdit {
+    path: String,
+    action: String,
+    summary: String,
+    content: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasonEditProposal {
+    summary: String,
+    #[serde(default)]
+    rationale: Vec<String>,
+    #[serde(default)]
+    edits: Vec<MasonEdit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasonEditProposalArtifact {
+    run_id: String,
+    spec_id: String,
+    product: String,
+    generated_at: String,
+    editable_paths: Vec<String>,
+    context_paths: Vec<String>,
+    summary: String,
+    rationale: Vec<String>,
+    edits: Vec<MasonEdit>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct MasonEditApplicationArtifact {
+    run_id: String,
+    spec_id: String,
+    product: String,
+    generated_at: String,
+    status: String,
+    summary: String,
+    proposal_generated: bool,
+    changed_files: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ResolvedPinnedSkillExcerpt {
+    id: String,
+    source: String,
+    provider_family: String,
+    vendor_path: String,
+    rationale: String,
+    excerpt: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct AgentPromptBundleArtifact {
+    agent_name: String,
+    display_name: String,
+    role: String,
+    resolved_provider: String,
+    resolved_model: Option<String>,
+    resolved_surface: Option<String>,
+    fingerprint: String,
+    shared_personality: String,
+    personality_addendum: Option<String>,
+    curated_skill_bundle: String,
+    pinned_skill_ids: Vec<String>,
+    pinned_external_skills: Vec<ResolvedPinnedSkillExcerpt>,
+    repo_local_context_entries: Vec<RepoLocalContextEntry>,
+    repo_local_skill_entries: Vec<RepoLocalContextEntry>,
+    system_instruction: String,
+    repo_context_block: String,
+}
+
+#[derive(Debug, Clone)]
+struct AgentPromptSupport {
+    system_instruction: String,
+    repo_context_block: String,
+    bundle: AgentPromptBundleArtifact,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PinnedSkillManifest {
+    #[serde(default)]
+    sources: HashMap<String, PinnedSkillSource>,
+    #[serde(default)]
+    skills: Vec<PinnedSkillEntry>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PinnedSkillSource {
+    #[serde(default)]
+    repo: String,
+    #[serde(default)]
+    commit: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+struct PinnedSkillEntry {
+    #[serde(default)]
+    id: String,
+    #[serde(default)]
+    source: String,
+    #[serde(default)]
+    vendor_path: String,
+    #[serde(default)]
+    agents: Vec<String>,
+    #[serde(default)]
+    rationale: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct RetrieverHookRecord {
     stage: String,
     decision: String,
@@ -519,7 +649,8 @@ impl AppContext {
                         },
                     )
                     .await?;
-                self.refresh_project_resume_packet(&target_source, &store).await?;
+                self.refresh_project_resume_packet(&target_source, &store)
+                    .await?;
                 Ok(result)
             }
             _ => bail!("unsupported memory ingest scope: {scope}"),
@@ -528,14 +659,16 @@ impl AppContext {
 
     pub async fn init_project_evidence(&self, project_root: &Path) -> Result<PathBuf> {
         let harkonnen_dir = self.repo_harkonnen_dir(project_root);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
         Ok(harkonnen_dir.join("evidence"))
     }
 
     pub async fn list_project_evidence_bundles(&self, project_root: &str) -> Result<Vec<String>> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
         let harkonnen_dir = self.project_harkonnen_dir(&target_source);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
         let annotations_dir = harkonnen_dir.join("evidence").join("annotations");
         let mut bundles = Vec::new();
         let mut reader = tokio::fs::read_dir(&annotations_dir).await?;
@@ -566,7 +699,9 @@ impl AppContext {
         bundle_name: &str,
     ) -> Result<Option<EvidenceAnnotationBundle>> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
-        let path = self.project_evidence_bundle_path(&target_source, bundle_name).await?;
+        let path = self
+            .project_evidence_bundle_path(&target_source, bundle_name)
+            .await?;
         if !path.exists() {
             return Ok(None);
         }
@@ -581,7 +716,9 @@ impl AppContext {
         annotation_id: Option<&str>,
     ) -> Result<Vec<EvidenceAnnotationHistoryEvent>> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
-        let path = self.project_evidence_history_path(&target_source, bundle_name).await?;
+        let path = self
+            .project_evidence_history_path(&target_source, bundle_name)
+            .await?;
         if !path.exists() {
             return Ok(Vec::new());
         }
@@ -602,7 +739,11 @@ impl AppContext {
             }
             events.push(event);
         }
-        events.sort_by(|left, right| left.occurred_at.cmp(&right.occurred_at).then_with(|| left.event_id.cmp(&right.event_id)));
+        events.sort_by(|left, right| {
+            left.occurred_at
+                .cmp(&right.occurred_at)
+                .then_with(|| left.event_id.cmp(&right.event_id))
+        });
         Ok(events)
     }
 
@@ -613,7 +754,9 @@ impl AppContext {
         bundle: &EvidenceAnnotationBundle,
     ) -> Result<PathBuf> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
-        let path = self.project_evidence_bundle_path(&target_source, bundle_name).await?;
+        let path = self
+            .project_evidence_bundle_path(&target_source, bundle_name)
+            .await?;
         let previous = if path.exists() {
             let raw = tokio::fs::read_to_string(&path).await?;
             Some(parse_evidence_bundle_text(&raw)?)
@@ -627,7 +770,8 @@ impl AppContext {
         validate_evidence_bundle(&normalized)?;
         let raw = serde_yaml::to_string(&normalized)?;
         tokio::fs::write(&path, raw).await?;
-        let history_events = collect_bundle_save_history_events(bundle_name, previous.as_ref(), &normalized);
+        let history_events =
+            collect_bundle_save_history_events(bundle_name, previous.as_ref(), &normalized);
         self.append_project_evidence_history_events(&target_source, bundle_name, &history_events)
             .await?;
         Ok(path)
@@ -644,7 +788,9 @@ impl AppContext {
         annotation: &EvidenceAnnotation,
     ) -> Result<(PathBuf, EvidenceAnnotationBundle)> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
-        let path = self.project_evidence_bundle_path(&target_source, bundle_name).await?;
+        let path = self
+            .project_evidence_bundle_path(&target_source, bundle_name)
+            .await?;
         let mut bundle = if path.exists() {
             let raw = tokio::fs::read_to_string(&path).await?;
             parse_evidence_bundle_text(&raw)?
@@ -718,8 +864,14 @@ impl AppContext {
         let history_event = build_annotation_history_event(
             bundle_name,
             &normalized_annotation,
-            if previous_annotation.is_some() { "updated" } else { "created" },
-            previous_annotation.as_ref().map(|value| effective_annotation_status(value)),
+            if previous_annotation.is_some() {
+                "updated"
+            } else {
+                "created"
+            },
+            previous_annotation
+                .as_ref()
+                .map(|value| effective_annotation_status(value)),
             Some(annotation_history_actor(&normalized_annotation)),
             if previous_annotation.is_some() {
                 Some("Annotation updated via upsert.".to_string())
@@ -748,7 +900,9 @@ impl AppContext {
         }
 
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
-        let path = self.project_evidence_bundle_path(&target_source, bundle_name).await?;
+        let path = self
+            .project_evidence_bundle_path(&target_source, bundle_name)
+            .await?;
         if !path.exists() {
             bail!("evidence bundle '{}' not found", bundle_name);
         }
@@ -764,7 +918,12 @@ impl AppContext {
                 .annotations
                 .iter_mut()
                 .find(|candidate| candidate.annotation_id == annotation_id)
-                .with_context(|| format!("annotation '{}' not found in bundle '{}'", annotation_id, bundle_name))?;
+                .with_context(|| {
+                    format!(
+                        "annotation '{}' not found in bundle '{}'",
+                        annotation_id, bundle_name
+                    )
+                })?;
 
             let previous_status = effective_annotation_status(annotation);
             let actor = reviewed_by
@@ -781,7 +940,8 @@ impl AppContext {
                 }
                 _ => {
                     annotation.reviewed_at = now.clone();
-                    if let Some(reviewed_by) = reviewed_by.filter(|value| !value.trim().is_empty()) {
+                    if let Some(reviewed_by) = reviewed_by.filter(|value| !value.trim().is_empty())
+                    {
                         annotation.reviewed_by = reviewed_by.trim().to_string();
                     }
                 }
@@ -802,7 +962,10 @@ impl AppContext {
                     Some(name) => format!("Review [{} by {}]", normalized_status, name),
                     None => format!("Review [{}]", normalized_status),
                 };
-                append_annotation_note(&mut annotation.notes, &format!("{}: {}", prefix, review_note.trim()));
+                append_annotation_note(
+                    &mut annotation.notes,
+                    &format!("{}: {}", prefix, review_note.trim()),
+                );
             }
 
             history_events.push(build_annotation_history_event(
@@ -811,7 +974,9 @@ impl AppContext {
                 "status_changed",
                 Some(previous_status),
                 Some(actor),
-                review_note.map(|value| value.trim().to_string()).filter(|value| !value.is_empty()),
+                review_note
+                    .map(|value| value.trim().to_string())
+                    .filter(|value| !value.is_empty()),
                 Vec::new(),
             ));
         }
@@ -820,16 +985,23 @@ impl AppContext {
         let serialized = serde_yaml::to_string(&bundle)?;
         tokio::fs::write(&path, serialized).await?;
 
-        let promotion = if let Some(scope) = promote_scope.filter(|value| !value.trim().is_empty()) {
+        let promotion = if let Some(scope) = promote_scope.filter(|value| !value.trim().is_empty())
+        {
             let single_annotation = bundle
                 .annotations
                 .iter()
                 .find(|candidate| candidate.annotation_id == annotation_id)
                 .cloned()
-                .with_context(|| format!("annotation '{}' not found after review update", annotation_id))?;
+                .with_context(|| {
+                    format!(
+                        "annotation '{}' not found after review update",
+                        annotation_id
+                    )
+                })?;
             let mut single_bundle = bundle.clone();
             single_bundle.annotations = vec![single_annotation.clone()];
-            let promotion = self.promote_evidence_bundle(&path, &single_bundle, scope, Some(project_root))
+            let promotion = self
+                .promote_evidence_bundle(&path, &single_bundle, scope, Some(project_root))
                 .await?;
             if !promotion.promoted_ids.is_empty() {
                 history_events.push(build_annotation_history_event(
@@ -861,9 +1033,12 @@ impl AppContext {
         project_root: Option<&str>,
     ) -> Result<EvidencePromotionResult> {
         let normalized_scope = scope.trim().to_lowercase();
-        let target_source = if normalized_scope == "project" || normalized_scope == "follow-bundle" {
+        let target_source = if normalized_scope == "project" || normalized_scope == "follow-bundle"
+        {
             match project_root {
-                Some(root) if !root.trim().is_empty() => Some(self.resolve_memory_ingest_target(root).await?),
+                Some(root) if !root.trim().is_empty() => {
+                    Some(self.resolve_memory_ingest_target(root).await?)
+                }
                 _ => None,
             }
         } else {
@@ -876,21 +1051,26 @@ impl AppContext {
 
         let mut result = EvidencePromotionResult::default();
         for annotation in &bundle.annotations {
-            let destination = match resolve_evidence_promotion_destination(annotation, &normalized_scope) {
-                Some(destination) => destination,
-                None => {
-                    result.skipped_annotations.push(format!(
-                        "{} (promotion disabled or unsupported scope)",
-                        annotation.annotation_id
-                    ));
-                    continue;
-                }
-            };
+            let destination =
+                match resolve_evidence_promotion_destination(annotation, &normalized_scope) {
+                    Some(destination) => destination,
+                    None => {
+                        result.skipped_annotations.push(format!(
+                            "{} (promotion disabled or unsupported scope)",
+                            annotation.annotation_id
+                        ));
+                        continue;
+                    }
+                };
             if !annotation_is_review_ready(annotation) {
                 result.skipped_annotations.push(format!(
                     "{} (status {} is not review-ready)",
                     annotation.annotation_id,
-                    if annotation.status.trim().is_empty() { "draft" } else { annotation.status.trim() }
+                    if annotation.status.trim().is_empty() {
+                        "draft"
+                    } else {
+                        annotation.status.trim()
+                    }
                 ));
                 continue;
             }
@@ -906,7 +1086,13 @@ impl AppContext {
                     let target_source = target_source
                         .as_ref()
                         .context("project evidence promotion requires target source context")?;
-                    let provenance = build_evidence_memory_provenance(bundle_path, bundle, annotation, target_source, &source_uris);
+                    let provenance = build_evidence_memory_provenance(
+                        bundle_path,
+                        bundle,
+                        annotation,
+                        target_source,
+                        &source_uris,
+                    );
                     self.store_project_memory_entry(
                         target_source,
                         &memory_id,
@@ -941,7 +1127,8 @@ impl AppContext {
 
         if let Some(target_source) = target_source.as_ref() {
             let store = self.project_memory_store(target_source).await?;
-            self.refresh_project_resume_packet(target_source, &store).await?;
+            self.refresh_project_resume_packet(target_source, &store)
+                .await?;
         }
 
         Ok(result)
@@ -960,7 +1147,8 @@ impl AppContext {
     ) -> Result<Vec<EvidenceWindowMatch>> {
         let target_source = self.resolve_memory_ingest_target(project_root).await?;
         let harkonnen_dir = self.project_harkonnen_dir(&target_source);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
         let annotations_dir = harkonnen_dir.join("evidence").join("annotations");
         if !annotations_dir.exists() {
             return Ok(Vec::new());
@@ -1028,7 +1216,12 @@ impl AppContext {
                 let matched_sources = bundle
                     .sources
                     .iter()
-                    .filter(|source| annotation.source_ids.iter().any(|id| id == &source.source_id))
+                    .filter(|source| {
+                        annotation
+                            .source_ids
+                            .iter()
+                            .any(|id| id == &source.source_id)
+                    })
                     .map(|source| format!("{}:{}:{}", source.source_id, source.kind, source.label))
                     .collect::<Vec<_>>();
                 let claim_summary = annotation
@@ -1036,7 +1229,8 @@ impl AppContext {
                     .iter()
                     .map(|claim| format!("{}:{}->{}", claim.relation, claim.cause, claim.effect))
                     .collect::<Vec<_>>();
-                let time_summary = render_evidence_time_range_summary(annotation.time_range.as_ref());
+                let time_summary =
+                    render_evidence_time_range_summary(annotation.time_range.as_ref());
                 let haystack = format!(
                     "{} {} {} {} {} {} {} {} {} {} {}",
                     bundle.project,
@@ -1073,8 +1267,12 @@ impl AppContext {
                     .claims
                     .iter()
                     .flat_map(|claim| {
-                        [claim.relation.clone(), claim.cause.clone(), claim.effect.clone()]
-                            .into_iter()
+                        [
+                            claim.relation.clone(),
+                            claim.cause.clone(),
+                            claim.effect.clone(),
+                        ]
+                        .into_iter()
                     })
                     .map(|value| value.trim().to_ascii_lowercase())
                     .filter(|value| !value.is_empty())
@@ -1083,9 +1281,12 @@ impl AppContext {
                     .iter()
                     .map(|value| value.to_ascii_lowercase())
                     .collect::<Vec<_>>();
-                let matched_labels = collect_overlapping_terms(&normalized_labels, &normalized_annotation_terms);
-                let matched_claims = collect_overlapping_terms(&normalized_claims, &normalized_claim_terms);
-                let matched_source_terms = collect_overlapping_terms(&normalized_sources, &normalized_source_terms);
+                let matched_labels =
+                    collect_overlapping_terms(&normalized_labels, &normalized_annotation_terms);
+                let matched_claims =
+                    collect_overlapping_terms(&normalized_claims, &normalized_claim_terms);
+                let matched_source_terms =
+                    collect_overlapping_terms(&normalized_sources, &normalized_source_terms);
 
                 score += overlap_bonus(&normalized_labels, &normalized_annotation_terms, 12);
                 score += overlap_bonus(&normalized_claims, &normalized_claim_terms, 12);
@@ -1127,7 +1328,11 @@ impl AppContext {
                     matched_sources: matched_source_terms,
                     time_span_delta_ms,
                     citation: CoobieEvidenceCitation {
-                        citation_id: format!("evidence-window:{}:{}", path.display(), annotation.annotation_id),
+                        citation_id: format!(
+                            "evidence-window:{}:{}",
+                            path.display(),
+                            annotation.annotation_id
+                        ),
                         source_type: "evidence_annotation_window".to_string(),
                         run_id: "annotation".to_string(),
                         episode_id: Some(annotation.annotation_id.clone()),
@@ -1136,16 +1341,36 @@ impl AppContext {
                         summary: format!(
                             "nearest prior evidence window '{}' from scenario '{}'",
                             title,
-                            if bundle.scenario.trim().is_empty() { "unspecified" } else { bundle.scenario.trim() }
+                            if bundle.scenario.trim().is_empty() {
+                                "unspecified"
+                            } else {
+                                bundle.scenario.trim()
+                            }
                         ),
                         evidence: format!(
                             "bundle={}; dataset={}; time={}; labels={}; claims={}; sources={}",
                             path.display(),
-                            if bundle.dataset.trim().is_empty() { "unspecified" } else { bundle.dataset.trim() },
+                            if bundle.dataset.trim().is_empty() {
+                                "unspecified"
+                            } else {
+                                bundle.dataset.trim()
+                            },
                             render_evidence_time_range_summary(annotation.time_range.as_ref()),
-                            if annotation.labels.is_empty() { "none".to_string() } else { annotation.labels.join(" | ") },
-                            if claim_summary.is_empty() { "none".to_string() } else { claim_summary.join(" | ") },
-                            if matched_sources.is_empty() { "none".to_string() } else { matched_sources.join(" | ") }
+                            if annotation.labels.is_empty() {
+                                "none".to_string()
+                            } else {
+                                annotation.labels.join(" | ")
+                            },
+                            if claim_summary.is_empty() {
+                                "none".to_string()
+                            } else {
+                                claim_summary.join(" | ")
+                            },
+                            if matched_sources.is_empty() {
+                                "none".to_string()
+                            } else {
+                                matched_sources.join(" | ")
+                            }
                         ),
                     },
                 });
@@ -1199,7 +1424,11 @@ impl AppContext {
                 };
                 self.update_run_status(&run_id, final_status).await?;
                 if let Err(error) = self
-                    .record_memory_context_outcome(&target_source, &output.memory_context, final_status == "completed")
+                    .record_memory_context_outcome(
+                        &target_source,
+                        &output.memory_context,
+                        final_status == "completed",
+                    )
                     .await
                 {
                     let _ = self
@@ -1274,7 +1503,8 @@ impl AppContext {
                         &log_path,
                     )
                     .await?;
-                self.finalize_blackboard(final_status, &output.run_dir).await?;
+                self.finalize_blackboard(final_status, &output.run_dir)
+                    .await?;
                 self.package_artifacts(&run_id).await?;
             }
             Err(error) => {
@@ -1311,7 +1541,8 @@ impl AppContext {
                     }
                 };
                 if run_dir.exists() {
-                    self.attach_lessons_to_blackboard(&run_dir, &lessons).await?;
+                    self.attach_lessons_to_blackboard(&run_dir, &lessons)
+                        .await?;
                     if let Ok(Some(briefing)) = self.load_run_briefing(&run_id).await {
                         let fallback_validation = ValidationSummary {
                             passed: false,
@@ -1365,7 +1596,8 @@ impl AppContext {
         log_path: &Path,
     ) -> Result<ExecutionOutput> {
         let profiles = agents::load_profiles(&self.paths.factory.join("agents").join("profiles"))?;
-        let workspace_root = workspace::create_run_workspace(&self.paths.workspaces, run_id).await?;
+        let workspace_root =
+            workspace::create_run_workspace(&self.paths.workspaces, run_id).await?;
         let run_dir = workspace_root.join("run");
         let agents_dir = run_dir.join("agents");
         tokio::fs::create_dir_all(&agents_dir).await?;
@@ -1382,19 +1614,30 @@ impl AppContext {
             ..Default::default()
         };
         push_unique(&mut blackboard.artifact_refs, "target_source.json");
+        push_unique(&mut blackboard.artifact_refs, "phase_attributions.json");
+        push_unique(&mut blackboard.artifact_refs, "phase_attributions.md");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         let mut agent_executions = Vec::new();
+        let mut phase_attributions = Vec::new();
         let mut retriever_context_bundle: Option<RetrieverContextBundleArtifact> = None;
         let query_terms = build_coobie_query_terms(spec_obj, target_source);
         let domain_signals = infer_domain_signals(spec_obj, target_source, &query_terms);
 
         let memory_episode = self
-            .start_episode(run_id, "memory", &format!("Coobie preflight for {}", spec_obj.id))
+            .start_episode(
+                run_id,
+                "memory",
+                &format!("Coobie preflight for {}", spec_obj.id),
+            )
             .await?;
         blackboard.current_phase = "memory".to_string();
         blackboard.active_goal = format!("Coobie preflight for {}", spec_obj.title);
-        claim_agent(&mut blackboard, "coobie", "retrieve prior context and emit causal briefing");
+        claim_agent(
+            &mut blackboard,
+            "coobie",
+            "retrieve prior context and emit causal briefing",
+        );
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "memory").await?;
         let memory_start = self
@@ -1447,7 +1690,10 @@ impl AppContext {
         .await?;
         push_unique(&mut blackboard.artifact_refs, "memory_context.md");
         push_unique(&mut blackboard.artifact_refs, "coobie_briefing.json");
-        push_unique(&mut blackboard.artifact_refs, "coobie_preflight_response.md");
+        push_unique(
+            &mut blackboard.artifact_refs,
+            "coobie_preflight_response.md",
+        );
         push_unique(&mut blackboard.artifact_refs, "evidence_match_report.json");
         push_unique(&mut blackboard.artifact_refs, "evidence_match_report.md");
         self.write_agent_execution(
@@ -1464,6 +1710,10 @@ impl AppContext {
                 briefing.required_checks.len()
             ),
             &briefing.coobie_response,
+            "memory",
+            &memory_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1483,9 +1733,29 @@ impl AppContext {
                 log_path,
             )
             .await?;
-        self.finish_episode(&memory_episode, "success", Some(1.0)).await?;
-        self.link_events(memory_start.event_id, memory_end.event_id, "contributed_to", 1.0)
+        self.finish_episode(&memory_episode, "success", Some(1.0))
             .await?;
+        self.record_phase_attribution(
+            run_id,
+            &memory_episode,
+            "memory",
+            "coobie",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
+        self.link_events(
+            memory_start.event_id,
+            memory_end.event_id,
+            "contributed_to",
+            1.0,
+        )
+        .await?;
         release_agent(&mut blackboard, "coobie");
         push_unique(&mut blackboard.resolved_items, "memory");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
@@ -1495,7 +1765,11 @@ impl AppContext {
             .await?;
         blackboard.current_phase = "intake".to_string();
         blackboard.active_goal = format!("Interpret spec {}", spec_obj.title);
-        claim_agent(&mut blackboard, "scout", "interpret spec and normalize intent with Coobie context");
+        claim_agent(
+            &mut blackboard,
+            "scout",
+            "interpret spec and normalize intent with Coobie context",
+        );
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "intake").await?;
         let intake_start = self
@@ -1509,8 +1783,11 @@ impl AppContext {
                 log_path,
             )
             .await?;
-        let intent = self.scout_intake(spec_obj, &briefing).await?;
-        self.write_json_file(&run_dir.join("intent.json"), &intent).await?;
+        let intent = self
+            .scout_intake(spec_obj, target_source, &briefing)
+            .await?;
+        self.write_json_file(&run_dir.join("intent.json"), &intent)
+            .await?;
         push_unique(&mut blackboard.artifact_refs, "intent.json");
         self.write_agent_execution(
             &profiles,
@@ -1521,6 +1798,10 @@ impl AppContext {
             ),
             "Parsed the spec and produced an implementation intent package anchored to Coobie's briefing.",
             &serde_json::to_string_pretty(&intent)?,
+            "intake",
+            &intake_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1539,9 +1820,29 @@ impl AppContext {
                 log_path,
             )
             .await?;
-        self.finish_episode(&intake_episode, "success", Some(1.0)).await?;
-        self.link_events(intake_start.event_id, intake_end.event_id, "contributed_to", 1.0)
+        self.finish_episode(&intake_episode, "success", Some(1.0))
             .await?;
+        self.record_phase_attribution(
+            run_id,
+            &intake_episode,
+            "intake",
+            "scout",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
+        self.link_events(
+            intake_start.event_id,
+            intake_end.event_id,
+            "contributed_to",
+            1.0,
+        )
+        .await?;
         release_agent(&mut blackboard, "scout");
         push_unique(&mut blackboard.resolved_items, "intake");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
@@ -1581,6 +1882,10 @@ impl AppContext {
                 workspace_root.display(),
                 staged_product.display()
             ),
+            "workspace",
+            &workspace_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1593,14 +1898,20 @@ impl AppContext {
                 &staged_product,
                 &query_terms,
             )?;
-            self.write_json_file(&run_dir.join("retriever_context_bundle.json"), &context_bundle)
-                .await?;
+            self.write_json_file(
+                &run_dir.join("retriever_context_bundle.json"),
+                &context_bundle,
+            )
+            .await?;
             tokio::fs::write(
                 run_dir.join("retriever_context_bundle.md"),
                 render_retriever_context_bundle_markdown(&context_bundle),
             )
             .await?;
-            push_unique(&mut blackboard.artifact_refs, "retriever_context_bundle.json");
+            push_unique(
+                &mut blackboard.artifact_refs,
+                "retriever_context_bundle.json",
+            );
             push_unique(&mut blackboard.artifact_refs, "retriever_context_bundle.md");
             let drift_guard = build_trail_drift_guard(
                 run_id,
@@ -1624,6 +1935,7 @@ impl AppContext {
                 target_source,
                 worker_harness,
                 &briefing,
+                &self.paths.root,
                 &workspace_root,
                 &run_dir,
                 &staged_product,
@@ -1651,7 +1963,22 @@ impl AppContext {
                 log_path,
             )
             .await?;
-        self.finish_episode(&workspace_episode, "success", Some(1.0)).await?;
+        self.finish_episode(&workspace_episode, "success", Some(1.0))
+            .await?;
+        self.record_phase_attribution(
+            run_id,
+            &workspace_episode,
+            "workspace",
+            "keeper",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
         self.link_events(
             workspace_start.event_id,
             workspace_end.event_id,
@@ -1665,7 +1992,11 @@ impl AppContext {
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         let implementation_episode = self
-            .start_episode(run_id, "implementation", &format!("Plan work for {}", target_source.label))
+            .start_episode(
+                run_id,
+                "implementation",
+                &format!("Plan work for {}", target_source.label),
+            )
             .await?;
         blackboard.current_phase = "implementation".to_string();
         blackboard.active_goal = format!("Prepare implementation plan for {}", target_source.label);
@@ -1717,8 +2048,14 @@ impl AppContext {
                 .await?;
             push_unique(&mut blackboard.artifact_refs, "retriever_dispatch.json");
             push_unique(&mut blackboard.artifact_refs, "retriever_dispatch.md");
-            push_unique(&mut blackboard.artifact_refs, &dispatch.context_bundle_artifact);
-            push_unique(&mut blackboard.artifact_refs, &dispatch.trail_drift_guard_artifact);
+            push_unique(
+                &mut blackboard.artifact_refs,
+                &dispatch.context_bundle_artifact,
+            );
+            push_unique(
+                &mut blackboard.artifact_refs,
+                &dispatch.trail_drift_guard_artifact,
+            );
             push_unique(&mut blackboard.artifact_refs, &dispatch.continuity_artifact);
             self.write_agent_execution(
                 &profiles,
@@ -1738,10 +2075,70 @@ next_actions={}",
                     dispatch.constraints_applied.join(" | "),
                     dispatch.next_actions.join(" | ")
                 ),
+                "implementation",
+                &implementation_episode,
+                spec_obj,
+                target_source,
                 &run_dir,
                 &mut agent_executions,
             )
             .await?;
+
+            if worker_harness.llm_edits {
+                let mason_edit_application = self
+                    .mason_generate_and_apply_edits(
+                        run_id,
+                        spec_obj,
+                        &intent,
+                        &briefing,
+                        &implementation_plan,
+                        target_source,
+                        &staged_product,
+                        &run_dir,
+                    )
+                    .await?;
+                push_unique(&mut blackboard.artifact_refs, "mason_edit_application.json");
+                push_unique(&mut blackboard.artifact_refs, "mason_edit_application.md");
+                if mason_edit_application.proposal_generated {
+                    push_unique(&mut blackboard.artifact_refs, "mason_edit_proposal.json");
+                    push_unique(&mut blackboard.artifact_refs, "mason_edit_proposal.md");
+                }
+                if mason_edit_application.status == "applied" {
+                    if let Some(context_bundle) = retriever_context_bundle.as_ref() {
+                        let drift_guard = build_trail_drift_guard(
+                            run_id,
+                            spec_obj,
+                            target_source,
+                            &staged_product,
+                            context_bundle,
+                        )?;
+                        self.write_json_file(&run_dir.join("trail_drift_guard.json"), &drift_guard)
+                            .await?;
+                        tokio::fs::write(
+                            run_dir.join("trail_drift_guard.md"),
+                            render_trail_drift_guard_markdown(&drift_guard),
+                        )
+                        .await?;
+                    }
+                }
+                self.write_agent_execution(
+                    &profiles,
+                    "mason",
+                    &format!(
+                        "Generate and apply bounded LLM-authored edits for target '{}' inside the staged workspace.",
+                        target_source.label
+                    ),
+                    &mason_edit_application.summary,
+                    &serde_json::to_string_pretty(&mason_edit_application)?,
+                    "implementation",
+                    &implementation_episode,
+                    spec_obj,
+                    target_source,
+                    &run_dir,
+                    &mut agent_executions,
+                )
+                .await?;
+            }
         }
         self.write_agent_execution(
             &profiles,
@@ -1752,6 +2149,10 @@ next_actions={}",
             ),
             "Prepared a local implementation plan for the staged product copy.",
             &implementation_plan,
+            "implementation",
+            &implementation_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1769,6 +2170,20 @@ next_actions={}",
             .await?;
         self.finish_episode(&implementation_episode, "success", Some(1.0))
             .await?;
+        self.record_phase_attribution(
+            run_id,
+            &implementation_episode,
+            "implementation",
+            "mason",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
         self.link_events(
             implementation_start.event_id,
             implementation_end.event_id,
@@ -1785,7 +2200,11 @@ next_actions={}",
             .await?;
         blackboard.current_phase = "tools".to_string();
         blackboard.active_goal = "Summarize tools and MCP surface".to_string();
-        claim_agent(&mut blackboard, "piper", "review tools and MCP availability");
+        claim_agent(
+            &mut blackboard,
+            "piper",
+            "review tools and MCP availability",
+        );
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         self.update_run_status(run_id, "tools").await?;
         let tools_start = self
@@ -1799,7 +2218,9 @@ next_actions={}",
                 log_path,
             )
             .await?;
-        let tool_plan = self.piper_tool_plan(spec_obj, &briefing).await;
+        let tool_plan = self
+            .piper_tool_plan(spec_obj, target_source, &briefing)
+            .await;
         tokio::fs::write(run_dir.join("tool_plan.md"), &tool_plan).await?;
         push_unique(&mut blackboard.artifact_refs, "tool_plan.md");
         self.write_agent_execution(
@@ -1808,6 +2229,10 @@ next_actions={}",
             "Summarize the configured provider and MCP tool surface for this run.",
             "Captured current tool and MCP availability for the run.",
             &tool_plan,
+            "tools",
+            &tools_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1823,16 +2248,40 @@ next_actions={}",
                 log_path,
             )
             .await?;
-        self.finish_episode(&tools_episode, "success", Some(1.0)).await?;
-        self.link_events(tools_start.event_id, tools_end.event_id, "contributed_to", 0.9)
+        self.finish_episode(&tools_episode, "success", Some(1.0))
             .await?;
+        self.record_phase_attribution(
+            run_id,
+            &tools_episode,
+            "tools",
+            "piper",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
+        self.link_events(
+            tools_start.event_id,
+            tools_end.event_id,
+            "contributed_to",
+            0.9,
+        )
+        .await?;
         release_agent(&mut blackboard, "piper");
         push_unique(&mut blackboard.resolved_items, "tools");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         if let Some(worker_harness) = &spec_obj.worker_harness {
             let forge_episode = self
-                .start_episode(run_id, "retriever_forge", "Run bounded retriever forge execution")
+                .start_episode(
+                    run_id,
+                    "retriever_forge",
+                    "Run bounded retriever forge execution",
+                )
                 .await?;
             blackboard.current_phase = "retriever_forge".to_string();
             blackboard.active_goal = "Execute the bounded retriever forge packet".to_string();
@@ -1851,10 +2300,23 @@ next_actions={}",
                 )
                 .await?;
             let forge_report = self
-                .execute_retriever_forge(run_id, spec_obj, target_source, worker_harness, &run_dir, &staged_product)
+                .execute_retriever_forge(
+                    run_id,
+                    spec_obj,
+                    target_source,
+                    worker_harness,
+                    &run_dir,
+                    &staged_product,
+                )
                 .await?;
-            push_unique(&mut blackboard.artifact_refs, "retriever_execution_report.json");
-            push_unique(&mut blackboard.artifact_refs, "retriever_execution_report.md");
+            push_unique(
+                &mut blackboard.artifact_refs,
+                "retriever_execution_report.json",
+            );
+            push_unique(
+                &mut blackboard.artifact_refs,
+                "retriever_execution_report.md",
+            );
             for artifact in &forge_report.returned_artifacts {
                 push_unique(&mut blackboard.artifact_refs, artifact);
             }
@@ -1867,6 +2329,10 @@ next_actions={}",
                 ),
                 &forge_report.summary,
                 &serde_json::to_string_pretty(&forge_report)?,
+                "retriever_forge",
+                &forge_episode,
+                spec_obj,
+                target_source,
                 &run_dir,
                 &mut agent_executions,
             )
@@ -1877,15 +2343,41 @@ next_actions={}",
                     Some(&forge_episode),
                     "retriever_forge",
                     "mason",
-                    if forge_report.passed { "complete" } else { "warning" },
+                    if forge_report.passed {
+                        "complete"
+                    } else {
+                        "warning"
+                    },
                     &forge_report.summary,
                     log_path,
                 )
                 .await?;
             self.finish_episode(
                 &forge_episode,
-                if forge_report.passed { "success" } else { "failure" },
+                if forge_report.passed {
+                    "success"
+                } else {
+                    "failure"
+                },
                 Some(if forge_report.passed { 1.0 } else { 0.5 }),
+            )
+            .await?;
+            self.record_phase_attribution(
+                run_id,
+                &forge_episode,
+                "retriever_forge",
+                "mason",
+                if forge_report.passed {
+                    "success"
+                } else {
+                    "failure"
+                },
+                Some(if forge_report.passed { 1.0 } else { 0.5 }),
+                &memory_context,
+                &briefing,
+                &agent_executions,
+                &mut phase_attributions,
+                &run_dir,
             )
             .await?;
             self.link_events(
@@ -1925,8 +2417,12 @@ next_actions={}",
             )
             .await?;
         let twin = self.build_twin_environment(run_id, spec_obj);
-        self.write_json_file(&run_dir.join("twin.json"), &twin).await?;
-        if let Some(narrative) = self.ash_twin_narrative(spec_obj, &twin, &briefing).await {
+        self.write_json_file(&run_dir.join("twin.json"), &twin)
+            .await?;
+        if let Some(narrative) = self
+            .ash_twin_narrative(spec_obj, target_source, &twin, &briefing)
+            .await
+        {
             let _ = tokio::fs::write(run_dir.join("twin_narrative.md"), &narrative).await;
             push_unique(&mut blackboard.artifact_refs, "twin_narrative.md");
         }
@@ -1937,6 +2433,10 @@ next_actions={}",
             "Provision a safe local twin environment for validation and hidden scenario work.",
             &format!("Provisioned {} twin service(s).", twin.services.len()),
             &serde_json::to_string_pretty(&twin)?,
+            "twin",
+            &twin_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -1952,9 +2452,29 @@ next_actions={}",
                 log_path,
             )
             .await?;
-        self.finish_episode(&twin_episode, "success", Some(1.0)).await?;
-        self.link_events(twin_start.event_id, twin_end.event_id, "contributed_to", 1.0)
+        self.finish_episode(&twin_episode, "success", Some(1.0))
             .await?;
+        self.record_phase_attribution(
+            run_id,
+            &twin_episode,
+            "twin",
+            "ash",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
+        self.link_events(
+            twin_start.event_id,
+            twin_end.event_id,
+            "contributed_to",
+            1.0,
+        )
+        .await?;
         release_agent(&mut blackboard, "ash");
         push_unique(&mut blackboard.resolved_items, "twin");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
@@ -1978,7 +2498,9 @@ next_actions={}",
                 log_path,
             )
             .await?;
-        let mut validation = self.run_visible_validation(&workspace_root, &staged_product, spec_obj).await?;
+        let mut validation = self
+            .run_visible_validation(&workspace_root, &staged_product, spec_obj)
+            .await?;
         if let Some(message) = req.harness_message("validation") {
             validation.passed = false;
             validation.results.push(ScenarioResult {
@@ -1990,7 +2512,11 @@ next_actions={}",
         self.write_json_file(&run_dir.join("validation.json"), &validation)
             .await?;
         push_unique(&mut blackboard.artifact_refs, "validation.json");
-        if workspace_root.join("run").join("corpus_results.json").exists() {
+        if workspace_root
+            .join("run")
+            .join("corpus_results.json")
+            .exists()
+        {
             push_unique(&mut blackboard.artifact_refs, "corpus_results.json");
         }
         self.write_agent_execution(
@@ -2002,18 +2528,30 @@ next_actions={}",
                 validation.results.len()
             ),
             &serde_json::to_string_pretty(&validation)?,
+            "validation",
+            &validation_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
         .await?;
-        let validation_outcome = if validation.passed { "success" } else { "failure" };
+        let validation_outcome = if validation.passed {
+            "success"
+        } else {
+            "failure"
+        };
         let validation_message = if let Some(message) = req.harness_message("validation") {
             format!("Failure harness forced validation failure: {message}")
         } else {
             format!(
                 "Visible validation finished: {} checks, {} passed",
                 validation.results.len(),
-                validation.results.iter().filter(|result| result.passed).count()
+                validation
+                    .results
+                    .iter()
+                    .filter(|result| result.passed)
+                    .count()
             )
         };
         let validation_end = self
@@ -2022,7 +2560,11 @@ next_actions={}",
                 Some(&validation_episode),
                 "validation",
                 "bramble",
-                if validation.passed { "complete" } else { "warning" },
+                if validation.passed {
+                    "complete"
+                } else {
+                    "warning"
+                },
                 &validation_message,
                 log_path,
             )
@@ -2031,6 +2573,20 @@ next_actions={}",
             &validation_episode,
             validation_outcome,
             Some(if validation.passed { 1.0 } else { 0.5 }),
+        )
+        .await?;
+        self.record_phase_attribution(
+            run_id,
+            &validation_episode,
+            "validation",
+            "bramble",
+            validation_outcome,
+            Some(if validation.passed { 1.0 } else { 0.5 }),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
         )
         .await?;
         self.link_events(
@@ -2049,7 +2605,7 @@ next_actions={}",
         }
         // Bramble LLM interpretation — best-effort, non-blocking
         if let Some(analysis) = self
-            .bramble_interpret_validation(spec_obj, &validation, &briefing)
+            .bramble_interpret_validation(spec_obj, target_source, &validation, &briefing)
             .await
         {
             let _ = tokio::fs::write(run_dir.join("validation_analysis.md"), &analysis).await;
@@ -2083,7 +2639,8 @@ next_actions={}",
         };
         let events_so_far = self.list_run_events(run_id).await?;
         let run_attempt = self.run_attempt_number(run_id).await?;
-        let hidden_definitions = scenarios::load_hidden_scenarios(&self.paths.scenarios, &spec_obj.id)?;
+        let hidden_definitions =
+            scenarios::load_hidden_scenarios(&self.paths.scenarios, &spec_obj.id)?;
         let mut hidden_scenarios = if req.run_hidden_scenarios {
             scenarios::evaluate_hidden_scenarios(
                 &hidden_definitions,
@@ -2102,7 +2659,8 @@ next_actions={}",
                     scenario_id: "operator-skip".to_string(),
                     title: "Hidden scenarios skipped".to_string(),
                     passed: true,
-                    details: "Hidden scenarios were skipped for this run by operator request.".to_string(),
+                    details: "Hidden scenarios were skipped for this run by operator request."
+                        .to_string(),
                     checks: vec![HiddenScenarioCheckResult {
                         kind: "operator_skip".to_string(),
                         passed: true,
@@ -2134,11 +2692,19 @@ next_actions={}",
             "Execute hidden scenarios from the protected scenario store and compare the run against them.",
             &format!("Hidden scenarios passed: {}", hidden_scenarios.passed),
             &serde_json::to_string_pretty(&hidden_scenarios)?,
+            "hidden_scenarios",
+            &hidden_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
         .await?;
-        let hidden_outcome = if hidden_scenarios.passed { "success" } else { "failure" };
+        let hidden_outcome = if hidden_scenarios.passed {
+            "success"
+        } else {
+            "failure"
+        };
         let hidden_message = if !req.run_hidden_scenarios {
             "Hidden scenarios skipped by operator request".to_string()
         } else if let Some(message) = req.harness_message("hidden_scenarios") {
@@ -2155,7 +2721,11 @@ next_actions={}",
                 Some(&hidden_episode),
                 "hidden_scenarios",
                 "sable",
-                if hidden_scenarios.passed { "complete" } else { "warning" },
+                if hidden_scenarios.passed {
+                    "complete"
+                } else {
+                    "warning"
+                },
                 &hidden_message,
                 log_path,
             )
@@ -2164,6 +2734,20 @@ next_actions={}",
             &hidden_episode,
             hidden_outcome,
             Some(if hidden_scenarios.passed { 1.0 } else { 0.5 }),
+        )
+        .await?;
+        self.record_phase_attribution(
+            run_id,
+            &hidden_episode,
+            "hidden_scenarios",
+            "sable",
+            hidden_outcome,
+            Some(if hidden_scenarios.passed { 1.0 } else { 0.5 }),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
         )
         .await?;
         self.link_events(
@@ -2183,9 +2767,17 @@ next_actions={}",
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
 
         let memory_store_episode = self
-            .start_episode(run_id, "memory", "Store run summary back into long-term memory")
+            .start_episode(
+                run_id,
+                "memory",
+                "Store run summary back into long-term memory",
+            )
             .await?;
-        claim_agent(&mut blackboard, "coobie", "store run summary and prepare future recall");
+        claim_agent(
+            &mut blackboard,
+            "coobie",
+            "store run summary and prepare future recall",
+        );
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
         let memory_store_start = self
             .record_event(
@@ -2232,9 +2824,11 @@ Top memory hits:
                 self.project_harkonnen_dir(target_source)
                     .join("project-memory")
                     .display(),
-                memory_context.memory_hits.join("
+                memory_context.memory_hits.join(
+                    "
 
-")
+"
+                )
             ),
             project_memory_provenance(
                 target_source,
@@ -2262,7 +2856,22 @@ Top memory hits:
                 log_path,
             )
             .await?;
-        self.finish_episode(&memory_store_episode, "success", Some(1.0)).await?;
+        self.finish_episode(&memory_store_episode, "success", Some(1.0))
+            .await?;
+        self.record_phase_attribution(
+            run_id,
+            &memory_store_episode,
+            "memory",
+            "coobie",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
         self.link_events(
             memory_store_start.event_id,
             memory_store_end.event_id,
@@ -2299,6 +2908,10 @@ Top memory hits:
             "Collect outputs, logs, and evaluation evidence into a portable artifact bundle.",
             "Prepared bundle contents for packaging.",
             &list_run_directory(&run_dir)?.join("\n"),
+            "artifacts",
+            &artifacts_episode,
+            spec_obj,
+            target_source,
             &run_dir,
             &mut agent_executions,
         )
@@ -2312,7 +2925,10 @@ Top memory hits:
         } else {
             push_unique(&mut blackboard.artifact_refs, "exploration_log.md");
             push_unique(&mut blackboard.artifact_refs, "exploration_log.json");
-            push_unique(&mut blackboard.artifact_refs, "dead_end_registry_snapshot.json");
+            push_unique(
+                &mut blackboard.artifact_refs,
+                "dead_end_registry_snapshot.json",
+            );
             let _ = self.sync_blackboard(&blackboard, Some(&run_dir)).await;
         }
         self.package_artifacts(run_id).await?;
@@ -2327,7 +2943,22 @@ Top memory hits:
                 log_path,
             )
             .await?;
-        self.finish_episode(&artifacts_episode, "success", Some(1.0)).await?;
+        self.finish_episode(&artifacts_episode, "success", Some(1.0))
+            .await?;
+        self.record_phase_attribution(
+            run_id,
+            &artifacts_episode,
+            "artifacts",
+            "flint",
+            "success",
+            Some(1.0),
+            &memory_context,
+            &briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            &run_dir,
+        )
+        .await?;
         self.link_events(
             artifacts_start.event_id,
             artifacts_end.event_id,
@@ -2348,6 +2979,7 @@ Top memory hits:
             features: spec_obj.acceptance_criteria.clone(),
             agent_events: all_events,
             tool_events: vec![],
+            phase_attributions: phase_attributions.clone(),
             twin_env: Some(twin.clone()),
             validation: Some(validation.clone()),
             scenarios: Some(hidden_scenarios.clone()),
@@ -2368,11 +3000,8 @@ Top memory hits:
                         &report_response,
                     )
                     .await;
-                    let _ = tokio::fs::write(
-                        run_dir.join("causal_summary.md"),
-                        &report_response,
-                    )
-                    .await;
+                    let _ =
+                        tokio::fs::write(run_dir.join("causal_summary.md"), &report_response).await;
                     push_unique(&mut blackboard.artifact_refs, "causal_report.json");
                     push_unique(&mut blackboard.artifact_refs, "coobie_report_response.md");
                     push_unique(&mut blackboard.artifact_refs, "causal_summary.md");
@@ -2404,19 +3033,35 @@ Top memory hits:
             project_memory.hits.insert(0, project_context_hit);
         }
         if let Some(project_scan_hit) = self.read_project_scan_hit(target_source).await? {
-            project_memory.hits.insert(1.min(project_memory.hits.len()), project_scan_hit);
+            project_memory
+                .hits
+                .insert(1.min(project_memory.hits.len()), project_scan_hit);
         }
         if let Some(resume_packet_hit) = self.read_project_resume_packet_hit(target_source).await? {
-            project_memory.hits.insert(project_memory.hits.len().min(2), resume_packet_hit);
+            project_memory
+                .hits
+                .insert(project_memory.hits.len().min(2), resume_packet_hit);
         }
-        if let Some(strategy_register_hit) = self.read_project_strategy_register_hit(target_source).await? {
-            project_memory.hits.insert(project_memory.hits.len().min(2), strategy_register_hit);
+        if let Some(strategy_register_hit) = self
+            .read_project_strategy_register_hit(target_source)
+            .await?
+        {
+            project_memory
+                .hits
+                .insert(project_memory.hits.len().min(2), strategy_register_hit);
         }
         if let Some(memory_status_hit) = self.read_project_memory_status_hit(target_source).await? {
-            project_memory.hits.insert(project_memory.hits.len().min(4), memory_status_hit);
+            project_memory
+                .hits
+                .insert(project_memory.hits.len().min(4), memory_status_hit);
         }
-        if let Some(mitigation_history_hit) = self.read_project_stale_memory_history_hit(target_source).await? {
-            project_memory.hits.insert(project_memory.hits.len().min(5), mitigation_history_hit);
+        if let Some(mitigation_history_hit) = self
+            .read_project_stale_memory_history_hit(target_source)
+            .await?
+        {
+            project_memory
+                .hits
+                .insert(project_memory.hits.len().min(5), mitigation_history_hit);
         }
         for bundle_hit in self.collect_repo_local_context_hits(target_source, query_terms, 4)? {
             project_memory.hits.push(bundle_hit);
@@ -2430,8 +3075,12 @@ Top memory hits:
         project_memory.ids.dedup();
         core_memory.ids.sort();
         core_memory.ids.dedup();
-        project_store.mark_entries_loaded(&project_memory.ids).await?;
-        self.memory_store.mark_entries_loaded(&core_memory.ids).await?;
+        project_store
+            .mark_entries_loaded(&project_memory.ids)
+            .await?;
+        self.memory_store
+            .mark_entries_loaded(&core_memory.ids)
+            .await?;
 
         let mut memory_hits = Vec::new();
         let mut seen = HashSet::new();
@@ -2509,11 +3158,19 @@ Top memory hits:
         Ok(())
     }
 
-    async fn project_memory_store(&self, target_source: &TargetSourceMetadata) -> Result<MemoryStore> {
-        let store = MemoryStore::new(self.project_harkonnen_dir(target_source).join("project-memory"));
-        self.ensure_project_memory_bootstrap(target_source, &store).await?;
+    async fn project_memory_store(
+        &self,
+        target_source: &TargetSourceMetadata,
+    ) -> Result<MemoryStore> {
+        let store = MemoryStore::new(
+            self.project_harkonnen_dir(target_source)
+                .join("project-memory"),
+        );
+        self.ensure_project_memory_bootstrap(target_source, &store)
+            .await?;
         store.reindex().await?;
-        self.refresh_project_resume_packet(target_source, &store).await?;
+        self.refresh_project_resume_packet(target_source, &store)
+            .await?;
         Ok(store)
     }
 
@@ -2531,17 +3188,23 @@ Top memory hits:
         tokio::fs::create_dir_all(&history_dir).await?;
         let guide_path = evidence_dir.join("00-evidence-guide.md");
         if !guide_path.exists() {
-            tokio::fs::write(&guide_path, "# Evidence Guide
+            tokio::fs::write(
+                &guide_path,
+                "# Evidence Guide
 
 - Keep raw evidence in evidence/raw/.
 - Store annotation bundles in evidence/annotations/.
 - Store reviewed causal summaries in evidence/causal/.
 - Audit annotation changes in evidence/history/.
-").await?;
+",
+            )
+            .await?;
         }
         let sample_bundle = annotations_dir.join("sample-causal-window.yaml");
         if !sample_bundle.exists() {
-            tokio::fs::write(&sample_bundle, "schema_version: 1
+            tokio::fs::write(
+                &sample_bundle,
+                "schema_version: 1
 project: example-project
 scenario: pressure-instability-review
 dataset: historian-shift-a
@@ -2602,7 +3265,9 @@ annotations:
     created_by: jerry
     created_at: 2026-04-01T00:00:00Z
     updated_at: 2026-04-01T00:00:00Z
-").await?;
+",
+            )
+            .await?;
         }
         Ok(())
     }
@@ -2614,7 +3279,8 @@ annotations:
     ) -> Result<()> {
         let harkonnen_dir = self.project_harkonnen_dir(target_source);
         tokio::fs::create_dir_all(&harkonnen_dir).await?;
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
         tokio::fs::create_dir_all(&store.root).await?;
         tokio::fs::create_dir_all(store.root.join("imports")).await?;
         tokio::fs::create_dir_all(harkonnen_dir.join("contexts")).await?;
@@ -2681,7 +3347,9 @@ annotations:
             )
             .await?;
         }
-        let contexts_guide = harkonnen_dir.join("contexts").join("00-context-bundle-guide.md");
+        let contexts_guide = harkonnen_dir
+            .join("contexts")
+            .join("00-context-bundle-guide.md");
         if !contexts_guide.exists() {
             tokio::fs::write(
                 &contexts_guide,
@@ -2693,7 +3361,9 @@ annotations:
             )
             .await?;
         }
-        let skills_guide = harkonnen_dir.join("skills").join("00-skill-bundle-guide.md");
+        let skills_guide = harkonnen_dir
+            .join("skills")
+            .join("00-skill-bundle-guide.md");
         if !skills_guide.exists() {
             tokio::fs::write(
                 &skills_guide,
@@ -2772,7 +3442,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("resume-packet.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("resume-packet.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2781,14 +3453,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         if trimmed.is_empty() {
             return Ok(None);
         }
-        Ok(Some(format!("[resume packet] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+        Ok(Some(format!(
+            "[resume packet] [{}] {}",
+            path.display(),
+            trimmed.chars().take(800).collect::<String>()
+        )))
     }
 
     async fn read_project_strategy_register_hit(
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("strategy-register.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("strategy-register.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2797,14 +3475,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         if trimmed.is_empty() {
             return Ok(None);
         }
-        Ok(Some(format!("[strategy register] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+        Ok(Some(format!(
+            "[strategy register] [{}] {}",
+            path.display(),
+            trimmed.chars().take(800).collect::<String>()
+        )))
     }
 
     async fn read_project_memory_status_hit(
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("memory-status.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("memory-status.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2813,14 +3497,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         if trimmed.is_empty() {
             return Ok(None);
         }
-        Ok(Some(format!("[memory status] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+        Ok(Some(format!(
+            "[memory status] [{}] {}",
+            path.display(),
+            trimmed.chars().take(800).collect::<String>()
+        )))
     }
 
     async fn read_project_stale_memory_history_hit(
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("stale-memory-history.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("stale-memory-history.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2829,7 +3519,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         if trimmed.is_empty() {
             return Ok(None);
         }
-        Ok(Some(format!("[stale memory history] [{}] {}", path.display(), trimmed.chars().take(800).collect::<String>())))
+        Ok(Some(format!(
+            "[stale memory history] [{}] {}",
+            path.display(),
+            trimmed.chars().take(800).collect::<String>()
+        )))
     }
 
     fn collect_repo_local_context_hits(
@@ -2853,9 +3547,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         {
             hits.push(format!(
                 "[repo-local {}] [{}] {}",
-                entry.category,
-                entry.path,
-                entry.summary
+                entry.category, entry.path, entry.summary
             ));
         }
         Ok(hits)
@@ -2865,7 +3557,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("project-scan.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("project-scan.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2886,15 +3580,21 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<ProjectResumePacket> {
-        let store = MemoryStore::new(self.project_harkonnen_dir(target_source).join("project-memory"));
-        self.refresh_project_resume_packet(target_source, &store).await
+        let store = MemoryStore::new(
+            self.project_harkonnen_dir(target_source)
+                .join("project-memory"),
+        );
+        self.refresh_project_resume_packet(target_source, &store)
+            .await
     }
 
     async fn load_project_stale_memory_history(
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<StaleMemoryMitigationHistory> {
-        let path = self.project_harkonnen_dir(target_source).join("stale-memory-history.json");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("stale-memory-history.json");
         if !path.exists() {
             return Ok(StaleMemoryMitigationHistory::default());
         }
@@ -2906,7 +3606,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         &self,
         target_source: &TargetSourceMetadata,
     ) -> Result<Option<String>> {
-        let path = self.project_harkonnen_dir(target_source).join("project-context.md");
+        let path = self
+            .project_harkonnen_dir(target_source)
+            .join("project-context.md");
         if !path.exists() {
             return Ok(None);
         }
@@ -2977,7 +3679,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     "{} {} {}",
                     lesson.pattern.to_lowercase(),
                     lesson.tags.join(" ").to_lowercase(),
-                    lesson.intervention.clone().unwrap_or_default().to_lowercase(),
+                    lesson
+                        .intervention
+                        .clone()
+                        .unwrap_or_default()
+                        .to_lowercase(),
                 );
                 let mut score = 0_i32;
                 for term in query_terms {
@@ -3015,7 +3721,12 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         if relevant.is_empty() {
             relevant = scored
                 .iter()
-                .filter(|(_, lesson)| lesson.tags.iter().any(|tag| tag == "causal" || tag == "lesson"))
+                .filter(|(_, lesson)| {
+                    lesson
+                        .tags
+                        .iter()
+                        .any(|tag| tag == "causal" || tag == "lesson")
+                })
                 .map(|(_, lesson)| lesson.clone())
                 .take(3)
                 .collect::<Vec<_>>();
@@ -3050,19 +3761,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             let cause_id = row.get::<String, _>("cause_id");
             let description = row.get::<String, _>("description");
             let run_id = row.get::<String, _>("run_id");
-            let created_at = chrono::DateTime::parse_from_rfc3339(
-                row.get::<String, _>("created_at").as_str(),
-            )?
-            .with_timezone(&Utc);
+            let created_at =
+                chrono::DateTime::parse_from_rfc3339(row.get::<String, _>("created_at").as_str())?
+                    .with_timezone(&Utc);
             let scenario_passed = row.get::<Option<i64>, _>("scenario_passed").unwrap_or(0) != 0;
 
-            let entry = aggregates.entry(cause_id).or_insert_with(|| CauseAggregate {
-                description,
-                occurrences: 0,
-                scenario_successes: 0,
-                last_seen_run_id: Some(run_id.clone()),
-                last_seen_at: Some(created_at),
-            });
+            let entry = aggregates
+                .entry(cause_id)
+                .or_insert_with(|| CauseAggregate {
+                    description,
+                    occurrences: 0,
+                    scenario_successes: 0,
+                    last_seen_run_id: Some(run_id.clone()),
+                    last_seen_at: Some(created_at),
+                });
             entry.occurrences += 1;
             if scenario_passed {
                 entry.scenario_successes += 1;
@@ -3114,10 +3826,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
     )> {
         let resume_packet = self.load_project_resume_packet(target_source).await?;
         let exploration = self
-            .collect_relevant_exploration_citations(spec_obj, target_source, query_terms, domain_signals)
+            .collect_relevant_exploration_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+            )
             .await?;
         let strategy = self
-            .collect_relevant_strategy_register_citations(spec_obj, target_source, query_terms, domain_signals)
+            .collect_relevant_strategy_register_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+            )
             .await?;
         let mitigation = self
             .collect_relevant_mitigation_history_citations(
@@ -3198,7 +3920,13 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     entry.parameters.join(" "),
                     entry.open_questions.join(" ")
                 );
-                let mut score = score_briefing_evidence(&haystack, &spec_obj.id, &target_source.label, query_terms, domain_signals);
+                let mut score = score_briefing_evidence(
+                    &haystack,
+                    &spec_obj.id,
+                    &target_source.label,
+                    query_terms,
+                    domain_signals,
+                );
                 if run.spec_id == spec_obj.id {
                     score += 8;
                 }
@@ -3221,7 +3949,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                         ),
                         evidence: format!(
                             "failure_constraint={}; surviving_structure={}; reformulation={}",
-                            entry.failure_constraint, entry.surviving_structure, entry.reformulation
+                            entry.failure_constraint,
+                            entry.surviving_structure,
+                            entry.reformulation
                         ),
                     },
                 ));
@@ -3229,7 +3959,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         }
 
         scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(3).collect())
+        Ok(scored
+            .into_iter()
+            .map(|(_, _, citation)| citation)
+            .take(3)
+            .collect())
     }
 
     async fn collect_relevant_mitigation_history_citations(
@@ -3240,7 +3974,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         domain_signals: &[String],
         current_risks: &[ProjectResumeRisk],
     ) -> Result<Vec<CoobieEvidenceCitation>> {
-        let history = self.load_project_stale_memory_history(target_source).await?;
+        let history = self
+            .load_project_stale_memory_history(target_source)
+            .await?;
         if history.records.is_empty() {
             return Ok(Vec::new());
         }
@@ -3334,7 +4070,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         }
 
         scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(4).collect())
+        Ok(scored
+            .into_iter()
+            .map(|(_, _, citation)| citation)
+            .take(4)
+            .collect())
     }
 
     async fn collect_relevant_retriever_forge_citations(
@@ -3375,9 +4115,19 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             };
             let denied = hooks
                 .as_ref()
-                .map(|artifact| artifact.records.iter().filter(|record| record.decision == "deny").count())
+                .map(|artifact| {
+                    artifact
+                        .records
+                        .iter()
+                        .filter(|record| record.decision == "deny")
+                        .count()
+                })
                 .unwrap_or(0);
-            let failed = report.executed_commands.iter().filter(|command| !command.passed).count();
+            let failed = report
+                .executed_commands
+                .iter()
+                .filter(|command| !command.passed)
+                .count();
             let haystack = format!(
                 "{} {} {} {} {} {} {} {} {}",
                 run.spec_id,
@@ -3386,11 +4136,39 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 report.profile,
                 report.summary,
                 report.returned_artifacts.join(" "),
-                report.executed_commands.iter().map(|command| format!("{} {} {} {}", command.label, command.raw_command, command.source, command.rationale)).collect::<Vec<_>>().join(" "),
-                hooks.as_ref().map(|artifact| artifact.records.iter().map(|record| format!("{} {} {} {}", record.stage, record.decision, record.raw_command, record.reasons.join(" "))).collect::<Vec<_>>().join(" ")).unwrap_or_default(),
+                report
+                    .executed_commands
+                    .iter()
+                    .map(|command| format!(
+                        "{} {} {} {}",
+                        command.label, command.raw_command, command.source, command.rationale
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(" "),
+                hooks
+                    .as_ref()
+                    .map(|artifact| artifact
+                        .records
+                        .iter()
+                        .map(|record| format!(
+                            "{} {} {} {}",
+                            record.stage,
+                            record.decision,
+                            record.raw_command,
+                            record.reasons.join(" ")
+                        ))
+                        .collect::<Vec<_>>()
+                        .join(" "))
+                    .unwrap_or_default(),
                 if report.passed { "passed" } else { "failed" },
             );
-            let mut score = score_briefing_evidence(&haystack, &spec_obj.id, &target_source.label, query_terms, domain_signals);
+            let mut score = score_briefing_evidence(
+                &haystack,
+                &spec_obj.id,
+                &target_source.label,
+                query_terms,
+                domain_signals,
+            );
             if run.spec_id == spec_obj.id {
                 score += 8;
             }
@@ -3415,7 +4193,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     agent: "mason".to_string(),
                     summary: format!(
                         "retriever forge {} with {} command(s), {} denied, {} failed",
-                        if report.passed { "passed" } else { "returned issues" },
+                        if report.passed {
+                            "passed"
+                        } else {
+                            "returned issues"
+                        },
                         report.executed_commands.len(),
                         denied,
                         failed
@@ -3425,16 +4207,28 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                         report.summary,
                         report.hook_artifact,
                         report.returned_artifacts.join(" | "),
-                        report.executed_commands.iter().map(|command| format!("{}:{}", command.label, if command.passed { "pass" } else { "fail" })).collect::<Vec<_>>().join(" | ")
+                        report
+                            .executed_commands
+                            .iter()
+                            .map(|command| format!(
+                                "{}:{}",
+                                command.label,
+                                if command.passed { "pass" } else { "fail" }
+                            ))
+                            .collect::<Vec<_>>()
+                            .join(" | ")
                     ),
                 },
             ));
         }
 
         scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(4).collect())
+        Ok(scored
+            .into_iter()
+            .map(|(_, _, citation)| citation)
+            .take(4)
+            .collect())
     }
-
 
     async fn collect_preferred_retriever_forge_commands(
         &self,
@@ -3450,7 +4244,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             if run.product != target_source.label {
                 continue;
             }
-            let report_path = self.run_dir(&run.run_id).join("retriever_execution_report.json");
+            let report_path = self
+                .run_dir(&run.run_id)
+                .join("retriever_execution_report.json");
             if !report_path.exists() {
                 continue;
             }
@@ -3537,12 +4333,16 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         ranked.sort_by(|left, right| {
             right
                 .1
-                .0
-                .cmp(&left.1.0)
-                .then_with(|| right.1.1.cmp(&left.1.1))
+                 .0
+                .cmp(&left.1 .0)
+                .then_with(|| right.1 .1.cmp(&left.1 .1))
                 .then_with(|| left.0.cmp(&right.0))
         });
-        Ok(ranked.into_iter().map(|(command, _)| command).take(5).collect())
+        Ok(ranked
+            .into_iter()
+            .map(|(command, _)| command)
+            .take(5)
+            .collect())
     }
 
     async fn collect_relevant_preferred_forge_outcome_citations(
@@ -3559,7 +4359,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             if run.product != target_source.label {
                 continue;
             }
-            let report_path = self.run_dir(&run.run_id).join("retriever_execution_report.json");
+            let report_path = self
+                .run_dir(&run.run_id)
+                .join("retriever_execution_report.json");
             if !report_path.exists() {
                 continue;
             }
@@ -3572,7 +4374,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 Err(_) => continue,
             };
 
-            for command in report.executed_commands.iter().filter(|command| command.was_preferred) {
+            for command in report
+                .executed_commands
+                .iter()
+                .filter(|command| command.was_preferred)
+            {
                 let haystack = format!(
                     "{} {} {} {} {} {} {} {} {}",
                     run.spec_id,
@@ -3600,10 +4406,18 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     Some("did_not_help") => score += 7,
                     _ => score += 2,
                 }
-                if report.preferred_commands_helped.iter().any(|value| value == &command.raw_command) {
+                if report
+                    .preferred_commands_helped
+                    .iter()
+                    .any(|value| value == &command.raw_command)
+                {
                     score += 3;
                 }
-                if report.preferred_commands_stale.iter().any(|value| value == &command.raw_command) {
+                if report
+                    .preferred_commands_stale
+                    .iter()
+                    .any(|value| value == &command.raw_command)
+                {
                     score += 2;
                 }
                 if score <= 0 {
@@ -3705,17 +4519,19 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
 
         for (scope, entries) in [("project", project_entries), ("core", core_entries)] {
             for entry in entries {
-                if !entry.tags.iter().any(|tag| matches!(
-                    tag.as_str(),
-                    "evidence"
-                        | "causal-evidence"
-                        | "pattern_example"
-                        | "pattern-example"
-                        | "causal_window"
-                        | "causal-window"
-                        | "negative_example"
-                        | "negative-example"
-                )) {
+                if !entry.tags.iter().any(|tag| {
+                    matches!(
+                        tag.as_str(),
+                        "evidence"
+                            | "causal-evidence"
+                            | "pattern_example"
+                            | "pattern-example"
+                            | "causal_window"
+                            | "causal-window"
+                            | "negative_example"
+                            | "negative-example"
+                    )
+                }) {
                     continue;
                 }
 
@@ -3748,7 +4564,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 if entry.tags.iter().any(|tag| {
                     matches!(
                         tag.as_str(),
-                        "pattern_example" | "pattern-example" | "negative_example" | "negative-example"
+                        "pattern_example"
+                            | "pattern-example"
+                            | "negative_example"
+                            | "negative-example"
                     )
                 }) {
                     score += 5;
@@ -3760,7 +4579,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 let is_pattern = entry.tags.iter().any(|tag| {
                     matches!(
                         tag.as_str(),
-                        "pattern_example" | "pattern-example" | "negative_example" | "negative-example"
+                        "pattern_example"
+                            | "pattern-example"
+                            | "negative_example"
+                            | "negative-example"
                     )
                 });
                 let citation = CoobieEvidenceCitation {
@@ -3783,7 +4605,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                         "memory_id={}; tags={}; source_kind={}; observed_paths={}",
                         entry.id,
                         entry.tags.join(" | "),
-                        entry.provenance
+                        entry
+                            .provenance
                             .source_kind
                             .clone()
                             .unwrap_or_else(|| "unknown".to_string()),
@@ -3803,8 +4626,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             }
         }
 
-        pattern_scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        causal_scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        pattern_scored
+            .sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
+        causal_scored
+            .sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
         Ok((
             pattern_scored
                 .into_iter()
@@ -3827,7 +4652,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         domain_signals: &[String],
     ) -> Result<Vec<CoobieEvidenceCitation>> {
         let harkonnen_dir = self.project_harkonnen_dir(target_source);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
         let annotations_dir = harkonnen_dir.join("evidence").join("annotations");
         if !annotations_dir.exists() {
             return Ok(Vec::new());
@@ -3865,7 +4691,12 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 let matched_sources = bundle
                     .sources
                     .iter()
-                    .filter(|source| annotation.source_ids.iter().any(|id| id == &source.source_id))
+                    .filter(|source| {
+                        annotation
+                            .source_ids
+                            .iter()
+                            .any(|id| id == &source.source_id)
+                    })
                     .map(|source| format!("{}:{}:{}", source.source_id, source.kind, source.label))
                     .collect::<Vec<_>>();
                 let anchor_summary = annotation
@@ -3878,7 +4709,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     .iter()
                     .map(|claim| format!("{}:{}->{}", claim.relation, claim.cause, claim.effect))
                     .collect::<Vec<_>>();
-                let time_summary = render_evidence_time_range_summary(annotation.time_range.as_ref());
+                let time_summary =
+                    render_evidence_time_range_summary(annotation.time_range.as_ref());
                 let haystack = format!(
                     "{} {} {} {} {} {} {} {} {} {} {} {} {}",
                     bundle.project,
@@ -3905,7 +4737,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 if bundle.project == target_source.label {
                     score += 8;
                 }
-                if annotation.annotation_type.eq_ignore_ascii_case("causal_window") {
+                if annotation
+                    .annotation_type
+                    .eq_ignore_ascii_case("causal_window")
+                {
                     score += 6;
                 }
                 if !annotation.claims.is_empty() {
@@ -3935,7 +4770,10 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                         annotation.updated_at.clone()
                     },
                     CoobieEvidenceCitation {
-                        citation_id: format!("evidence-window:{}:{}", bundle_name, annotation.annotation_id),
+                        citation_id: format!(
+                            "evidence-window:{}:{}",
+                            bundle_name, annotation.annotation_id
+                        ),
                         source_type: "evidence_annotation_window".to_string(),
                         run_id: "annotation".to_string(),
                         episode_id: Some(annotation.annotation_id.clone()),
@@ -3944,16 +4782,36 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                         summary: format!(
                             "nearest prior evidence window '{}' from scenario '{}'",
                             title,
-                            if bundle.scenario.trim().is_empty() { "unspecified" } else { bundle.scenario.trim() }
+                            if bundle.scenario.trim().is_empty() {
+                                "unspecified"
+                            } else {
+                                bundle.scenario.trim()
+                            }
                         ),
                         evidence: format!(
                             "bundle={}; dataset={}; time={}; labels={}; claims={}; sources={}",
                             path.display(),
-                            if bundle.dataset.trim().is_empty() { "unspecified" } else { bundle.dataset.trim() },
+                            if bundle.dataset.trim().is_empty() {
+                                "unspecified"
+                            } else {
+                                bundle.dataset.trim()
+                            },
                             time_summary,
-                            if annotation.labels.is_empty() { "none".to_string() } else { annotation.labels.join(" | ") },
-                            if claim_summary.is_empty() { "none".to_string() } else { claim_summary.join(" | ") },
-                            if matched_sources.is_empty() { "none".to_string() } else { matched_sources.join(" | ") }
+                            if annotation.labels.is_empty() {
+                                "none".to_string()
+                            } else {
+                                annotation.labels.join(" | ")
+                            },
+                            if claim_summary.is_empty() {
+                                "none".to_string()
+                            } else {
+                                claim_summary.join(" | ")
+                            },
+                            if matched_sources.is_empty() {
+                                "none".to_string()
+                            } else {
+                                matched_sources.join(" | ")
+                            }
                         ),
                     },
                 ));
@@ -3998,7 +4856,13 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 entry.surviving_structure,
                 entry.reformulation
             );
-            let mut score = score_briefing_evidence(&haystack, &spec_obj.id, &target_source.label, query_terms, domain_signals);
+            let mut score = score_briefing_evidence(
+                &haystack,
+                &spec_obj.id,
+                &target_source.label,
+                query_terms,
+                domain_signals,
+            );
             if entry.spec_id == spec_obj.id {
                 score += 8;
             }
@@ -4028,7 +4892,11 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         }
 
         scored.sort_by(|left, right| right.0.cmp(&left.0).then_with(|| right.1.cmp(&left.1)));
-        Ok(scored.into_iter().map(|(_, _, citation)| citation).take(3).collect())
+        Ok(scored
+            .into_iter()
+            .map(|(_, _, citation)| citation)
+            .take(3)
+            .collect())
     }
 
     async fn build_coobie_briefing(
@@ -4039,7 +4907,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         domain_signals: &[String],
         memory_context: &MemoryContextBundle,
     ) -> Result<CoobieBriefing> {
-        let relevant_lessons = self.find_relevant_lessons(query_terms, domain_signals).await?;
+        let relevant_lessons = self
+            .find_relevant_lessons(query_terms, domain_signals)
+            .await?;
         let prior_causes = self.summarize_prior_causes(5).await?;
         let (
             exploration_citations,
@@ -4048,18 +4918,32 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             forge_evidence_citations,
             preferred_forge_outcome_citations,
         ) = self
-            .collect_briefing_evidence_citations(spec_obj, target_source, query_terms, domain_signals)
+            .collect_briefing_evidence_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+            )
             .await?;
         let (evidence_pattern_exemplar_citations, evidence_causal_exemplar_citations) = self
-            .collect_evidence_memory_exemplar_citations(spec_obj, target_source, query_terms, domain_signals)
+            .collect_evidence_memory_exemplar_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+            )
             .await?;
         let nearest_evidence_window_citations = self
-            .collect_nearest_evidence_window_citations(spec_obj, target_source, query_terms, domain_signals)
+            .collect_nearest_evidence_window_citations(
+                spec_obj,
+                target_source,
+                query_terms,
+                domain_signals,
+            )
             .await?;
         let pattern_matching_focus =
             build_pattern_matching_focus(&evidence_pattern_exemplar_citations);
-        let causal_chain_focus =
-            build_causal_chain_focus(&evidence_causal_exemplar_citations);
+        let causal_chain_focus = build_causal_chain_focus(&evidence_causal_exemplar_citations);
         let mut enriched_query_terms = query_terms.to_vec();
         let preferred_forge_commands = self
             .collect_preferred_retriever_forge_commands(
@@ -4070,16 +4954,21 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             )
             .await?;
         let resume_packet = self.load_project_resume_packet(target_source).await?;
-        let prior_report_count = sqlx::query(
-            "SELECT COUNT(DISTINCT run_id) AS cnt FROM causal_hypotheses",
-        )
-        .fetch_one(&self.pool)
-        .await?
-        .get::<i64, _>("cnt") as usize;
-        let application_risks = build_application_risks(spec_obj, domain_signals, &memory_context.memory_hits, &prior_causes);
+        let prior_report_count =
+            sqlx::query("SELECT COUNT(DISTINCT run_id) AS cnt FROM causal_hypotheses")
+                .fetch_one(&self.pool)
+                .await?
+                .get::<i64, _>("cnt") as usize;
+        let application_risks = build_application_risks(
+            spec_obj,
+            domain_signals,
+            &memory_context.memory_hits,
+            &prior_causes,
+        );
         let environment_risks = build_environment_risks(spec_obj, domain_signals);
         let regulatory_considerations = build_regulatory_considerations(spec_obj, domain_signals);
-        let mut stale_memory_mitigation_plan = build_stale_memory_mitigation_plan(&resume_packet.stale_memory);
+        let mut stale_memory_mitigation_plan =
+            build_stale_memory_mitigation_plan(&resume_packet.stale_memory);
         let mut recommended_guardrails = build_recommended_guardrails(
             spec_obj,
             domain_signals,
@@ -4093,7 +4982,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             &regulatory_considerations,
             &relevant_lessons,
         );
-        let mut open_questions = build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
+        let mut open_questions =
+            build_coobie_open_questions(spec_obj, domain_signals, &regulatory_considerations);
         apply_stale_memory_mitigations(
             &resume_packet.stale_memory,
             &mut recommended_guardrails,
@@ -4172,8 +5062,78 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             coobie_response: String::new(),
             generated_at: Utc::now(),
         };
-        briefing.coobie_response = crate::coobie::render_coobie_briefing_response(&briefing);
+        briefing.coobie_response = self
+            .coobie_llm_briefing_response(spec_obj, target_source, &briefing)
+            .await
+            .unwrap_or_else(|| crate::coobie::render_coobie_briefing_response(&briefing));
         Ok(briefing)
+    }
+
+    async fn coobie_llm_briefing_response(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+    ) -> Option<String> {
+        let provider = llm::build_provider("coobie", "default", &self.paths.setup)?;
+        let prompt_support = self.agent_prompt_support("coobie", spec_obj, target_source);
+        let system_instruction = prompt_support
+            .as_ref()
+            .map(|support| format!(
+                "{}
+
+Task contract:
+You are Coobie, a memory and causal reasoning Labrador for a software factory. You receive a structured briefing object and must render a concise Markdown preflight for the pack. Summarize the strongest prior context, the biggest risks, the guardrails, required checks, open questions, and the next trail to follow. Stay concrete. No filler.",
+                support.system_instruction
+            ))
+            .unwrap_or_else(|| "You are Coobie, a memory and causal reasoning Labrador for a software factory. You receive a structured briefing object and must render a concise Markdown preflight for the pack. Summarize the strongest prior context, the biggest risks, the guardrails, required checks, open questions, and the next trail to follow. Stay concrete. No filler.".to_string());
+        let repo_context_block = prompt_support
+            .as_ref()
+            .map(|support| support.repo_context_block.as_str())
+            .unwrap_or(
+                "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+            );
+        let briefing_json = serde_json::to_string_pretty(briefing).ok()?;
+        let spec_yaml =
+            serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+        let req = LlmRequest::simple(
+            system_instruction,
+            format!(
+                "SPEC:
+```yaml
+{spec_yaml}
+```
+
+TARGET: {} ({})
+
+BRIEFING FACTS:
+```json
+{briefing_json}
+```
+
+{repo_context_block}
+
+Render Coobie's preflight markdown for the pack. Incorporate repo-local guidance and skill bundles where relevant, but do not invent facts outside the briefing object.",
+                target_source.label,
+                target_source.source_path,
+                repo_context_block = repo_context_block,
+            ),
+        );
+
+        match provider.complete(req).await {
+            Ok(resp) => Some(resp.content),
+            Err(error) => {
+                tracing::warn!(
+                    "Coobie LLM call failed ({}), using procedural briefing",
+                    error
+                );
+                None
+            }
+        }
     }
 
     async fn build_evidence_match_report(
@@ -4238,7 +5198,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
 
         let mut summary = vec![format!(
             "Compared {} reviewed evidence window candidate(s) for spec '{}'.",
-            assessments.len(), spec_obj.id
+            assessments.len(),
+            spec_obj.id
         )];
         if let Some(best) = assessments.first() {
             summary.push(format!(
@@ -4249,7 +5210,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 best.confidence * 100.0
             ));
         } else {
-            summary.push("No reviewed evidence windows matched the current query context.".to_string());
+            summary.push(
+                "No reviewed evidence windows matched the current query context.".to_string(),
+            );
         }
         if !labels.is_empty() {
             summary.push(format!("Labels compared: {}", labels.join(", ")));
@@ -4321,7 +5284,8 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             .to_string();
         let mut summary = vec![format!(
             "Compared {} reviewed evidence window candidate(s) for spec '{}'.",
-            assessments.len(), resolved_spec_id
+            assessments.len(),
+            resolved_spec_id
         )];
         if let Some(selected) = selected_window_summary.as_ref() {
             summary.push(format!("Selected window: {}", selected));
@@ -4335,7 +5299,9 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 best.confidence * 100.0
             ));
         } else {
-            summary.push("No reviewed evidence windows matched the current query context.".to_string());
+            summary.push(
+                "No reviewed evidence windows matched the current query context.".to_string(),
+            );
         }
         if !labels.is_empty() {
             summary.push(format!("Labels compared: {}", labels.join(", ")));
@@ -4363,14 +5329,41 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         })
     }
 
-    async fn scout_intake(&self, spec_obj: &Spec, briefing: &CoobieBriefing) -> Result<IntentPackage> {
+    async fn scout_intake(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+    ) -> Result<IntentPackage> {
         if let Some(provider) = llm::build_provider("scout", "claude", &self.paths.setup) {
             let memory_section = format_memory_context(&briefing.memory_hits);
             let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
-            let spec_yaml = serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+            let spec_yaml =
+                serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+            let prompt_support = self.agent_prompt_support("scout", spec_obj, target_source);
+            let system_instruction = prompt_support
+                .as_ref()
+                .map(|support| format!(
+                    "{}
+
+Task contract:
+You are Scout, a spec-intake specialist for a software factory. Read a YAML spec, prior memory context, and repo-local guidance, then produce a concise implementation intent package as JSON with these fields: spec_id (string), summary (one sentence), ambiguity_notes (array of strings), recommended_steps (ordered array of strings). Respond with valid JSON only and no markdown.",
+                    support.system_instruction
+                ))
+                .unwrap_or_else(|| "You are Scout, a spec-intake specialist for a software factory. Read a YAML spec and prior memory context, then produce a concise implementation intent package as JSON with these fields: spec_id (string), summary (one sentence), ambiguity_notes (array of strings), recommended_steps (ordered array of strings). Respond with valid JSON only and no markdown.".to_string());
+            let repo_context_block = prompt_support
+                .as_ref()
+                .map(|support| support.repo_context_block.as_str())
+                .unwrap_or(
+                    "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+                );
 
             let req = LlmRequest::simple(
-                "You are Scout, a spec-intake specialist for a software factory.                  Your job is to read a YAML spec and prior memory context, then produce a                  concise implementation intent package as JSON with these fields:                  spec_id (string), summary (one sentence), ambiguity_notes (array of strings —                  things that are unclear or missing), recommended_steps (ordered array of strings).                  Respond with valid JSON only — no markdown, no explanation.",
+                system_instruction,
                 format!(
                     "SPEC:
 ```yaml
@@ -4388,17 +5381,22 @@ COOBIE BRIEFING:
 COOBIE RESPONSE:
 {response}
 
-                     Produce the intent package JSON and incorporate Coobie guardrails, required checks, and open questions.",
+{repo_context_block}
+
+Produce the intent package JSON and incorporate Coobie guardrails, required checks, open questions, repo-local constraints, and skill bundles when they are relevant.",
                     response = briefing.coobie_response,
+                    repo_context_block = repo_context_block,
                 ),
             );
 
             match provider.complete(req).await {
                 Ok(resp) => {
-                    if let Ok(parsed) = serde_json::from_str::<IntentPackage>(&resp.content.trim()) {
+                    if let Ok(parsed) = serde_json::from_str::<IntentPackage>(&resp.content.trim())
+                    {
                         return Ok(parsed);
                     }
-                    let stripped = resp.content
+                    let stripped = resp
+                        .content
                         .trim()
                         .trim_start_matches("```json")
                         .trim_start_matches("```")
@@ -4455,16 +5453,39 @@ COOBIE RESPONSE:
         staged_product: &Path,
         target_source: &TargetSourceMetadata,
     ) -> String {
-        let stub = build_implementation_plan(spec_obj, intent, briefing, staged_product, target_source);
+        let stub =
+            build_implementation_plan(spec_obj, intent, briefing, staged_product, target_source);
 
         if let Some(provider) = llm::build_provider("mason", "default", &self.paths.setup) {
             let memory_section = format_memory_context(&briefing.memory_hits);
-            let spec_yaml = serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+            let spec_yaml =
+                serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
             let intent_json = serde_json::to_string_pretty(intent).unwrap_or_default();
             let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
+            let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
+            let system_instruction = prompt_support
+                .as_ref()
+                .map(|support| format!(
+                    "{}
+
+Task contract:
+You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec, a Scout intent package, and prior memory context. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Intent Summary, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks, ## Prior Context. Be specific and avoid filler.",
+                    support.system_instruction
+                ))
+                .unwrap_or_else(|| "You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec, a Scout intent package, and prior memory context. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Intent Summary, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks, ## Prior Context. Be specific and avoid filler.".to_string());
+            let repo_context_block = prompt_support
+                .as_ref()
+                .map(|support| support.repo_context_block.as_str())
+                .unwrap_or(
+                    "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+                );
 
             let req = LlmRequest::simple(
-                "You are Mason, an implementation planning specialist for a software factory.                  You receive a YAML spec, a Scout intent package, and prior memory context.                  Produce a clear, actionable implementation plan in Markdown.                  Structure: ## Target, ## Intent Summary, ## Scope, ## Acceptance Criteria,                  ## Recommended Steps (ordered, numbered), ## Risks, ## Prior Context.                  Be specific. No filler. No preamble.",
+                system_instruction,
                 format!(
                     "SPEC:
 ```yaml
@@ -4476,7 +5497,7 @@ INTENT:
 {intent_json}
 ```
 
-                     TARGET: {} ({})
+TARGET: {} ({})
 
 PRIOR MEMORY:
 {memory_section}
@@ -4489,10 +5510,13 @@ COOBIE BRIEFING:
 COOBIE RESPONSE:
 {response}
 
-                     Produce the implementation plan markdown and treat Coobie guardrails and required checks as constraints.",
+{repo_context_block}
+
+Produce the implementation plan markdown and treat Coobie guardrails, required checks, repo-local constraints, and skill bundles as real operating constraints.",
                     target_source.label,
                     target_source.source_path,
                     response = briefing.coobie_response,
+                    repo_context_block = repo_context_block,
                 ),
             );
 
@@ -4505,15 +5529,407 @@ COOBIE RESPONSE:
         stub
     }
 
+    async fn write_mason_edit_proposal(
+        &self,
+        run_dir: &Path,
+        proposal: &MasonEditProposalArtifact,
+    ) -> Result<()> {
+        self.write_json_file(&run_dir.join("mason_edit_proposal.json"), proposal)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("mason_edit_proposal.md"),
+            render_mason_edit_proposal_markdown(proposal),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn write_mason_edit_application(
+        &self,
+        run_dir: &Path,
+        application: &MasonEditApplicationArtifact,
+    ) -> Result<()> {
+        self.write_json_file(&run_dir.join("mason_edit_application.json"), application)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("mason_edit_application.md"),
+            render_mason_edit_application_markdown(application),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn mason_generate_and_apply_edits(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        intent: &IntentPackage,
+        briefing: &CoobieBriefing,
+        implementation_plan: &str,
+        target_source: &TargetSourceMetadata,
+        staged_product: &Path,
+        run_dir: &Path,
+    ) -> Result<MasonEditApplicationArtifact> {
+        let editable_paths =
+            collect_staged_code_under_test_paths(spec_obj, target_source, &self.paths.root);
+        let generated_at = Utc::now().to_rfc3339();
+
+        if editable_paths.is_empty() {
+            let application = MasonEditApplicationArtifact {
+                run_id: run_id.to_string(),
+                spec_id: spec_obj.id.clone(),
+                product: target_source.label.clone(),
+                generated_at,
+                status: "skipped_no_editable_paths".to_string(),
+                summary: "Mason edit lane skipped because the spec did not resolve any code-under-test paths inside the staged workspace.".to_string(),
+                proposal_generated: false,
+                changed_files: Vec::new(),
+            };
+            self.write_mason_edit_application(run_dir, &application)
+                .await?;
+            return Ok(application);
+        }
+
+        let context_files = build_mason_context_files(staged_product, &editable_paths)?;
+        if context_files.is_empty() {
+            let application = MasonEditApplicationArtifact {
+                run_id: run_id.to_string(),
+                spec_id: spec_obj.id.clone(),
+                product: target_source.label.clone(),
+                generated_at,
+                status: "skipped_no_context".to_string(),
+                summary: "Mason edit lane skipped because no bounded text file context could be loaded for the editable paths.".to_string(),
+                proposal_generated: false,
+                changed_files: Vec::new(),
+            };
+            self.write_mason_edit_application(run_dir, &application)
+                .await?;
+            return Ok(application);
+        }
+
+        let Some(provider) = llm::build_provider("mason", "default", &self.paths.setup) else {
+            let application = MasonEditApplicationArtifact {
+                run_id: run_id.to_string(),
+                spec_id: spec_obj.id.clone(),
+                product: target_source.label.clone(),
+                generated_at,
+                status: "skipped_no_provider".to_string(),
+                summary: "Mason edit lane skipped because no live LLM provider is configured for Mason in the active setup.".to_string(),
+                proposal_generated: false,
+                changed_files: Vec::new(),
+            };
+            self.write_mason_edit_application(run_dir, &application)
+                .await?;
+            return Ok(application);
+        };
+
+        let spec_yaml =
+            serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+        let intent_json = serde_json::to_string_pretty(intent).unwrap_or_default();
+        let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
+        let context_paths = context_files
+            .iter()
+            .map(|file| file.path.clone())
+            .collect::<Vec<_>>();
+        let context_block = context_files
+            .iter()
+            .map(|file| {
+                format!(
+                    "FILE: {}
+TRUNCATED: {}
+```text
+{}
+```",
+                    file.path,
+                    if file.truncated { "true" } else { "false" },
+                    file.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+
+",
+            );
+
+        let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
+        let system_instruction = prompt_support
+            .as_ref()
+            .map(|support| format!(
+                "{}
+
+Task contract:
+You are Mason, an implementation specialist for a software factory. Produce valid JSON only. Return an object with keys summary (string), rationale (array of strings), and edits (array). Each edit must contain path (relative path inside the staged workspace), action (must be 'write'), summary (string), and content (the full file contents after your edit). Only edit files within the provided editable paths. Do not emit markdown. Do not explain outside the JSON object.",
+                support.system_instruction
+            ))
+            .unwrap_or_else(|| "You are Mason, an implementation specialist for a software factory. Produce valid JSON only. Return an object with keys summary (string), rationale (array of strings), and edits (array). Each edit must contain path (relative path inside the staged workspace), action (must be 'write'), summary (string), and content (the full file contents after your edit). Only edit files within the provided editable paths. Do not emit markdown. Do not explain outside the JSON object.".to_string());
+        let repo_context_block = prompt_support
+            .as_ref()
+            .map(|support| support.repo_context_block.as_str())
+            .unwrap_or(
+                "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+            );
+
+        let req = LlmRequest {
+            messages: vec![
+                Message::system(system_instruction),
+                Message::user(format!(
+                    "SPEC:
+```yaml
+{spec_yaml}
+```
+
+INTENT:
+```json
+{intent_json}
+```
+
+COOBIE BRIEFING:
+```json
+{briefing_json}
+```
+
+IMPLEMENTATION PLAN:
+```markdown
+{implementation_plan}
+```
+
+TARGET: {} ({})
+
+EDITABLE PATHS:
+{}
+
+CURRENT FILE CONTEXT:
+{}
+
+{repo_context_block}
+
+Generate the smallest safe set of file writes needed to move the staged workspace toward the spec's requested behavior. Respect the declared skill bundles and repo-local guidance. If no safe edit is justified from this context, return edits as an empty array and explain why in rationale.",
+                    target_source.label,
+                    staged_product.display(),
+                    render_list(&editable_paths, "No editable paths were resolved."),
+                    context_block,
+                    repo_context_block = repo_context_block,
+                )),
+            ],
+            max_tokens: 12000,
+            temperature: 0.1,
+        };
+
+        let response = match provider.complete(req).await {
+            Ok(response) => response,
+            Err(error) => {
+                let application = MasonEditApplicationArtifact {
+                    run_id: run_id.to_string(),
+                    spec_id: spec_obj.id.clone(),
+                    product: target_source.label.clone(),
+                    generated_at: Utc::now().to_rfc3339(),
+                    status: "llm_error".to_string(),
+                    summary: format!("Mason edit lane failed before applying edits: {}", error),
+                    proposal_generated: false,
+                    changed_files: Vec::new(),
+                };
+                self.write_mason_edit_application(run_dir, &application)
+                    .await?;
+                return Ok(application);
+            }
+        };
+
+        let proposal = match parse_mason_edit_proposal(&response.content) {
+            Ok(proposal) => proposal,
+            Err(error) => {
+                let application = MasonEditApplicationArtifact {
+                    run_id: run_id.to_string(),
+                    spec_id: spec_obj.id.clone(),
+                    product: target_source.label.clone(),
+                    generated_at: Utc::now().to_rfc3339(),
+                    status: "invalid_llm_edit_response".to_string(),
+                    summary: format!(
+                        "Mason edit lane produced an invalid JSON edit proposal: {}",
+                        error
+                    ),
+                    proposal_generated: false,
+                    changed_files: Vec::new(),
+                };
+                self.write_mason_edit_application(run_dir, &application)
+                    .await?;
+                return Ok(application);
+            }
+        };
+
+        for edit in &proposal.edits {
+            let normalized = normalize_project_path(&edit.path);
+            if normalized.is_empty() {
+                let application = MasonEditApplicationArtifact {
+                    run_id: run_id.to_string(),
+                    spec_id: spec_obj.id.clone(),
+                    product: target_source.label.clone(),
+                    generated_at: Utc::now().to_rfc3339(),
+                    status: "invalid_edit_path".to_string(),
+                    summary: "Mason proposed an empty edit path, so the edit batch was rejected."
+                        .to_string(),
+                    proposal_generated: false,
+                    changed_files: Vec::new(),
+                };
+                self.write_mason_edit_application(run_dir, &application)
+                    .await?;
+                return Ok(application);
+            }
+            if !edit.action.eq_ignore_ascii_case("write") {
+                let application = MasonEditApplicationArtifact {
+                    run_id: run_id.to_string(),
+                    spec_id: spec_obj.id.clone(),
+                    product: target_source.label.clone(),
+                    generated_at: Utc::now().to_rfc3339(),
+                    status: "invalid_edit_action".to_string(),
+                    summary: format!(
+                        "Mason proposed unsupported edit action '{}' for {}.",
+                        edit.action, normalized
+                    ),
+                    proposal_generated: false,
+                    changed_files: Vec::new(),
+                };
+                self.write_mason_edit_application(run_dir, &application)
+                    .await?;
+                return Ok(application);
+            }
+            if !path_allowed_for_edit(&normalized, &editable_paths) {
+                let application = MasonEditApplicationArtifact {
+                    run_id: run_id.to_string(),
+                    spec_id: spec_obj.id.clone(),
+                    product: target_source.label.clone(),
+                    generated_at: Utc::now().to_rfc3339(),
+                    status: "edit_outside_scope".to_string(),
+                    summary: format!(
+                        "Mason proposed an edit outside the editable scope: {}",
+                        normalized
+                    ),
+                    proposal_generated: false,
+                    changed_files: Vec::new(),
+                };
+                self.write_mason_edit_application(run_dir, &application)
+                    .await?;
+                return Ok(application);
+            }
+            let _ = join_workspace_relative_path(staged_product, &normalized)?;
+        }
+
+        let proposal_artifact = MasonEditProposalArtifact {
+            run_id: run_id.to_string(),
+            spec_id: spec_obj.id.clone(),
+            product: target_source.label.clone(),
+            generated_at: Utc::now().to_rfc3339(),
+            editable_paths: editable_paths.clone(),
+            context_paths,
+            summary: proposal.summary.clone(),
+            rationale: proposal.rationale.clone(),
+            edits: proposal.edits.clone(),
+        };
+        self.write_mason_edit_proposal(run_dir, &proposal_artifact)
+            .await?;
+
+        if proposal.edits.is_empty() {
+            let application = MasonEditApplicationArtifact {
+                run_id: run_id.to_string(),
+                spec_id: spec_obj.id.clone(),
+                product: target_source.label.clone(),
+                generated_at: Utc::now().to_rfc3339(),
+                status: "no_changes".to_string(),
+                summary: if proposal.summary.trim().is_empty() {
+                    "Mason reviewed the staged workspace but did not propose any file edits."
+                        .to_string()
+                } else {
+                    proposal.summary.clone()
+                },
+                proposal_generated: true,
+                changed_files: Vec::new(),
+            };
+            self.write_mason_edit_application(run_dir, &application)
+                .await?;
+            return Ok(application);
+        }
+
+        let mut changed_files = Vec::new();
+        for edit in &proposal.edits {
+            let normalized = normalize_project_path(&edit.path);
+            let destination = join_workspace_relative_path(staged_product, &normalized)?;
+            if let Some(parent) = destination.parent() {
+                tokio::fs::create_dir_all(parent).await?;
+            }
+            let existing = tokio::fs::read_to_string(&destination).await.ok();
+            if existing.as_deref() != Some(edit.content.as_str()) {
+                tokio::fs::write(&destination, &edit.content).await?;
+                push_unique(&mut changed_files, &normalized);
+            }
+        }
+
+        let summary = if changed_files.is_empty() {
+            format!(
+                "Mason generated an edit proposal for '{}' but every file already matched the requested content.",
+                target_source.label
+            )
+        } else {
+            format!(
+                "Mason applied {} LLM-authored file edit(s) inside the staged workspace for '{}'.",
+                changed_files.len(),
+                target_source.label
+            )
+        };
+        let application = MasonEditApplicationArtifact {
+            run_id: run_id.to_string(),
+            spec_id: spec_obj.id.clone(),
+            product: target_source.label.clone(),
+            generated_at: Utc::now().to_rfc3339(),
+            status: "applied".to_string(),
+            summary,
+            proposal_generated: true,
+            changed_files,
+        };
+        self.write_mason_edit_application(run_dir, &application)
+            .await?;
+        Ok(application)
+    }
+
     /// Piper: build a tool and MCP surface plan, using an LLM when available.
-    async fn piper_tool_plan(&self, spec_obj: &Spec, briefing: &CoobieBriefing) -> String {
+    async fn piper_tool_plan(
+        &self,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+    ) -> String {
         let stub = self.build_tool_plan(briefing);
 
         if let Some(provider) = llm::build_provider("piper", "default", &self.paths.setup) {
+            let prompt_support = self.agent_prompt_support("piper", spec_obj, target_source);
+            let system_instruction = prompt_support
+                .as_ref()
+                .map(|support| format!(
+                    "{}
+
+Task contract:
+You are Piper, a tool and MCP routing specialist for a software factory. You receive the current tool surface and a spec summary. Produce a brief Markdown report describing which tools are available, which are relevant to this spec, and any gaps or warnings. No filler.",
+                    support.system_instruction
+                ))
+                .unwrap_or_else(|| "You are Piper, a tool and MCP routing specialist for a software factory. You receive the current tool surface and a spec summary. Produce a brief Markdown report describing which tools are available, which are relevant to this spec, and any gaps or warnings. No filler.".to_string());
+            let repo_context_block = prompt_support
+                .as_ref()
+                .map(|support| support.repo_context_block.as_str())
+                .unwrap_or(
+                    "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+                );
             let req = LlmRequest::simple(
-                "You are Piper, a tool and MCP routing specialist for a software factory.                  You receive the current tool surface and a spec summary.                  Produce a brief Markdown report: which tools are available, which are relevant                  to this spec, and any gaps or warnings. No filler.",
+                system_instruction,
                 format!(
                     "SPEC: {} — {}
+TARGET: {} ({})
 DOMAIN SIGNALS: {}
 REGULATORY: {}
 REQUIRED CHECKS: {}
@@ -4521,12 +5937,17 @@ REQUIRED CHECKS: {}
 TOOL SURFACE:
 {stub}
 
-                     Produce the tool plan analysis and explicitly call out tools or MCP gaps that block Coobie's required checks.",
+{repo_context_block}
+
+Produce the tool plan analysis and explicitly call out tools or MCP gaps that block Coobie's required checks or conflict with repo-local skill guidance.",
                     spec_obj.id,
                     spec_obj.title,
+                    target_source.label,
+                    target_source.source_path,
                     if briefing.domain_signals.is_empty() { "none".to_string() } else { briefing.domain_signals.join(", ") },
                     if briefing.regulatory_considerations.is_empty() { "none".to_string() } else { briefing.regulatory_considerations.join(" | ") },
                     if briefing.required_checks.is_empty() { "none".to_string() } else { briefing.required_checks.join(" | ") },
+                    repo_context_block = repo_context_block,
                 ),
             );
 
@@ -4539,7 +5960,6 @@ TOOL SURFACE:
         stub
     }
 
-
     async fn execute_retriever_forge(
         &self,
         run_id: &str,
@@ -4549,9 +5969,11 @@ TOOL SURFACE:
         run_dir: &Path,
         staged_product: &Path,
     ) -> Result<RetrieverExecutionArtifact> {
-        let packet_raw = tokio::fs::read_to_string(run_dir.join("retriever_task_packet.json")).await?;
+        let packet_raw =
+            tokio::fs::read_to_string(run_dir.join("retriever_task_packet.json")).await?;
         let review_raw = tokio::fs::read_to_string(run_dir.join("trail_review_chain.json")).await?;
-        let dispatch_raw = tokio::fs::read_to_string(run_dir.join("retriever_dispatch.json")).await?;
+        let dispatch_raw =
+            tokio::fs::read_to_string(run_dir.join("retriever_dispatch.json")).await?;
         let packet = serde_json::from_str::<WorkerTaskEnvelope>(&packet_raw)?;
         let _review = serde_json::from_str::<PlanReviewChainArtifact>(&review_raw)?;
         let dispatch = serde_json::from_str::<RetrieverDispatchArtifact>(&dispatch_raw)?;
@@ -4571,7 +5993,8 @@ TOOL SURFACE:
         let logs_dir = run_dir.join("retriever-forge");
         tokio::fs::create_dir_all(&logs_dir).await?;
 
-        let drift_guard_raw = tokio::fs::read_to_string(run_dir.join("trail_drift_guard.json")).await?;
+        let drift_guard_raw =
+            tokio::fs::read_to_string(run_dir.join("trail_drift_guard.json")).await?;
         let drift_guard = serde_json::from_str::<TrailDriftGuardArtifact>(&drift_guard_raw)?;
         let drift_check = verify_trail_drift_guard(run_id, spec_obj, target_source, &drift_guard)?;
         self.write_json_file(&run_dir.join("trail_drift_check.json"), &drift_check)
@@ -4627,37 +6050,42 @@ TOOL SURFACE:
         }
         if drift_check.passed {
             for (idx, planned) in command_plan.iter().enumerate() {
-            let (decision, reasons) = evaluate_retriever_hook(&packet, planned);
-            hook_records.push(RetrieverHookRecord {
-                stage: "pre_tool_use".to_string(),
-                decision: decision.clone(),
-                tool: "shell_command".to_string(),
-                command_label: planned.label.clone(),
-                raw_command: planned.raw_command.clone(),
-                source: planned.source.clone(),
-                rationale: planned.rationale.clone(),
-                reasons: reasons.clone(),
-                passed: None,
-                exit_code: None,
-                log_artifact: None,
-                created_at: Utc::now().to_rfc3339(),
-            });
+                let (decision, reasons) = evaluate_retriever_hook(&packet, planned);
+                hook_records.push(RetrieverHookRecord {
+                    stage: "pre_tool_use".to_string(),
+                    decision: decision.clone(),
+                    tool: "shell_command".to_string(),
+                    command_label: planned.label.clone(),
+                    raw_command: planned.raw_command.clone(),
+                    source: planned.source.clone(),
+                    rationale: planned.rationale.clone(),
+                    reasons: reasons.clone(),
+                    passed: None,
+                    exit_code: None,
+                    log_artifact: None,
+                    created_at: Utc::now().to_rfc3339(),
+                });
 
-            let log_artifact = format!("retriever-forge/command-{:02}.log", idx + 1);
-            let preference_rank = preferred_rank_map.get(planned.raw_command.as_str()).copied();
-            let was_preferred = preference_rank.is_some();
-            if was_preferred {
-                push_unique(&mut preferred_commands_selected, &planned.raw_command);
-            }
-            if decision == "deny" {
-                all_passed = false;
-                let denied_message = if reasons.is_empty() {
-                    "Keeper denied this retriever-forge command before execution.".to_string()
-                } else {
-                    format!("Keeper denied this retriever-forge command: {}", reasons.join(" | "))
-                };
-                let log_body = format!(
-                    "# {}
+                let log_artifact = format!("retriever-forge/command-{:02}.log", idx + 1);
+                let preference_rank = preferred_rank_map
+                    .get(planned.raw_command.as_str())
+                    .copied();
+                let was_preferred = preference_rank.is_some();
+                if was_preferred {
+                    push_unique(&mut preferred_commands_selected, &planned.raw_command);
+                }
+                if decision == "deny" {
+                    all_passed = false;
+                    let denied_message = if reasons.is_empty() {
+                        "Keeper denied this retriever-forge command before execution.".to_string()
+                    } else {
+                        format!(
+                            "Keeper denied this retriever-forge command: {}",
+                            reasons.join(" | ")
+                        )
+                    };
+                    let log_body = format!(
+                        "# {}
 
 - Decision: deny
 - Source: {}
@@ -4665,57 +6093,61 @@ TOOL SURFACE:
 - Command: {}
 - Reasons: {}
 ",
-                    planned.label,
-                    planned.source,
-                    planned.rationale,
-                    planned.raw_command,
-                    if reasons.is_empty() { "none".to_string() } else { reasons.join(" | ") },
-                );
-                tokio::fs::write(run_dir.join(&log_artifact), log_body).await?;
-                returned_artifacts.push(log_artifact.clone());
-                if was_preferred {
-                    push_unique(&mut preferred_commands_stale, &planned.raw_command);
+                        planned.label,
+                        planned.source,
+                        planned.rationale,
+                        planned.raw_command,
+                        if reasons.is_empty() {
+                            "none".to_string()
+                        } else {
+                            reasons.join(" | ")
+                        },
+                    );
+                    tokio::fs::write(run_dir.join(&log_artifact), log_body).await?;
+                    returned_artifacts.push(log_artifact.clone());
+                    if was_preferred {
+                        push_unique(&mut preferred_commands_stale, &planned.raw_command);
+                    }
+                    executed_commands.push(RetrieverCommandExecution {
+                        label: planned.label.clone(),
+                        raw_command: planned.raw_command.clone(),
+                        source: planned.source.clone(),
+                        rationale: planned.rationale.clone(),
+                        was_preferred,
+                        preference_rank,
+                        preference_outcome: Some(if was_preferred {
+                            "did_not_help".to_string()
+                        } else {
+                            "not_preferred".to_string()
+                        }),
+                        passed: false,
+                        exit_code: None,
+                        stdout: String::new(),
+                        stderr: denied_message.clone(),
+                        log_artifact: log_artifact.clone(),
+                    });
+                    hook_records.push(RetrieverHookRecord {
+                        stage: "post_tool_use".to_string(),
+                        decision,
+                        tool: "shell_command".to_string(),
+                        command_label: planned.label.clone(),
+                        raw_command: planned.raw_command.clone(),
+                        source: planned.source.clone(),
+                        rationale: planned.rationale.clone(),
+                        reasons,
+                        passed: Some(false),
+                        exit_code: None,
+                        log_artifact: Some(log_artifact),
+                        created_at: Utc::now().to_rfc3339(),
+                    });
+                    continue;
                 }
-                executed_commands.push(RetrieverCommandExecution {
-                    label: planned.label.clone(),
-                    raw_command: planned.raw_command.clone(),
-                    source: planned.source.clone(),
-                    rationale: planned.rationale.clone(),
-                    was_preferred,
-                    preference_rank,
-                    preference_outcome: Some(if was_preferred {
-                        "did_not_help".to_string()
-                    } else {
-                        "not_preferred".to_string()
-                    }),
-                    passed: false,
-                    exit_code: None,
-                    stdout: String::new(),
-                    stderr: denied_message.clone(),
-                    log_artifact: log_artifact.clone(),
-                });
-                hook_records.push(RetrieverHookRecord {
-                    stage: "post_tool_use".to_string(),
-                    decision,
-                    tool: "shell_command".to_string(),
-                    command_label: planned.label.clone(),
-                    raw_command: planned.raw_command.clone(),
-                    source: planned.source.clone(),
-                    rationale: planned.rationale.clone(),
-                    reasons,
-                    passed: Some(false),
-                    exit_code: None,
-                    log_artifact: Some(log_artifact),
-                    created_at: Utc::now().to_rfc3339(),
-                });
-                continue;
-            }
 
-            let outcome = self
-                .run_shell_command_capture(&planned.raw_command, staged_product)
-                .await?;
-            let log_body = format!(
-                "# {}
+                let outcome = self
+                    .run_shell_command_capture(&planned.raw_command, staged_product)
+                    .await?;
+                let log_body = format!(
+                    "# {}
 
 - Source: {}
 - Rationale: {}
@@ -4729,71 +6161,84 @@ TOOL SURFACE:
 ## stderr
 {}
 ",
-                planned.label,
-                planned.source,
-                planned.rationale,
-                planned.raw_command,
-                outcome
-                    .code
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "signal".to_string()),
-                if outcome.success { "true" } else { "false" },
-                if outcome.stdout.is_empty() { "<empty>" } else { &outcome.stdout },
-                if outcome.stderr.is_empty() { "<empty>" } else { &outcome.stderr },
-            );
-            tokio::fs::write(run_dir.join(&log_artifact), log_body).await?;
-            if !outcome.success {
-                all_passed = false;
-            }
-            if was_preferred {
-                if outcome.success {
-                    push_unique(&mut preferred_commands_helped, &planned.raw_command);
-                } else {
-                    push_unique(&mut preferred_commands_stale, &planned.raw_command);
-                }
-            }
-            returned_artifacts.push(log_artifact.clone());
-            executed_commands.push(RetrieverCommandExecution {
-                label: planned.label.clone(),
-                raw_command: planned.raw_command.clone(),
-                source: planned.source.clone(),
-                rationale: planned.rationale.clone(),
-                was_preferred,
-                preference_rank,
-                preference_outcome: Some(if was_preferred {
-                    if outcome.success {
-                        "helped".to_string()
+                    planned.label,
+                    planned.source,
+                    planned.rationale,
+                    planned.raw_command,
+                    outcome
+                        .code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "signal".to_string()),
+                    if outcome.success { "true" } else { "false" },
+                    if outcome.stdout.is_empty() {
+                        "<empty>"
                     } else {
-                        "did_not_help".to_string()
+                        &outcome.stdout
+                    },
+                    if outcome.stderr.is_empty() {
+                        "<empty>"
+                    } else {
+                        &outcome.stderr
+                    },
+                );
+                tokio::fs::write(run_dir.join(&log_artifact), log_body).await?;
+                if !outcome.success {
+                    all_passed = false;
+                }
+                if was_preferred {
+                    if outcome.success {
+                        push_unique(&mut preferred_commands_helped, &planned.raw_command);
+                    } else {
+                        push_unique(&mut preferred_commands_stale, &planned.raw_command);
                     }
-                } else {
-                    "not_preferred".to_string()
-                }),
-                passed: outcome.success,
-                exit_code: outcome.code,
-                stdout: outcome.stdout.clone(),
-                stderr: outcome.stderr.clone(),
-                log_artifact: log_artifact.clone(),
-            });
-            hook_records.push(RetrieverHookRecord {
-                stage: "post_tool_use".to_string(),
-                decision: if outcome.success { "allow" } else { "allow_with_failure" }.to_string(),
-                tool: "shell_command".to_string(),
-                command_label: planned.label.clone(),
-                raw_command: planned.raw_command.clone(),
-                source: planned.source.clone(),
-                rationale: planned.rationale.clone(),
-                reasons: if outcome.success {
-                    vec!["Command completed inside the bounded staged workspace.".to_string()]
-                } else {
-                    vec!["Command was allowed but returned a failing exit code.".to_string()]
-                },
-                passed: Some(outcome.success),
-                exit_code: outcome.code,
-                log_artifact: Some(log_artifact),
-                created_at: Utc::now().to_rfc3339(),
-            });
-        }
+                }
+                returned_artifacts.push(log_artifact.clone());
+                executed_commands.push(RetrieverCommandExecution {
+                    label: planned.label.clone(),
+                    raw_command: planned.raw_command.clone(),
+                    source: planned.source.clone(),
+                    rationale: planned.rationale.clone(),
+                    was_preferred,
+                    preference_rank,
+                    preference_outcome: Some(if was_preferred {
+                        if outcome.success {
+                            "helped".to_string()
+                        } else {
+                            "did_not_help".to_string()
+                        }
+                    } else {
+                        "not_preferred".to_string()
+                    }),
+                    passed: outcome.success,
+                    exit_code: outcome.code,
+                    stdout: outcome.stdout.clone(),
+                    stderr: outcome.stderr.clone(),
+                    log_artifact: log_artifact.clone(),
+                });
+                hook_records.push(RetrieverHookRecord {
+                    stage: "post_tool_use".to_string(),
+                    decision: if outcome.success {
+                        "allow"
+                    } else {
+                        "allow_with_failure"
+                    }
+                    .to_string(),
+                    tool: "shell_command".to_string(),
+                    command_label: planned.label.clone(),
+                    raw_command: planned.raw_command.clone(),
+                    source: planned.source.clone(),
+                    rationale: planned.rationale.clone(),
+                    reasons: if outcome.success {
+                        vec!["Command completed inside the bounded staged workspace.".to_string()]
+                    } else {
+                        vec!["Command was allowed but returned a failing exit code.".to_string()]
+                    },
+                    passed: Some(outcome.success),
+                    exit_code: outcome.code,
+                    log_artifact: Some(log_artifact),
+                    created_at: Utc::now().to_rfc3339(),
+                });
+            }
         }
 
         if executed_commands.is_empty() {
@@ -4924,7 +6369,14 @@ TOOL SURFACE:
             }
         };
         trail_state.updated_at = Utc::now().to_rfc3339();
-        trail_state.last_execution_outcome = Some(if artifact.passed { "success" } else { "failure" }.to_string());
+        trail_state.last_execution_outcome = Some(
+            if artifact.passed {
+                "success"
+            } else {
+                "failure"
+            }
+            .to_string(),
+        );
         trail_state.last_execution_summary = Some(summary);
         trail_state.last_execution_artifact = Some("retriever_execution_report.json".to_string());
         trail_state.executed_commands = artifact
@@ -4938,7 +6390,11 @@ TOOL SURFACE:
         Ok(artifact)
     }
 
-    async fn run_shell_command_capture(&self, raw_command: &str, cwd: &Path) -> Result<CommandOutcome> {
+    async fn run_shell_command_capture(
+        &self,
+        raw_command: &str,
+        cwd: &Path,
+    ) -> Result<CommandOutcome> {
         #[cfg(target_os = "windows")]
         let mut command = {
             let mut command = Command::new("cmd");
@@ -5038,7 +6494,9 @@ TOOL SURFACE:
                     if !output_chunks.is_empty() {
                         tokio::fs::write(&validation_log_path, output_chunks.join("\n\n"))
                             .await
-                            .with_context(|| format!("writing validation log {}", validation_log_path.display()))?;
+                            .with_context(|| {
+                                format!("writing validation log {}", validation_log_path.display())
+                            })?;
                     }
                     return Ok(ValidationSummary {
                         passed: false,
@@ -5082,7 +6540,9 @@ TOOL SURFACE:
                     results.push(ScenarioResult {
                         scenario_id: "node_runtime".to_string(),
                         passed: false,
-                        details: "package.json found but no supported Node package manager is available".to_string(),
+                        details:
+                            "package.json found but no supported Node package manager is available"
+                                .to_string(),
                     });
                 }
             } else if scripts.contains(&"test".to_string()) {
@@ -5100,7 +6560,9 @@ TOOL SURFACE:
                     results.push(ScenarioResult {
                         scenario_id: "node_runtime".to_string(),
                         passed: false,
-                        details: "package.json found but no supported Node package manager is available".to_string(),
+                        details:
+                            "package.json found but no supported Node package manager is available"
+                                .to_string(),
                     });
                 }
             } else {
@@ -5134,10 +6596,15 @@ TOOL SURFACE:
                     || pyproject_mentions_pytest(&pyproject_toml)?;
                 if run_pytest {
                     let outcome = if command_available("pytest") {
-                        self.run_command_capture("pytest", &["-q"], staged_product).await?
-                    } else {
-                        self.run_command_capture(python_command, &["-m", "pytest", "-q"], staged_product)
+                        self.run_command_capture("pytest", &["-q"], staged_product)
                             .await?
+                    } else {
+                        self.run_command_capture(
+                            python_command,
+                            &["-m", "pytest", "-q"],
+                            staged_product,
+                        )
+                        .await?
                     };
                     let command_label = if command_available("pytest") {
                         "pytest -q"
@@ -5152,7 +6619,11 @@ TOOL SURFACE:
                     });
                 } else {
                     let outcome = self
-                        .run_command_capture(python_command, &["-m", "compileall", "."], staged_product)
+                        .run_command_capture(
+                            python_command,
+                            &["-m", "compileall", "."],
+                            staged_product,
+                        )
                         .await?;
                     output_chunks.push(format_command_output("python -m compileall .", &outcome));
                     results.push(ScenarioResult {
@@ -5219,7 +6690,9 @@ TOOL SURFACE:
         if !output_chunks.is_empty() {
             tokio::fs::write(&validation_log_path, output_chunks.join("\n\n"))
                 .await
-                .with_context(|| format!("writing validation log {}", validation_log_path.display()))?;
+                .with_context(|| {
+                    format!("writing validation log {}", validation_log_path.display())
+                })?;
         }
 
         Ok(ValidationSummary {
@@ -5249,6 +6722,219 @@ TOOL SURFACE:
         })
     }
 
+    fn agent_prompt_support(
+        &self,
+        agent_name: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+    ) -> Option<AgentPromptSupport> {
+        let profiles =
+            agents::load_profiles(&self.paths.factory.join("agents").join("profiles")).ok()?;
+        let profile = profiles.get(agent_name)?;
+        let resolved_provider = self
+            .paths
+            .setup
+            .resolve_agent_provider_name(&profile.name, &profile.provider);
+        let resolved_config = self
+            .paths
+            .setup
+            .resolve_agent_provider(&profile.name, &profile.provider);
+        let resolved_model = profile
+            .model_override
+            .clone()
+            .or_else(|| resolved_config.map(|provider| provider.model.clone()));
+        let resolved_surface = resolved_config.and_then(|provider| provider.surface.clone());
+        let shared_personality_raw = std::fs::read_to_string(
+            self.paths
+                .factory
+                .join("agents")
+                .join("personality")
+                .join("labrador.md"),
+        )
+        .unwrap_or_default();
+        let shared_personality = if shared_personality_raw.trim().is_empty() {
+            "- loyal to the mission
+- honest when uncertain
+- non-destructive and boundary-aware"
+                .to_string()
+        } else {
+            shared_personality_raw.trim().to_string()
+        };
+        let personality_addendum = if profile.personality_file.ends_with("labrador.md") {
+            None
+        } else {
+            let personality_path = self
+                .paths
+                .factory
+                .join("agents")
+                .join("profiles")
+                .join(&profile.personality_file);
+            std::fs::read_to_string(&personality_path)
+                .ok()
+                .map(|raw| raw.trim().to_string())
+                .filter(|raw| !raw.is_empty())
+        };
+        let personality_addendum_block = personality_addendum
+            .as_ref()
+            .map(|raw| {
+                format!(
+                    "Agent-specific personality addendum:
+{}",
+                    raw
+                )
+            })
+            .unwrap_or_default();
+        let curated_skill_bundle = std::fs::read_to_string(
+            self.paths
+                .factory
+                .join("agents")
+                .join("skills")
+                .join(format!("{}.md", agent_name)),
+        )
+        .ok()
+        .map(|raw| raw.trim().to_string())
+        .filter(|raw| !raw.is_empty())
+        .unwrap_or_else(|| {
+            "No factory-curated skill bundle is installed for this Labrador yet.".to_string()
+        });
+        let pinned_external_skills =
+            self.load_pinned_skill_excerpts(agent_name, &resolved_provider);
+        let query_terms = build_coobie_query_terms(spec_obj, target_source);
+        let harkonnen_dir = self.project_harkonnen_dir(target_source);
+        let (context_entries, skill_entries) = discover_repo_local_context_entries(
+            &harkonnen_dir,
+            Some(target_source),
+            Some(spec_obj),
+            &query_terms,
+        )
+        .unwrap_or_default();
+        let pinned_external_skill_block =
+            format_resolved_pinned_skill_excerpts(&pinned_external_skills, &resolved_provider);
+        let system_instruction = format!(
+            "You are {display_name}, the Harkonnen Labrador '{agent_name}'.
+
+Factory profile:
+- role: {role}
+- provider route: {provider}
+- responsibilities:
+{responsibilities}
+- allowed tools:
+{allowed_tools}
+- disallowed tools:
+{disallowed_tools}
+
+Shared Labrador personality:
+{shared_personality}
+
+{personality_addendum}
+
+Factory-curated local skill bundle:
+{curated_skill_bundle}
+
+Pinned external skill excerpts:
+{pinned_external_skills}",
+            display_name = profile.display_name,
+            agent_name = profile.name,
+            role = profile.role,
+            provider = resolved_provider,
+            responsibilities = render_list(
+                &profile.responsibilities,
+                "No explicit responsibilities recorded."
+            ),
+            allowed_tools = render_list(&profile.allowed_tools, "No allowed tools recorded."),
+            disallowed_tools =
+                render_list(&profile.disallowed_tools, "No disallowed tools recorded."),
+            shared_personality = shared_personality,
+            personality_addendum = personality_addendum_block,
+            curated_skill_bundle = curated_skill_bundle,
+            pinned_external_skills = pinned_external_skill_block,
+        );
+        let repo_context_block = format!(
+            "REPO-LOCAL CONTEXT:
+{}
+
+REPO-LOCAL SKILL BUNDLES:
+{}",
+            render_repo_local_prompt_lines(
+                &context_entries,
+                "No repo-local context files discovered."
+            ),
+            render_repo_local_prompt_lines(
+                &skill_entries,
+                "No repo-local skill bundles discovered."
+            ),
+        );
+        let mut bundle = AgentPromptBundleArtifact {
+            agent_name: profile.name.clone(),
+            display_name: profile.display_name.clone(),
+            role: profile.role.clone(),
+            resolved_provider,
+            resolved_model,
+            resolved_surface,
+            fingerprint: String::new(),
+            shared_personality,
+            personality_addendum,
+            curated_skill_bundle,
+            pinned_skill_ids: pinned_external_skills
+                .iter()
+                .map(|entry| entry.id.clone())
+                .collect(),
+            pinned_external_skills,
+            repo_local_context_entries: context_entries,
+            repo_local_skill_entries: skill_entries,
+            system_instruction: system_instruction.clone(),
+            repo_context_block: repo_context_block.clone(),
+        };
+        bundle.fingerprint = fingerprint_agent_prompt_bundle(&bundle);
+        Some(AgentPromptSupport {
+            system_instruction,
+            repo_context_block,
+            bundle,
+        })
+    }
+
+    fn load_pinned_skill_excerpts(
+        &self,
+        agent_name: &str,
+        resolved_provider: &str,
+    ) -> Vec<ResolvedPinnedSkillExcerpt> {
+        let manifest_path = self.paths.factory.join("agents").join("pinned-skills.yaml");
+        let Ok(raw) = std::fs::read_to_string(&manifest_path) else {
+            return Vec::new();
+        };
+        let Ok(manifest) = serde_yaml::from_str::<PinnedSkillManifest>(&raw) else {
+            return Vec::new();
+        };
+        let mut out = Vec::new();
+        for entry in manifest.skills.iter().filter(|entry| {
+            entry.agents.iter().any(|name| name == agent_name)
+                && pinned_skill_matches_provider_route(&entry.source, resolved_provider)
+        }) {
+            let skill_path = self.paths.root.join(&entry.vendor_path).join("SKILL.md");
+            let raw_skill = match std::fs::read_to_string(&skill_path) {
+                Ok(raw_skill) => raw_skill,
+                Err(_) => continue,
+            };
+            let source_meta = manifest.sources.get(&entry.source);
+            let source_line = source_meta
+                .map(|meta| format!("{} @ {}", meta.repo, meta.commit))
+                .unwrap_or_else(|| entry.source.clone());
+            out.push(ResolvedPinnedSkillExcerpt {
+                id: entry.id.clone(),
+                source: source_line,
+                provider_family: entry.source.clone(),
+                vendor_path: entry.vendor_path.clone(),
+                rationale: if entry.rationale.trim().is_empty() {
+                    "none recorded".to_string()
+                } else {
+                    entry.rationale.trim().to_string()
+                },
+                excerpt: summarize_pinned_skill_markdown(&raw_skill, 2200),
+            });
+        }
+        out
+    }
+
     async fn write_agent_execution(
         &self,
         profiles: &HashMap<String, AgentProfile>,
@@ -5256,21 +6942,51 @@ TOOL SURFACE:
         prompt: &str,
         summary: &str,
         output: &str,
+        phase: &str,
+        episode_id: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
         run_dir: &Path,
         agent_executions: &mut Vec<AgentExecution>,
     ) -> Result<()> {
         let profile = profiles
             .get(agent_name)
             .with_context(|| format!("agent profile not found: {agent_name}"))?;
-        let execution = agents::build_execution(profile, &self.paths.setup, prompt, summary, output);
+        let prompt_support = self.agent_prompt_support(agent_name, spec_obj, target_source);
         let agents_dir = run_dir.join("agents");
         tokio::fs::create_dir_all(&agents_dir).await?;
+
+        let mut execution =
+            agents::build_execution(profile, &self.paths.setup, prompt, summary, output);
+        execution.phase = Some(phase.to_string());
+        execution.episode_id = Some(episode_id.to_string());
+        if let Some(prompt_support) = prompt_support.as_ref() {
+            let bundle_json_name = format!("{}_prompt_bundle.json", agent_name);
+            let bundle_md_name = format!("{}_prompt_bundle.md", agent_name);
+            self.write_json_file(&agents_dir.join(&bundle_json_name), &prompt_support.bundle)
+                .await?;
+            tokio::fs::write(
+                agents_dir.join(&bundle_md_name),
+                render_prompt_bundle_markdown(&prompt_support.bundle),
+            )
+            .await?;
+            execution.prompt_bundle_fingerprint = Some(prompt_support.bundle.fingerprint.clone());
+            execution.prompt_bundle_artifact = Some(format!("agents/{}", bundle_json_name));
+            execution.prompt_bundle_provider =
+                Some(prompt_support.bundle.resolved_provider.clone());
+            execution.pinned_skill_ids = prompt_support.bundle.pinned_skill_ids.clone();
+        }
+
         self.write_json_file(&agents_dir.join(format!("{agent_name}.json")), &execution)
             .await?;
 
-        agent_executions.retain(|existing| existing.agent_name != agent_name);
+        agent_executions.retain(|existing| existing.episode_id.as_deref() != Some(episode_id));
         agent_executions.push(execution);
-        agent_executions.sort_by(|left, right| left.agent_name.cmp(&right.agent_name));
+        agent_executions.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.agent_name.cmp(&right.agent_name))
+        });
         self.write_json_file(&agents_dir.join("index.json"), agent_executions)
             .await?;
         self.write_json_file(&run_dir.join("agent_executions.json"), agent_executions)
@@ -5288,6 +7004,7 @@ TOOL SURFACE:
     async fn bramble_interpret_validation(
         &self,
         spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
         validation: &ValidationSummary,
         briefing: &CoobieBriefing,
     ) -> Option<String> {
@@ -5296,27 +7013,64 @@ TOOL SURFACE:
         let results_text = validation
             .results
             .iter()
-            .map(|r| format!("- [{}] {}: {}", if r.passed { "PASS" } else { "FAIL" }, r.scenario_id, r.details))
+            .map(|r| {
+                format!(
+                    "- [{}] {}: {}",
+                    if r.passed { "PASS" } else { "FAIL" },
+                    r.scenario_id,
+                    r.details
+                )
+            })
             .collect::<Vec<_>>()
-            .join("
-");
+            .join(
+                "
+",
+            );
+
+        let prompt_support = self.agent_prompt_support("bramble", spec_obj, target_source);
+        let system_instruction = prompt_support
+            .as_ref()
+            .map(|support| format!(
+                "{}
+
+Task contract:
+You are Bramble, a validation analyst for a software factory. You receive a spec summary and the results of visible validation checks. Produce a brief Markdown analysis describing what passed, what failed, likely root causes for failures, and what a developer should inspect first. No filler.",
+                support.system_instruction
+            ))
+            .unwrap_or_else(|| "You are Bramble, a validation analyst for a software factory. You receive a spec summary and the results of visible validation checks. Produce a brief Markdown analysis describing what passed, what failed, likely root causes for failures, and what a developer should inspect first. No filler.".to_string());
+        let repo_context_block = prompt_support
+            .as_ref()
+            .map(|support| support.repo_context_block.as_str())
+            .unwrap_or(
+                "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+            );
 
         let req = LlmRequest::simple(
-            "You are Bramble, a validation analyst for a software factory.              You receive a spec summary and the results of visible validation checks.              Produce a brief Markdown analysis: what passed, what failed, likely root causes              for any failures, and what a developer should look at first. No filler.",
+            system_instruction,
             format!(
                 "SPEC: {} — {}
+TARGET: {} ({})
 COOBIE REQUIRED CHECKS: {}
 COOBIE GUARDRAILS: {}
 
 VALIDATION RESULTS (passed={}):
 {results_text}
 
-                 Produce the validation analysis and note any checks Coobie asked for that are still unproven.",
+{repo_context_block}
+
+Produce the validation analysis and note any checks Coobie asked for that are still unproven or contradicted by repo-local guidance.",
                 spec_obj.id,
                 spec_obj.title,
+                target_source.label,
+                target_source.source_path,
                 if briefing.required_checks.is_empty() { "none".to_string() } else { briefing.required_checks.join(" | ") },
                 if briefing.recommended_guardrails.is_empty() { "none".to_string() } else { briefing.recommended_guardrails.join(" | ") },
                 validation.passed,
+                repo_context_block = repo_context_block,
             ),
         );
 
@@ -5334,28 +7088,65 @@ VALIDATION RESULTS (passed={}):
     async fn ash_twin_narrative(
         &self,
         spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
         twin: &TwinEnvironment,
         briefing: &CoobieBriefing,
     ) -> Option<String> {
         let provider = llm::build_provider("ash", "default", &self.paths.setup)?;
+        let prompt_support = self.agent_prompt_support("ash", spec_obj, target_source);
         let ash_addendum = std::fs::read_to_string(
-            self.paths.factory.join("agents").join("personality").join("ash.md"),
+            self.paths
+                .factory
+                .join("agents")
+                .join("personality")
+                .join("ash.md"),
         )
         .unwrap_or_default();
 
-        let services = twin.services.iter()
-            .map(|s| format!("- {} [{}] status={} — {}", s.name, s.kind, s.status, s.details))
+        let services = twin
+            .services
+            .iter()
+            .map(|s| {
+                format!(
+                    "- {} [{}] status={} — {}",
+                    s.name, s.kind, s.status, s.details
+                )
+            })
             .collect::<Vec<_>>()
-            .join("
-");
+            .join(
+                "
+",
+            );
+
+        let system_instruction = prompt_support
+            .as_ref()
+            .map(|support| format!(
+                "{}
+
+Task contract:
+You are Ash, a digital twin specialist for a software factory. You have just provisioned a local twin environment for a run. Produce a brief Markdown narrative explaining what was provisioned, what each service provides to this run, and any gaps or warnings relevant to the spec. Two to four short paragraphs. No filler.",
+                support.system_instruction
+            ))
+            .unwrap_or_else(|| "You are Ash, a digital twin specialist for a software factory. You have just provisioned a local twin environment for a run. Produce a brief Markdown narrative explaining what was provisioned, what each service provides to this run, and any gaps or warnings relevant to the spec. Two to four short paragraphs. No filler.".to_string());
+        let repo_context_block = prompt_support
+            .as_ref()
+            .map(|support| support.repo_context_block.as_str())
+            .unwrap_or(
+                "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+            );
 
         let req = LlmRequest::simple(
-            "You are Ash, a digital twin specialist for a software factory.              You have just provisioned a local twin environment for a run.              Produce a brief Markdown narrative: what was provisioned, what each service              provides to this run, and any gaps or warnings relevant to the spec.              Two to four short paragraphs. No filler.",
+            system_instruction,
             format!(
                 "ASH ADDENDUM:
 {}
 
 SPEC: {} — {}
+TARGET: {} ({})
 DEPENDENCIES: {}
 COOBIE ENVIRONMENT RISKS: {}
 COOBIE REQUIRED CHECKS: {}
@@ -5363,13 +7154,18 @@ COOBIE REQUIRED CHECKS: {}
 TWIN SERVICES:
 {services}
 
-                 Write the twin environment narrative and identify any simulation gaps against Coobie's environment risks. Be explicit about which twin facts came from Harkonnen versus any product runtime assumptions.",
+{repo_context_block}
+
+Write the twin environment narrative and identify any simulation gaps against Coobie's environment risks. Be explicit about which twin facts came from Harkonnen versus any product runtime assumptions.",
                 if ash_addendum.trim().is_empty() { "none" } else { ash_addendum.trim() },
                 spec_obj.id,
                 spec_obj.title,
+                target_source.label,
+                target_source.source_path,
                 if spec_obj.dependencies.is_empty() { "none".to_string() } else { spec_obj.dependencies.join(", ") },
                 if briefing.environment_risks.is_empty() { "none".to_string() } else { briefing.environment_risks.join(" | ") },
                 if briefing.required_checks.is_empty() { "none".to_string() } else { briefing.required_checks.join(" | ") },
+                repo_context_block = repo_context_block,
             ),
         );
 
@@ -5437,7 +7233,11 @@ TWIN SERVICES:
         lines.push("Host Commands".to_string());
         lines.push("-------------".to_string());
         for command in ["cargo", "node", "npm", "docker", "podman", "openclaw"] {
-            lines.push(format!("- {} available={}", command, command_available(command)));
+            lines.push(format!(
+                "- {} available={}",
+                command,
+                command_available(command)
+            ));
         }
 
         lines.join("\n") + "\n"
@@ -5553,7 +7353,10 @@ TWIN SERVICES:
             bail!("target source not found: {}", source_path.display());
         }
         if !source_path.is_dir() {
-            bail!("target source is not a directory: {}", source_path.display());
+            bail!(
+                "target source is not a directory: {}",
+                source_path.display()
+            );
         }
 
         let canonical = source_path.canonicalize()?;
@@ -5566,7 +7369,10 @@ TWIN SERVICES:
         })
     }
 
-    async fn resolve_memory_ingest_target(&self, project_root: &str) -> Result<TargetSourceMetadata> {
+    async fn resolve_memory_ingest_target(
+        &self,
+        project_root: &str,
+    ) -> Result<TargetSourceMetadata> {
         let candidate = PathBuf::from(project_root);
         let source_path = if candidate.is_absolute() {
             candidate
@@ -5578,7 +7384,10 @@ TWIN SERVICES:
             bail!("project memory root not found: {}", source_path.display());
         }
         if !source_path.is_dir() {
-            bail!("project memory root is not a directory: {}", source_path.display());
+            bail!(
+                "project memory root is not a directory: {}",
+                source_path.display()
+            );
         }
 
         let canonical = source_path.canonicalize()?;
@@ -5604,8 +7413,12 @@ TWIN SERVICES:
     ) -> Result<PathBuf> {
         let filename = normalize_evidence_bundle_name(bundle_name)?;
         let harkonnen_dir = self.project_harkonnen_dir(target_source);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
-        Ok(harkonnen_dir.join("evidence").join("annotations").join(filename))
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
+        Ok(harkonnen_dir
+            .join("evidence")
+            .join("annotations")
+            .join(filename))
     }
 
     async fn project_evidence_history_path(
@@ -5616,8 +7429,12 @@ TWIN SERVICES:
         let filename = normalize_evidence_bundle_name(bundle_name)?;
         let history_name = format!("{}.history.jsonl", filename);
         let harkonnen_dir = self.project_harkonnen_dir(target_source);
-        self.ensure_project_evidence_bootstrap(&harkonnen_dir).await?;
-        Ok(harkonnen_dir.join("evidence").join("history").join(history_name))
+        self.ensure_project_evidence_bootstrap(&harkonnen_dir)
+            .await?;
+        Ok(harkonnen_dir
+            .join("evidence")
+            .join("history")
+            .join(history_name))
     }
 
     async fn append_project_evidence_history_events(
@@ -5629,8 +7446,14 @@ TWIN SERVICES:
         if events.is_empty() {
             return Ok(());
         }
-        let path = self.project_evidence_history_path(target_source, bundle_name).await?;
-        let mut file = OpenOptions::new().create(true).append(true).open(&path).await?;
+        let path = self
+            .project_evidence_history_path(target_source, bundle_name)
+            .await?;
+        let mut file = OpenOptions::new()
+            .create(true)
+            .append(true)
+            .open(&path)
+            .await?;
         for event in events {
             let line = serde_json::to_string(event)?;
             file.write_all(line.as_bytes()).await?;
@@ -5768,6 +7591,146 @@ TWIN SERVICES:
         .bind(outcome)
         .bind(confidence)
         .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn record_phase_attribution(
+        &self,
+        run_id: &str,
+        episode_id: &str,
+        phase: &str,
+        agent_name: &str,
+        outcome: &str,
+        confidence: Option<f64>,
+        memory_context: &MemoryContextBundle,
+        briefing: &CoobieBriefing,
+        agent_executions: &[AgentExecution],
+        phase_attributions: &mut Vec<PhaseAttributionRecord>,
+        run_dir: &Path,
+    ) -> Result<()> {
+        let execution = agent_executions
+            .iter()
+            .find(|execution| execution.episode_id.as_deref() == Some(episode_id));
+        let created_at = Utc::now();
+        let record = PhaseAttributionRecord {
+            attribution_id: format!("phase-attribution-{}", episode_id),
+            run_id: run_id.to_string(),
+            episode_id: episode_id.to_string(),
+            phase: phase.to_string(),
+            agent_name: agent_name.to_string(),
+            outcome: outcome.to_string(),
+            confidence,
+            prompt_bundle_fingerprint: execution
+                .and_then(|execution| execution.prompt_bundle_fingerprint.clone()),
+            prompt_bundle_provider: execution
+                .and_then(|execution| execution.prompt_bundle_provider.clone()),
+            prompt_bundle_artifact: execution
+                .and_then(|execution| execution.prompt_bundle_artifact.clone()),
+            pinned_skill_ids: execution
+                .map(|execution| execution.pinned_skill_ids.clone())
+                .unwrap_or_default(),
+            memory_hits: memory_context.memory_hits.clone(),
+            core_memory_ids: memory_context.core_memory_ids.clone(),
+            project_memory_ids: memory_context.project_memory_ids.clone(),
+            relevant_lesson_ids: briefing
+                .relevant_lessons
+                .iter()
+                .map(|lesson| lesson.lesson_id.clone())
+                .collect(),
+            required_checks: briefing.required_checks.clone(),
+            guardrails: briefing.recommended_guardrails.clone(),
+            query_terms: briefing.query_terms.clone(),
+            created_at,
+        };
+        self.upsert_phase_attribution(&record).await?;
+
+        phase_attributions.retain(|existing| existing.episode_id != episode_id);
+        phase_attributions.push(record);
+        phase_attributions.sort_by(|left, right| {
+            left.created_at
+                .cmp(&right.created_at)
+                .then_with(|| left.phase.cmp(&right.phase))
+        });
+        self.write_json_file(&run_dir.join("phase_attributions.json"), phase_attributions)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("phase_attributions.md"),
+            render_phase_attributions_markdown(phase_attributions),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn upsert_phase_attribution(&self, record: &PhaseAttributionRecord) -> Result<()> {
+        sqlx::query(
+            r#"
+            INSERT INTO phase_attributions (
+                attribution_id,
+                run_id,
+                episode_id,
+                phase,
+                agent_name,
+                outcome,
+                confidence,
+                prompt_bundle_fingerprint,
+                prompt_bundle_provider,
+                prompt_bundle_artifact,
+                pinned_skill_ids,
+                memory_hits,
+                core_memory_ids,
+                project_memory_ids,
+                relevant_lesson_ids,
+                required_checks,
+                guardrails,
+                query_terms,
+                created_at
+            )
+            VALUES (
+                ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10,
+                ?11, ?12, ?13, ?14, ?15, ?16, ?17, ?18, ?19
+            )
+            ON CONFLICT(episode_id) DO UPDATE SET
+                attribution_id = excluded.attribution_id,
+                run_id = excluded.run_id,
+                phase = excluded.phase,
+                agent_name = excluded.agent_name,
+                outcome = excluded.outcome,
+                confidence = excluded.confidence,
+                prompt_bundle_fingerprint = excluded.prompt_bundle_fingerprint,
+                prompt_bundle_provider = excluded.prompt_bundle_provider,
+                prompt_bundle_artifact = excluded.prompt_bundle_artifact,
+                pinned_skill_ids = excluded.pinned_skill_ids,
+                memory_hits = excluded.memory_hits,
+                core_memory_ids = excluded.core_memory_ids,
+                project_memory_ids = excluded.project_memory_ids,
+                relevant_lesson_ids = excluded.relevant_lesson_ids,
+                required_checks = excluded.required_checks,
+                guardrails = excluded.guardrails,
+                query_terms = excluded.query_terms,
+                created_at = excluded.created_at
+            "#,
+        )
+        .bind(&record.attribution_id)
+        .bind(&record.run_id)
+        .bind(&record.episode_id)
+        .bind(&record.phase)
+        .bind(&record.agent_name)
+        .bind(&record.outcome)
+        .bind(record.confidence)
+        .bind(record.prompt_bundle_fingerprint.clone())
+        .bind(record.prompt_bundle_provider.clone())
+        .bind(record.prompt_bundle_artifact.clone())
+        .bind(serde_json::to_string(&record.pinned_skill_ids)?)
+        .bind(serde_json::to_string(&record.memory_hits)?)
+        .bind(serde_json::to_string(&record.core_memory_ids)?)
+        .bind(serde_json::to_string(&record.project_memory_ids)?)
+        .bind(serde_json::to_string(&record.relevant_lesson_ids)?)
+        .bind(serde_json::to_string(&record.required_checks)?)
+        .bind(serde_json::to_string(&record.guardrails)?)
+        .bind(serde_json::to_string(&record.query_terms)?)
+        .bind(record.created_at.to_rfc3339())
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -5923,7 +7886,10 @@ TWIN SERVICES:
                 .map(|event| event.message.clone())
                 .unwrap_or_else(|| "none".to_string());
             let reformulation = match outcome.as_str() {
-                "success" => format!("{} phase completed with confidence {confidence}", episode.phase),
+                "success" => format!(
+                    "{} phase completed with confidence {confidence}",
+                    episode.phase
+                ),
                 "failure" | "blocked" => {
                     format!("{} phase failed; preserve surviving structure and change strategy on retry", episode.phase)
                 }
@@ -5965,18 +7931,30 @@ TWIN SERVICES:
             lines.push(format!("strategy: {}", entry.strategy));
             lines.push(format!("outcome: {}", entry.outcome));
             lines.push(format!("failure_constraint: {}", entry.failure_constraint));
-            lines.push(format!("surviving_structure: {}", entry.surviving_structure));
+            lines.push(format!(
+                "surviving_structure: {}",
+                entry.surviving_structure
+            ));
             lines.push(format!("reformulation: {}", entry.reformulation));
             lines.push(format!("artifacts: {}", format_yaml_list(&entry.artifacts)));
-            lines.push(format!("parameters: {}", format_yaml_list(&entry.parameters)));
-            lines.push(format!("open_questions: {}", format_yaml_list(&entry.open_questions)));
+            lines.push(format!(
+                "parameters: {}",
+                format_yaml_list(&entry.parameters)
+            ));
+            lines.push(format!(
+                "open_questions: {}",
+                format_yaml_list(&entry.open_questions)
+            ));
             lines.push("```".to_string());
             lines.push(String::new());
 
             entries.push(entry);
         }
 
-        let passed = entries.iter().filter(|entry| entry.outcome == "success").count();
+        let passed = entries
+            .iter()
+            .filter(|entry| entry.outcome == "success")
+            .count();
         let failed = entries
             .iter()
             .filter(|entry| matches!(entry.outcome.as_str(), "failure" | "blocked"))
@@ -6036,7 +8014,11 @@ TWIN SERVICES:
                 continue;
             }
             let registry_id = format!("{}:{}", run_id, entry.episode_id);
-            if registry.entries.iter().any(|existing| existing.registry_id == registry_id) {
+            if registry
+                .entries
+                .iter()
+                .any(|existing| existing.registry_id == registry_id)
+            {
                 continue;
             }
             registry.entries.push(DeadEndRegistryEntry {
@@ -6054,9 +8036,12 @@ TWIN SERVICES:
             });
         }
 
-        registry.entries.sort_by(|left, right| left.created_at.cmp(&right.created_at));
+        registry
+            .entries
+            .sort_by(|left, right| left.created_at.cmp(&right.created_at));
         self.write_json_file(&registry_path, &registry).await?;
-        self.sync_project_strategy_register(target_source, &registry).await?;
+        self.sync_project_strategy_register(target_source, &registry)
+            .await?;
         let snapshot = registry
             .entries
             .iter()
@@ -6097,13 +8082,28 @@ TWIN SERVICES:
         summary.push(format!("Project memory entries indexed: {}", entries.len()));
         summary.push(format!("Entries currently at risk: {}", stale_memory.len()));
         if status_count > 0 {
-            summary.push(format!("Entries already marked challenged/superseded: {}", status_count));
+            summary.push(format!(
+                "Entries already marked challenged/superseded: {}",
+                status_count
+            ));
         }
         if !stale_memory.is_empty() {
-            let critical = stale_memory.iter().filter(|risk| risk.severity == "critical").count();
-            let high = stale_memory.iter().filter(|risk| risk.severity == "high").count();
-            let medium = stale_memory.iter().filter(|risk| risk.severity == "medium").count();
-            let low = stale_memory.iter().filter(|risk| risk.severity == "low").count();
+            let critical = stale_memory
+                .iter()
+                .filter(|risk| risk.severity == "critical")
+                .count();
+            let high = stale_memory
+                .iter()
+                .filter(|risk| risk.severity == "high")
+                .count();
+            let medium = stale_memory
+                .iter()
+                .filter(|risk| risk.severity == "medium")
+                .count();
+            let low = stale_memory
+                .iter()
+                .filter(|risk| risk.severity == "low")
+                .count();
             summary.push(format!(
                 "Risk mix: critical={} high={} medium={} low={}",
                 critical, high, medium, low
@@ -6113,7 +8113,12 @@ TWIN SERVICES:
             if !git.changed_paths.is_empty() {
                 summary.push(format!(
                     "Working tree changed paths: {}",
-                    git.changed_paths.iter().take(8).cloned().collect::<Vec<_>>().join(", ")
+                    git.changed_paths
+                        .iter()
+                        .take(8)
+                        .cloned()
+                        .collect::<Vec<_>>()
+                        .join(", ")
                 ));
             }
             if git.clean.is_some_and(|clean| !clean) {
@@ -6170,7 +8175,10 @@ TWIN SERVICES:
         ) {
             if stored != current {
                 if observed_paths.is_empty() {
-                    reasons.push(format!("stored commit {} differs from current commit {}", stored, current));
+                    reasons.push(format!(
+                        "stored commit {} differs from current commit {}",
+                        stored, current
+                    ));
                     severity_score = severity_score.max(25);
                 } else {
                     let changed = self
@@ -6200,7 +8208,10 @@ TWIN SERVICES:
             current_git.and_then(|git| git.branch.as_deref()),
         ) {
             if stored != current {
-                reasons.push(format!("stored branch {} differs from current branch {}", stored, current));
+                reasons.push(format!(
+                    "stored branch {} differs from current branch {}",
+                    stored, current
+                ));
                 severity_score = severity_score.max(30);
             }
         }
@@ -6353,7 +8364,9 @@ TWIN SERVICES:
         hidden_scenarios: &HiddenScenarioSummary,
         run_dir: &Path,
     ) -> Result<()> {
-        let mut history = self.load_project_stale_memory_history(target_source).await?;
+        let mut history = self
+            .load_project_stale_memory_history(target_source)
+            .await?;
         let previous_record = history.records.last().cloned();
         let mut previous_scores = HashMap::new();
         if let Some(record) = &previous_record {
@@ -6399,13 +8412,20 @@ TWIN SERVICES:
                 evidence.push("hidden scenarios passed".to_string());
             }
             if !mitigation_steps.is_empty() {
-                evidence.push(format!("{} mitigation step(s) generated", mitigation_steps.len()));
+                evidence.push(format!(
+                    "{} mitigation step(s) generated",
+                    mitigation_steps.len()
+                ));
             }
             if !related_checks.is_empty() {
-                evidence.push(format!("{} mitigation check(s) generated", related_checks.len()));
+                evidence.push(format!(
+                    "{} mitigation check(s) generated",
+                    related_checks.len()
+                ));
             }
             let previous_severity_score = previous_scores.get(&risk.memory_id).copied();
-            let risk_reduced_from_previous = previous_severity_score.map(|previous| risk.severity_score < previous);
+            let risk_reduced_from_previous =
+                previous_severity_score.map(|previous| risk.severity_score < previous);
             entries.push(StaleMemoryMitigationStatusEntry {
                 memory_id: risk.memory_id.clone(),
                 severity: risk.severity.clone(),
@@ -6426,10 +8446,12 @@ TWIN SERVICES:
                     .entries
                     .iter()
                     .filter(|entry| !current_ids.contains(&entry.memory_id))
-                    .map(|entry| format!(
-                        "{} dropped from the stale-risk list after prior status {}",
-                        entry.memory_id, entry.status
-                    ))
+                    .map(|entry| {
+                        format!(
+                            "{} dropped from the stale-risk list after prior status {}",
+                            entry.memory_id, entry.status
+                        )
+                    })
                     .collect::<Vec<_>>()
             })
             .unwrap_or_default();
@@ -6442,8 +8464,11 @@ TWIN SERVICES:
             entries,
             resolved_since_previous,
         };
-        self.write_json_file(&run_dir.join("stale_memory_mitigation_status.json"), &artifact)
-            .await?;
+        self.write_json_file(
+            &run_dir.join("stale_memory_mitigation_status.json"),
+            &artifact,
+        )
+        .await?;
         tokio::fs::write(
             run_dir.join("stale_memory_mitigation_status.md"),
             render_stale_memory_mitigation_status_markdown(&artifact),
@@ -6455,7 +8480,8 @@ TWIN SERVICES:
             let drain = history.records.len() - 50;
             history.records.drain(0..drain);
         }
-        self.sync_project_stale_memory_history(target_source, &history).await?;
+        self.sync_project_stale_memory_history(target_source, &history)
+            .await?;
         Ok(())
     }
 
@@ -6484,7 +8510,8 @@ TWIN SERVICES:
         worker_harness: &WorkerHarnessConfig,
         run_dir: &Path,
     ) -> Result<(RetrieverDispatchArtifact, TrailStateArtifact)> {
-        let packet_raw = tokio::fs::read_to_string(run_dir.join("retriever_task_packet.json")).await?;
+        let packet_raw =
+            tokio::fs::read_to_string(run_dir.join("retriever_task_packet.json")).await?;
         let review_raw = tokio::fs::read_to_string(run_dir.join("trail_review_chain.json")).await?;
         let packet = serde_json::from_str::<WorkerTaskEnvelope>(&packet_raw)?;
         let review = serde_json::from_str::<PlanReviewChainArtifact>(&review_raw)?;
@@ -6504,7 +8531,12 @@ TWIN SERVICES:
         let next_actions = if review.final_execution_plan.is_empty() {
             vec!["No final execution plan steps were recorded yet.".to_string()]
         } else {
-            review.final_execution_plan.iter().take(8).cloned().collect::<Vec<_>>()
+            review
+                .final_execution_plan
+                .iter()
+                .take(8)
+                .cloned()
+                .collect::<Vec<_>>()
         };
 
         let dispatch = RetrieverDispatchArtifact {
@@ -6583,7 +8615,12 @@ TWIN SERVICES:
             *guard = board.clone();
         }
         if let Some(run_dir) = run_dir {
-            self.write_json_file(&run_dir.join("blackboard.json"), board).await?;
+            self.write_json_file(&run_dir.join("blackboard.json"), board)
+                .await?;
+            if !board.run_id.trim().is_empty() {
+                self.sync_checkpoints_for_board(&board.run_id, board)
+                    .await?;
+            }
         }
         Ok(())
     }
@@ -6597,6 +8634,10 @@ TWIN SERVICES:
         drop(board);
         self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
             .await?;
+        if !snapshot.run_id.trim().is_empty() {
+            self.sync_checkpoints_for_board(&snapshot.run_id, &snapshot)
+                .await?;
+        }
         Ok(())
     }
 
@@ -6611,11 +8652,19 @@ TWIN SERVICES:
         if run_dir.exists() {
             self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
                 .await?;
+            if !snapshot.run_id.trim().is_empty() {
+                self.sync_checkpoints_for_board(&snapshot.run_id, &snapshot)
+                    .await?;
+            }
         }
         Ok(())
     }
 
-    async fn attach_lessons_to_blackboard(&self, run_dir: &Path, lessons: &[LessonRecord]) -> Result<()> {
+    async fn attach_lessons_to_blackboard(
+        &self,
+        run_dir: &Path,
+        lessons: &[LessonRecord],
+    ) -> Result<()> {
         if lessons.is_empty() {
             return Ok(());
         }
@@ -6627,7 +8676,12 @@ TWIN SERVICES:
         drop(board);
         self.write_json_file(&run_dir.join("blackboard.json"), &snapshot)
             .await?;
-        self.write_json_file(&run_dir.join("lessons.json"), &lessons).await?;
+        self.write_json_file(&run_dir.join("lessons.json"), &lessons)
+            .await?;
+        if !snapshot.run_id.trim().is_empty() {
+            self.sync_checkpoints_for_board(&snapshot.run_id, &snapshot)
+                .await?;
+        }
         Ok(())
     }
 
@@ -6805,6 +8859,497 @@ TWIN SERVICES:
         Ok(events)
     }
 
+    pub async fn list_phase_attributions_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<PhaseAttributionRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT attribution_id, run_id, episode_id, phase, agent_name, outcome, confidence,
+                   prompt_bundle_fingerprint, prompt_bundle_provider, prompt_bundle_artifact,
+                   pinned_skill_ids, memory_hits, core_memory_ids, project_memory_ids,
+                   relevant_lesson_ids, required_checks, guardrails, query_terms, created_at
+            FROM phase_attributions
+            WHERE run_id = ?1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(PhaseAttributionRecord {
+                attribution_id: row.get::<String, _>("attribution_id"),
+                run_id: row.get::<String, _>("run_id"),
+                episode_id: row.get::<String, _>("episode_id"),
+                phase: row.get::<String, _>("phase"),
+                agent_name: row.get::<String, _>("agent_name"),
+                outcome: row.get::<String, _>("outcome"),
+                confidence: row.get::<Option<f64>, _>("confidence"),
+                prompt_bundle_fingerprint: row
+                    .get::<Option<String>, _>("prompt_bundle_fingerprint"),
+                prompt_bundle_provider: row.get::<Option<String>, _>("prompt_bundle_provider"),
+                prompt_bundle_artifact: row.get::<Option<String>, _>("prompt_bundle_artifact"),
+                pinned_skill_ids: serde_json::from_str(
+                    row.get::<String, _>("pinned_skill_ids").as_str(),
+                )
+                .with_context(|| "parsing phase attribution pinned_skill_ids")?,
+                memory_hits: serde_json::from_str(row.get::<String, _>("memory_hits").as_str())
+                    .with_context(|| "parsing phase attribution memory_hits")?,
+                core_memory_ids: serde_json::from_str(
+                    row.get::<String, _>("core_memory_ids").as_str(),
+                )
+                .with_context(|| "parsing phase attribution core_memory_ids")?,
+                project_memory_ids: serde_json::from_str(
+                    row.get::<String, _>("project_memory_ids").as_str(),
+                )
+                .with_context(|| "parsing phase attribution project_memory_ids")?,
+                relevant_lesson_ids: serde_json::from_str(
+                    row.get::<String, _>("relevant_lesson_ids").as_str(),
+                )
+                .with_context(|| "parsing phase attribution relevant_lesson_ids")?,
+                required_checks: serde_json::from_str(
+                    row.get::<String, _>("required_checks").as_str(),
+                )
+                .with_context(|| "parsing phase attribution required_checks")?,
+                guardrails: serde_json::from_str(row.get::<String, _>("guardrails").as_str())
+                    .with_context(|| "parsing phase attribution guardrails")?,
+                query_terms: serde_json::from_str(row.get::<String, _>("query_terms").as_str())
+                    .with_context(|| "parsing phase attribution query_terms")?,
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+        Ok(records)
+    }
+
+    pub async fn consolidate_run_for_operator(&self, run_id: &str) -> Result<Vec<LessonRecord>> {
+        let run_dir = self.run_dir(run_id);
+        let spec_path = run_dir.join("spec.yaml");
+        if !spec_path.exists() {
+            bail!("run {run_id} is missing spec.yaml; cannot consolidate");
+        }
+
+        let spec_path_string = spec_path.to_string_lossy().to_string();
+        let spec_obj = spec::load_spec(&spec_path_string)?;
+        let lessons = self.consolidate_run(run_id, &spec_obj).await?;
+        self.attach_lessons_to_blackboard(&run_dir, &lessons)
+            .await?;
+        Ok(lessons)
+    }
+
+    pub async fn materialize_run_checkpoints(&self, run_id: &str) -> Result<()> {
+        let blackboard_path = self.run_dir(run_id).join("blackboard.json");
+        if !blackboard_path.exists() {
+            return Ok(());
+        }
+        let raw = tokio::fs::read_to_string(&blackboard_path).await?;
+        let board = serde_json::from_str::<BlackboardState>(&raw)?;
+        self.sync_checkpoints_for_board(run_id, &board).await
+    }
+
+    pub async fn list_run_checkpoints(&self, run_id: &str) -> Result<Vec<RunCheckpointRecord>> {
+        self.materialize_run_checkpoints(run_id).await?;
+
+        let rows = sqlx::query(
+            r#"
+            SELECT checkpoint_id, run_id, phase, agent, checkpoint_type, status, prompt,
+                   context_json, created_at, resolved_at
+            FROM run_checkpoints
+            WHERE run_id = ?1
+            ORDER BY created_at ASC, checkpoint_id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            let checkpoint_id = row.get::<String, _>("checkpoint_id");
+            let answers = self.list_checkpoint_answers(&checkpoint_id).await?;
+            records.push(RunCheckpointRecord {
+                checkpoint_id,
+                run_id: row.get::<String, _>("run_id"),
+                phase: row.get::<Option<String>, _>("phase"),
+                agent: row.get::<Option<String>, _>("agent"),
+                checkpoint_type: row.get::<String, _>("checkpoint_type"),
+                status: row.get::<String, _>("status"),
+                prompt: row.get::<String, _>("prompt"),
+                context_json: serde_json::from_str(row.get::<String, _>("context_json").as_str())?,
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+                resolved_at: row
+                    .get::<Option<String>, _>("resolved_at")
+                    .map(|value| chrono::DateTime::parse_from_rfc3339(&value))
+                    .transpose()?
+                    .map(|value| value.with_timezone(&Utc)),
+                answers,
+            });
+        }
+        Ok(records)
+    }
+
+    pub async fn reply_to_checkpoint(
+        &self,
+        run_id: &str,
+        checkpoint_id: &str,
+        answered_by: &str,
+        answer_text: &str,
+        decision_json: Option<serde_json::Value>,
+        resolve: bool,
+    ) -> Result<RunCheckpointRecord> {
+        self.materialize_run_checkpoints(run_id).await?;
+        let checkpoint = self
+            .get_run_checkpoint(run_id, checkpoint_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("checkpoint {checkpoint_id} not found for run {run_id}")
+            })?;
+
+        let trimmed_answer = answer_text.trim();
+        if trimmed_answer.is_empty() && decision_json.is_none() {
+            bail!("checkpoint replies need answer_text or decision_json");
+        }
+
+        sqlx::query(
+            r#"
+            INSERT INTO checkpoint_answers (answer_id, checkpoint_id, answered_by, answer_text, decision_json, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            "#,
+        )
+        .bind(Uuid::new_v4().to_string())
+        .bind(checkpoint_id)
+        .bind(answered_by)
+        .bind(trimmed_answer)
+        .bind(serde_json::to_string(&decision_json.clone().unwrap_or_else(|| serde_json::json!({})))?)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        let next_status = if resolve { "resolved" } else { "answered" };
+        let resolved_at = if resolve {
+            Some(Utc::now().to_rfc3339())
+        } else {
+            None
+        };
+
+        sqlx::query(
+            "UPDATE run_checkpoints SET status = ?1, resolved_at = ?2 WHERE checkpoint_id = ?3",
+        )
+        .bind(next_status)
+        .bind(resolved_at)
+        .bind(checkpoint_id)
+        .execute(&self.pool)
+        .await?;
+
+        if resolve {
+            self.resolve_checkpoint_on_blackboard(run_id, checkpoint_id)
+                .await?;
+        }
+
+        let phase = checkpoint.phase.as_deref().unwrap_or("interaction");
+        self.audit_checkpoint_activity(
+            run_id,
+            phase,
+            answered_by,
+            if resolve { "resolved" } else { "answered" },
+            &format!(
+                "{} {} checkpoint {}{}",
+                answered_by,
+                if resolve { "resolved" } else { "answered" },
+                checkpoint_id,
+                if trimmed_answer.is_empty() {
+                    String::new()
+                } else {
+                    format!(": {}", trimmed_answer)
+                }
+            ),
+        )
+        .await?;
+
+        self.get_run_checkpoint(run_id, checkpoint_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("checkpoint {checkpoint_id} disappeared after reply"))
+    }
+
+    pub async fn unblock_agent_checkpoints(
+        &self,
+        run_id: &str,
+        agent: &str,
+        checkpoint_id: Option<&str>,
+        answered_by: &str,
+        answer_text: Option<&str>,
+        decision_json: Option<serde_json::Value>,
+    ) -> Result<Vec<RunCheckpointRecord>> {
+        let checkpoints = self
+            .list_run_checkpoints(run_id)
+            .await?
+            .into_iter()
+            .filter(|checkpoint| matches!(checkpoint.status.as_str(), "open" | "answered"))
+            .filter(|checkpoint| {
+                checkpoint
+                    .agent
+                    .as_deref()
+                    .map(|value| value.eq_ignore_ascii_case(agent))
+                    .unwrap_or(false)
+            })
+            .filter(|checkpoint| {
+                checkpoint_id
+                    .map(|expected| checkpoint.checkpoint_id == expected)
+                    .unwrap_or(true)
+            })
+            .collect::<Vec<_>>();
+
+        if checkpoints.is_empty() {
+            if let Some(checkpoint_id) = checkpoint_id {
+                bail!("checkpoint {checkpoint_id} is not open for agent {agent} on run {run_id}");
+            }
+            return Ok(Vec::new());
+        }
+
+        let default_note = format!("Operator unblocked agent {agent}");
+        let answer_text = answer_text.unwrap_or(default_note.as_str());
+        let mut resolved = Vec::new();
+        for checkpoint in checkpoints {
+            resolved.push(
+                self.reply_to_checkpoint(
+                    run_id,
+                    &checkpoint.checkpoint_id,
+                    answered_by,
+                    answer_text,
+                    decision_json.clone(),
+                    true,
+                )
+                .await?,
+            );
+        }
+
+        Ok(resolved)
+    }
+
+    pub async fn audit_checkpoint_activity(
+        &self,
+        run_id: &str,
+        phase: &str,
+        agent: &str,
+        status: &str,
+        message: &str,
+    ) -> Result<()> {
+        let log_path = self.run_log_path(run_id);
+        self.record_event(run_id, None, phase, agent, status, message, &log_path)
+            .await?;
+        Ok(())
+    }
+
+    async fn list_checkpoint_answers(
+        &self,
+        checkpoint_id: &str,
+    ) -> Result<Vec<CheckpointAnswerRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT answer_id, checkpoint_id, answered_by, answer_text, decision_json, created_at
+            FROM checkpoint_answers
+            WHERE checkpoint_id = ?1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(checkpoint_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut answers = Vec::new();
+        for row in rows {
+            let decision_value = serde_json::from_str::<serde_json::Value>(
+                row.get::<String, _>("decision_json").as_str(),
+            )?;
+            answers.push(CheckpointAnswerRecord {
+                answer_id: row.get::<String, _>("answer_id"),
+                checkpoint_id: row.get::<String, _>("checkpoint_id"),
+                answered_by: row.get::<String, _>("answered_by"),
+                answer_text: row.get::<String, _>("answer_text"),
+                decision_json: if decision_value.is_null()
+                    || decision_value == serde_json::json!({})
+                {
+                    None
+                } else {
+                    Some(decision_value)
+                },
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+
+        Ok(answers)
+    }
+
+    async fn get_run_checkpoint(
+        &self,
+        run_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<Option<RunCheckpointRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT checkpoint_id, run_id, phase, agent, checkpoint_type, status, prompt,
+                   context_json, created_at, resolved_at
+            FROM run_checkpoints
+            WHERE run_id = ?1 AND checkpoint_id = ?2
+            "#,
+        )
+        .bind(run_id)
+        .bind(checkpoint_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = row else {
+            return Ok(None);
+        };
+
+        Ok(Some(RunCheckpointRecord {
+            checkpoint_id: row.get::<String, _>("checkpoint_id"),
+            run_id: row.get::<String, _>("run_id"),
+            phase: row.get::<Option<String>, _>("phase"),
+            agent: row.get::<Option<String>, _>("agent"),
+            checkpoint_type: row.get::<String, _>("checkpoint_type"),
+            status: row.get::<String, _>("status"),
+            prompt: row.get::<String, _>("prompt"),
+            context_json: serde_json::from_str(row.get::<String, _>("context_json").as_str())?,
+            created_at: chrono::DateTime::parse_from_rfc3339(
+                row.get::<String, _>("created_at").as_str(),
+            )?
+            .with_timezone(&Utc),
+            resolved_at: row
+                .get::<Option<String>, _>("resolved_at")
+                .map(|value| chrono::DateTime::parse_from_rfc3339(&value))
+                .transpose()?
+                .map(|value| value.with_timezone(&Utc)),
+            answers: self.list_checkpoint_answers(checkpoint_id).await?,
+        }))
+    }
+
+    async fn resolve_checkpoint_on_blackboard(
+        &self,
+        run_id: &str,
+        checkpoint_id: &str,
+    ) -> Result<()> {
+        let checkpoint = self
+            .get_run_checkpoint(run_id, checkpoint_id)
+            .await?
+            .ok_or_else(|| {
+                anyhow::anyhow!("checkpoint {checkpoint_id} not found for run {run_id}")
+            })?;
+        let blocker = checkpoint
+            .context_json
+            .get("blocker")
+            .and_then(|value| value.as_str())
+            .map(|value| value.to_string());
+        let blackboard_path = self.run_dir(run_id).join("blackboard.json");
+        if !blackboard_path.exists() {
+            return Ok(());
+        }
+        let raw = tokio::fs::read_to_string(&blackboard_path).await?;
+        let mut board = serde_json::from_str::<BlackboardState>(&raw)?;
+        if let Some(blocker) = blocker.as_deref() {
+            remove_blocker(&mut board, blocker);
+        }
+        self.sync_blackboard(&board, Some(&self.run_dir(run_id)))
+            .await
+    }
+
+    async fn sync_checkpoints_for_board(
+        &self,
+        run_id: &str,
+        board: &BlackboardState,
+    ) -> Result<()> {
+        let desired = board
+            .open_blockers
+            .iter()
+            .map(|blocker| checkpoint_draft(run_id, board, blocker))
+            .collect::<Vec<_>>();
+        let desired_ids = desired
+            .iter()
+            .map(|draft| draft.checkpoint_id.clone())
+            .collect::<HashSet<_>>();
+
+        let rows =
+            sqlx::query("SELECT checkpoint_id, status FROM run_checkpoints WHERE run_id = ?1")
+                .bind(run_id)
+                .fetch_all(&self.pool)
+                .await?;
+
+        let mut existing_status = HashMap::new();
+        for row in rows {
+            existing_status.insert(
+                row.get::<String, _>("checkpoint_id"),
+                row.get::<String, _>("status"),
+            );
+        }
+
+        for draft in desired {
+            let next_status = match existing_status
+                .get(&draft.checkpoint_id)
+                .map(|value| value.as_str())
+            {
+                Some("answered") => "answered",
+                Some("open") => "open",
+                _ => "open",
+            };
+            sqlx::query(
+                r#"
+                INSERT INTO run_checkpoints (
+                    checkpoint_id, run_id, phase, agent, checkpoint_type, status, prompt,
+                    context_json, created_at, resolved_at
+                ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+                ON CONFLICT(checkpoint_id) DO UPDATE SET
+                    phase = excluded.phase,
+                    agent = excluded.agent,
+                    checkpoint_type = excluded.checkpoint_type,
+                    status = excluded.status,
+                    prompt = excluded.prompt,
+                    context_json = excluded.context_json,
+                    resolved_at = excluded.resolved_at
+                "#,
+            )
+            .bind(&draft.checkpoint_id)
+            .bind(run_id)
+            .bind(&draft.phase)
+            .bind(&draft.agent)
+            .bind(&draft.checkpoint_type)
+            .bind(next_status)
+            .bind(&draft.prompt)
+            .bind(serde_json::to_string(&draft.context_json)?)
+            .bind(Utc::now().to_rfc3339())
+            .bind(Option::<String>::None)
+            .execute(&self.pool)
+            .await?;
+        }
+
+        for (checkpoint_id, status) in existing_status {
+            if desired_ids.contains(&checkpoint_id) {
+                continue;
+            }
+            if matches!(status.as_str(), "open" | "answered") {
+                sqlx::query(
+                    "UPDATE run_checkpoints SET status = 'resolved', resolved_at = ?1 WHERE checkpoint_id = ?2",
+                )
+                .bind(Utc::now().to_rfc3339())
+                .bind(checkpoint_id)
+                .execute(&self.pool)
+                .await?;
+            }
+        }
+
+        Ok(())
+    }
+
     pub async fn list_lessons(&self) -> Result<Vec<LessonRecord>> {
         let rows = sqlx::query(
             "SELECT lesson_id, source_episode, pattern, intervention, tags, strength, recall_count, last_recalled, created_at FROM lessons ORDER BY created_at ASC",
@@ -6876,10 +9421,7 @@ TWIN SERVICES:
             let lesson = LessonRecord {
                 lesson_id: lesson_id.clone(),
                 source_episode: Some(episode.episode_id.clone()),
-                pattern: format!(
-                    "Repeated failure pattern in {}: {}",
-                    episode.phase, pattern
-                ),
+                pattern: format!("Repeated failure pattern in {}: {}", episode.phase, pattern),
                 intervention: infer_intervention(&events),
                 tags: vec![
                     "lesson".to_string(),
@@ -6926,6 +9468,7 @@ Observed pattern: {}",
                 features: vec![],
                 agent_events: events.clone(),
                 tool_events: vec![],
+                phase_attributions: Vec::new(),
                 twin_env: None,
                 validation: None,
                 scenarios: None,
@@ -6934,6 +9477,15 @@ Observed pattern: {}",
             };
             let _ = self.coobie.ingest_episode(&intake_episode).await;
         }
+
+        self.consolidate_phase_attribution_lessons(
+            run_id,
+            spec_obj,
+            target_source.as_ref(),
+            &mut known_lesson_ids,
+            &mut new_lessons,
+        )
+        .await?;
 
         self.consolidate_exploration_artifacts(
             run_id,
@@ -6945,6 +9497,209 @@ Observed pattern: {}",
         .await?;
 
         Ok(new_lessons)
+    }
+
+    async fn consolidate_phase_attribution_lessons(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        target_source: Option<&TargetSourceMetadata>,
+        known_lesson_ids: &mut HashSet<String>,
+        new_lessons: &mut Vec<LessonRecord>,
+    ) -> Result<()> {
+        let attributions = self.list_phase_attributions_for_run(run_id).await?;
+        if attributions.is_empty() {
+            return Ok(());
+        }
+
+        let successful_run = attributions
+            .iter()
+            .any(|record| record.phase == "validation" && record.outcome == "success")
+            && attributions
+                .iter()
+                .any(|record| record.phase == "hidden_scenarios" && record.outcome == "success");
+
+        for record in attributions {
+            let outcome = record.outcome.to_ascii_lowercase();
+            if outcome == "success" && !successful_run {
+                continue;
+            }
+            if !matches!(outcome.as_str(), "success" | "failure" | "blocked") {
+                continue;
+            }
+
+            let provider = record
+                .prompt_bundle_provider
+                .clone()
+                .unwrap_or_else(|| "unresolved".to_string());
+            let pinned_skill_ids_json = serde_json::to_string(&record.pinned_skill_ids)?;
+            let supporting_rows = sqlx::query(
+                r#"
+                SELECT DISTINCT run_id
+                FROM phase_attributions
+                WHERE run_id != ?1
+                  AND phase = ?2
+                  AND agent_name = ?3
+                  AND outcome = ?4
+                  AND COALESCE(prompt_bundle_provider, '') = ?5
+                  AND pinned_skill_ids = ?6
+                ORDER BY created_at DESC
+                LIMIT 6
+                "#,
+            )
+            .bind(run_id)
+            .bind(&record.phase)
+            .bind(&record.agent_name)
+            .bind(&outcome)
+            .bind(&provider)
+            .bind(&pinned_skill_ids_json)
+            .fetch_all(&self.pool)
+            .await?;
+            if supporting_rows.is_empty() {
+                continue;
+            }
+            let supporting_runs = supporting_rows
+                .into_iter()
+                .map(|row| row.get::<String, _>("run_id"))
+                .collect::<Vec<_>>();
+
+            let skill_label = if record.pinned_skill_ids.is_empty() {
+                "no-pinned-skills".to_string()
+            } else {
+                record.pinned_skill_ids.join("+")
+            };
+            let lesson_id = format!(
+                "lesson-phase-pattern-{}",
+                stable_key_fragment(&format!(
+                    "{}|{}|{}|{}|{}",
+                    record.phase, record.agent_name, outcome, provider, skill_label
+                ))
+            );
+            if known_lesson_ids.contains(&lesson_id) {
+                continue;
+            }
+
+            let occurrence_count = supporting_runs.len() + 1;
+            let pattern = if outcome == "success" {
+                format!(
+                    "Repeatable success pattern in {} / {} via {} with {}",
+                    record.phase, record.agent_name, provider, skill_label
+                )
+            } else {
+                format!(
+                    "Repeatable failure pattern in {} / {} via {} with {}",
+                    record.phase, record.agent_name, provider, skill_label
+                )
+            };
+            let intervention = if outcome == "success" {
+                Some(
+                    "Reuse this provider and pinned-skill mix when similar work appears again."
+                        .to_string(),
+                )
+            } else {
+                Some(format!(
+                    "Inspect the {} / {} prompt bundle, provider route, pinned skills, and required checks before rerunning this phase.",
+                    record.phase, record.agent_name
+                ))
+            };
+            let mut tags = vec![
+                "lesson".to_string(),
+                "phase-attribution".to_string(),
+                "project-memory".to_string(),
+                record.phase.clone(),
+                record.agent_name.clone(),
+                outcome.clone(),
+                provider.to_ascii_lowercase(),
+            ];
+            if outcome == "success" {
+                tags.push("success-pattern".to_string());
+            } else {
+                tags.push("failure-pattern".to_string());
+                tags.push("causal".to_string());
+            }
+            let lesson = LessonRecord {
+                lesson_id,
+                source_episode: Some(record.episode_id.clone()),
+                pattern,
+                intervention,
+                tags,
+                strength: if outcome == "success" {
+                    (0.8 + supporting_runs.len() as f64 * 0.1).min(1.5)
+                } else {
+                    (1.0 + supporting_runs.len() as f64 * 0.15).min(2.0)
+                },
+                recall_count: 0,
+                last_recalled: None,
+                created_at: Utc::now(),
+            };
+            let lesson_body = format!(
+                "Occurrences: {}
+Supporting runs: {}
+Provider route: {}
+Prompt bundle fingerprint: {}
+Prompt bundle artifact: {}
+Pinned skills: {}
+Required checks: {}
+Guardrails: {}
+Memory ids: {}
+Relevant lesson ids: {}
+Query terms: {}",
+                occurrence_count,
+                supporting_runs.join(", "),
+                provider,
+                record
+                    .prompt_bundle_fingerprint
+                    .as_deref()
+                    .unwrap_or("none recorded"),
+                record
+                    .prompt_bundle_artifact
+                    .as_deref()
+                    .unwrap_or("none recorded"),
+                if record.pinned_skill_ids.is_empty() {
+                    "none".to_string()
+                } else {
+                    record.pinned_skill_ids.join(" | ")
+                },
+                if record.required_checks.is_empty() {
+                    "none".to_string()
+                } else {
+                    record.required_checks.join(" | ")
+                },
+                if record.guardrails.is_empty() {
+                    "none".to_string()
+                } else {
+                    record.guardrails.join(" | ")
+                },
+                record
+                    .project_memory_ids
+                    .iter()
+                    .chain(record.core_memory_ids.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(" | "),
+                if record.relevant_lesson_ids.is_empty() {
+                    "none".to_string()
+                } else {
+                    record.relevant_lesson_ids.join(" | ")
+                },
+                if record.query_terms.is_empty() {
+                    "none".to_string()
+                } else {
+                    record.query_terms.join(" | ")
+                },
+            );
+            self.persist_lesson(
+                lesson,
+                lesson_body,
+                target_source,
+                Some(spec_obj),
+                known_lesson_ids,
+                new_lessons,
+            )
+            .await?;
+        }
+
+        Ok(())
     }
 
     async fn persist_lesson(
@@ -6968,11 +9723,18 @@ Observed pattern: {}",
                 None,
                 Vec::new(),
                 vec![
-                    "implementation behavior, oracle semantics, or runtime assumptions change".to_string(),
+                    "implementation behavior, oracle semantics, or runtime assumptions change"
+                        .to_string(),
                 ],
-                spec_obj.map(collect_spec_provenance_paths).unwrap_or_default(),
-                spec_obj.map(collect_spec_code_under_test_paths).unwrap_or_default(),
-                spec_obj.map(collect_spec_provenance_surfaces).unwrap_or_default(),
+                spec_obj
+                    .map(collect_spec_provenance_paths)
+                    .unwrap_or_default(),
+                spec_obj
+                    .map(collect_spec_code_under_test_paths)
+                    .unwrap_or_default(),
+                spec_obj
+                    .map(collect_spec_provenance_surfaces)
+                    .unwrap_or_default(),
             );
             self.store_project_memory_entry(
                 target_source,
@@ -6983,7 +9745,8 @@ Observed pattern: {}",
                 provenance.clone(),
             )
             .await?;
-            self.reconcile_project_memory_statuses(target_source, &lesson).await?;
+            self.reconcile_project_memory_statuses(target_source, &lesson)
+                .await?;
         } else {
             self.memory_store
                 .store_with_metadata(
@@ -7040,7 +9803,11 @@ Observed pattern: {}",
         let store = self.project_memory_store(target_source).await?;
         let entries = store.list_entries().await?;
         let lesson_key = normalize_memory_text(&lesson.pattern);
-        let lesson_intervention = lesson.intervention.clone().unwrap_or_default().to_lowercase();
+        let lesson_intervention = lesson
+            .intervention
+            .clone()
+            .unwrap_or_default()
+            .to_lowercase();
 
         for entry in entries {
             if entry.id == lesson.lesson_id || !entry.tags.iter().any(|tag| tag == "lesson") {
@@ -7051,7 +9818,10 @@ Observed pattern: {}",
             let entry_key = normalize_memory_text(&entry.summary);
             let same_pattern = !entry_key.is_empty() && entry_key == lesson_key;
 
-            if same_pattern && !lesson_intervention.is_empty() && !entry.content.to_lowercase().contains(&lesson_intervention) {
+            if same_pattern
+                && !lesson_intervention.is_empty()
+                && !entry.content.to_lowercase().contains(&lesson_intervention)
+            {
                 store
                     .annotate_entry_status(&entry.id, "superseded", Some(&lesson.lesson_id))
                     .await?;
@@ -7062,7 +9832,8 @@ Observed pattern: {}",
             }
         }
 
-        self.write_project_memory_status_snapshot(target_source, &store).await?;
+        self.write_project_memory_status_snapshot(target_source, &store)
+            .await?;
         Ok(())
     }
 
@@ -7172,12 +9943,17 @@ Open questions: {}",
         let relevant = registry
             .entries
             .into_iter()
-            .filter(|entry| entry.spec_id == run_record.spec_id && entry.product == run_record.product)
+            .filter(|entry| {
+                entry.spec_id == run_record.spec_id && entry.product == run_record.product
+            })
             .collect::<Vec<_>>();
         let mut grouped = HashMap::<String, Vec<DeadEndRegistryEntry>>::new();
         for entry in relevant {
             grouped
-                .entry(format!("{}|{}|{}", entry.phase, entry.agent, entry.strategy))
+                .entry(format!(
+                    "{}|{}|{}",
+                    entry.phase, entry.agent, entry.strategy
+                ))
                 .or_default()
                 .push(entry);
         }
@@ -7185,7 +9961,10 @@ Open questions: {}",
             if entries.len() < 2 {
                 continue;
             }
-            let latest = entries.last().cloned().unwrap_or_else(|| entries[0].clone());
+            let latest = entries
+                .last()
+                .cloned()
+                .unwrap_or_else(|| entries[0].clone());
             let lesson = LessonRecord {
                 lesson_id: format!("lesson-dead-end-{}-{}", run_id, stable_key_fragment(&key)),
                 source_episode: None,
@@ -7218,7 +9997,11 @@ Run ids: {}",
                 latest.failure_constraint,
                 latest.surviving_structure,
                 latest.reformulation,
-                entries.iter().map(|entry| entry.run_id.clone()).collect::<Vec<_>>().join(", "),
+                entries
+                    .iter()
+                    .map(|entry| entry.run_id.clone())
+                    .collect::<Vec<_>>()
+                    .join(", "),
             );
             self.persist_lesson(
                 lesson,
@@ -7305,8 +10088,10 @@ Run ids: {}",
 
         let summary = render_bundle_summary(&run, &events);
         tokio::fs::write(bundle_dir.join("SUMMARY.txt"), summary).await?;
-        self.write_json_file(&bundle_dir.join("run.json"), &run).await?;
-        self.write_json_file(&bundle_dir.join("events.json"), &events).await?;
+        self.write_json_file(&bundle_dir.join("run.json"), &run)
+            .await?;
+        self.write_json_file(&bundle_dir.join("events.json"), &events)
+            .await?;
 
         let run_dir = self.run_dir(run_id);
         if run_dir.exists() {
@@ -7322,8 +10107,11 @@ Run ids: {}",
         let staged_product = self.workspace_root(run_id).join("product");
         if staged_product.exists() {
             let manifest = list_relative_files(&staged_product, &staged_product)?;
-            tokio::fs::write(bundle_dir.join("workspace_manifest.txt"), manifest.join("\n"))
-                .await?;
+            tokio::fs::write(
+                bundle_dir.join("workspace_manifest.txt"),
+                manifest.join("\n"),
+            )
+            .await?;
         }
 
         Ok(bundle_dir)
@@ -7584,38 +10372,99 @@ fn infer_domain_signals(
         spec_obj.purpose,
         target_source.label,
         target_source.source_kind,
-        spec_obj.scope.join("
-"),
-        spec_obj.constraints.join("
-"),
-        spec_obj.inputs.join("
-"),
-        spec_obj.outputs.join("
-"),
-        spec_obj.acceptance_criteria.join("
-"),
-        spec_obj.dependencies.join("
-"),
-        spec_obj.performance_expectations.join("
-"),
-        spec_obj.security_expectations.join("
-"),
-        query_terms.join("
-"),
+        spec_obj.scope.join(
+            "
+"
+        ),
+        spec_obj.constraints.join(
+            "
+"
+        ),
+        spec_obj.inputs.join(
+            "
+"
+        ),
+        spec_obj.outputs.join(
+            "
+"
+        ),
+        spec_obj.acceptance_criteria.join(
+            "
+"
+        ),
+        spec_obj.dependencies.join(
+            "
+"
+        ),
+        spec_obj.performance_expectations.join(
+            "
+"
+        ),
+        spec_obj.security_expectations.join(
+            "
+"
+        ),
+        query_terms.join(
+            "
+"
+        ),
     )
     .to_lowercase();
 
     let signal_map = [
-        (["sensor", "telemetry", "sampling", "daq"].as_slice(), "high_speed_sensing"),
-        (["plc", "opc ua", "modbus", "ethernet/ip", "fieldbus"].as_slice(), "plc_control"),
-        (["histori", "time series", "pi system"].as_slice(), "historian_integration"),
-        (["scada", "hmi", "alarm", "operator"].as_slice(), "scada_operations"),
-        (["simulator", "digital twin", "emulator", "hardware in the loop"].as_slice(), "simulation"),
-        (["analytics", "model", "inference", "prediction"].as_slice(), "analytics"),
-        (["latency", "throughput", "real-time", "jitter", "cycle time"].as_slice(), "timing_sensitive"),
-        (["fail-safe", "interlock", "shutdown", "degraded mode", "safety"].as_slice(), "safety_critical"),
-        (["gmp", "gxp", "21 cfr part 11", "audit trail", "validation"].as_slice(), "regulated_environment"),
-        (["batch", "recipe", "traceability", "electronic record"].as_slice(), "manufacturing_execution"),
+        (
+            ["sensor", "telemetry", "sampling", "daq"].as_slice(),
+            "high_speed_sensing",
+        ),
+        (
+            ["plc", "opc ua", "modbus", "ethernet/ip", "fieldbus"].as_slice(),
+            "plc_control",
+        ),
+        (
+            ["histori", "time series", "pi system"].as_slice(),
+            "historian_integration",
+        ),
+        (
+            ["scada", "hmi", "alarm", "operator"].as_slice(),
+            "scada_operations",
+        ),
+        (
+            [
+                "simulator",
+                "digital twin",
+                "emulator",
+                "hardware in the loop",
+            ]
+            .as_slice(),
+            "simulation",
+        ),
+        (
+            ["analytics", "model", "inference", "prediction"].as_slice(),
+            "analytics",
+        ),
+        (
+            ["latency", "throughput", "real-time", "jitter", "cycle time"].as_slice(),
+            "timing_sensitive",
+        ),
+        (
+            [
+                "fail-safe",
+                "interlock",
+                "shutdown",
+                "degraded mode",
+                "safety",
+            ]
+            .as_slice(),
+            "safety_critical",
+        ),
+        (
+            ["gmp", "gxp", "21 cfr part 11", "audit trail", "validation"].as_slice(),
+            "regulated_environment",
+        ),
+        (
+            ["batch", "recipe", "traceability", "electronic record"].as_slice(),
+            "manufacturing_execution",
+        ),
     ];
 
     for (needles, signal) in signal_map {
@@ -7639,13 +10488,19 @@ fn build_application_risks(
 ) -> Vec<String> {
     let mut risks = Vec::new();
 
-    if domain_signals.iter().any(|signal| signal == "timing_sensitive") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "timing_sensitive")
+    {
         risks.push("Throughput, latency, or jitter budgets may be violated without explicit buffering and backpressure handling.".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "analytics") {
         risks.push("Analytics outputs may look plausible while operating on stale, replayed, or low-quality plant data.".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "manufacturing_execution") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "manufacturing_execution")
+    {
         risks.push("Batch, recipe, and traceability state can drift if workflow transitions are not modeled as explicit state machines.".to_string());
     }
     if has_project_component_role(spec_obj, "reference_oracle") {
@@ -7657,12 +10512,17 @@ fn build_application_risks(
     if spec_obj.security_expectations.is_empty() {
         risks.push("Security expectations are underspecified, which leaves device trust, credential handling, and operator access ambiguous.".to_string());
     }
-    if memory_hits.iter().any(|hit| hit.contains("No memories found")) {
+    if memory_hits
+        .iter()
+        .any(|hit| hit.contains("No memories found"))
+    {
         risks.push("Coobie found little directly reusable prior context, so assumptions need stronger explicit checks and telemetry.".to_string());
     }
     if let Some(blueprint) = &spec_obj.scenario_blueprint {
         if !blueprint.coobie_memory_topics.is_empty()
-            && memory_hits.iter().any(|hit| hit.contains("No memories found"))
+            && memory_hits
+                .iter()
+                .any(|hit| hit.contains("No memories found"))
         {
             risks.push(format!(
                 "The run declares project memory topics ({}) but Coobie did not retrieve strong context yet, so the pack is at risk of relearning known behavior the hard way.",
@@ -7686,16 +10546,25 @@ fn build_environment_risks(spec_obj: &Spec, domain_signals: &[String]) -> Vec<St
     let mut risks = Vec::new();
     let dependency_text = spec_obj.dependencies.join(" ").to_lowercase();
 
-    if domain_signals.iter().any(|signal| signal == "high_speed_sensing") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "high_speed_sensing")
+    {
         risks.push("High-rate sensor ingest can drop samples or reorder packets unless the twin exercises burst conditions and queue saturation.".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "plc_control") {
         risks.push("PLC handshakes, state transitions, and command acknowledgement timing can diverge from nominal flows on the shop floor.".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "historian_integration") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "historian_integration")
+    {
         risks.push("Historian lag, replay, and tag-quality changes can create false confidence if only happy-path reads are simulated.".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "scada_operations") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "scada_operations")
+    {
         risks.push("Alarm acknowledgement, operator overrides, and stale HMI tag quality need environment-level checks, not just unit tests.".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "simulation") {
@@ -7723,19 +10592,29 @@ fn build_regulatory_considerations(spec_obj: &Spec, domain_signals: &[String]) -
 {}
 {}
 {}",
-        spec_obj.constraints.join("
-"),
-        spec_obj.acceptance_criteria.join("
-"),
-        spec_obj.security_expectations.join("
-"),
-        spec_obj.outputs.join("
-"),
+        spec_obj.constraints.join(
+            "
+"
+        ),
+        spec_obj.acceptance_criteria.join(
+            "
+"
+        ),
+        spec_obj.security_expectations.join(
+            "
+"
+        ),
+        spec_obj.outputs.join(
+            "
+"
+        ),
         spec_obj.purpose,
     )
     .to_lowercase();
 
-    if domain_signals.iter().any(|signal| signal == "regulated_environment")
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "regulated_environment")
         || contains_any(&corpus, &["gmp", "gxp", "21 cfr part 11", "audit trail"])
     {
         items.push("Treat the run as potentially regulated: preserve audit trails, user attribution, and evidence needed for validation packages.".to_string());
@@ -7764,13 +10643,19 @@ fn build_recommended_guardrails(
         "Capture evidence artifacts for each critical validation claim instead of relying on narrative confidence.".to_string(),
     ];
 
-    if domain_signals.iter().any(|signal| signal == "timing_sensitive") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "timing_sensitive")
+    {
         guardrails.push("Model latency budgets, queue limits, retry windows, and timeout behavior as first-class constraints.".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "plc_control") {
         guardrails.push("Do not assume PLC writes succeeded until acknowledgement, state echo, and timeout handling are explicitly checked.".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "regulated_environment") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "regulated_environment")
+    {
         guardrails.push("Preserve auditability: configuration changes, operator actions, and derived records should all produce reviewable evidence.".to_string());
     }
     if has_project_component_role(spec_obj, "reference_oracle") {
@@ -7790,7 +10675,10 @@ fn build_recommended_guardrails(
             guardrails.push("Keep Harkonnen coordination state separate from product runtime APIs; Ash may read product surfaces, but the pack still coordinates through the Harkonnen backend.".to_string());
         }
     }
-    if memory_hits.iter().any(|hit| hit.contains("No memories found")) {
+    if memory_hits
+        .iter()
+        .any(|hit| hit.contains("No memories found"))
+    {
         guardrails.push("When prior memory is weak, convert assumptions into explicit open questions and required checks before implementation proceeds.".to_string());
     }
     if let Some(cause) = prior_causes.first() {
@@ -7820,7 +10708,10 @@ fn build_recommended_guardrails(
         guardrails.push("Do not repeat a recorded dead-end strategy unless this run introduces new evidence that explicitly changes the constraint.".to_string());
     }
     if relevant_lessons.iter().any(|lesson| {
-        lesson.tags.iter().any(|tag| tag == "residue" || tag == "exploration")
+        lesson
+            .tags
+            .iter()
+            .any(|tag| tag == "residue" || tag == "exploration")
     }) {
         guardrails.push("Record each serious attempt with strategy, failure constraint, surviving structure, and reformulation so Coobie can compare retries structurally.".to_string());
     }
@@ -7840,17 +10731,32 @@ fn build_required_checks(
         "The twin narrative must state which external systems are simulated, stubbed, or still missing.".to_string(),
     ];
 
-    if domain_signals.iter().any(|signal| signal == "high_speed_sensing") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "high_speed_sensing")
+    {
         checks.push("Exercise burst input conditions and verify sample loss, ordering, and backpressure behavior.".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "plc_control") {
-        checks.push("Verify PLC command/acknowledgement, heartbeat loss, and safe timeout behavior.".to_string());
+        checks.push(
+            "Verify PLC command/acknowledgement, heartbeat loss, and safe timeout behavior."
+                .to_string(),
+        );
     }
-    if domain_signals.iter().any(|signal| signal == "historian_integration") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "historian_integration")
+    {
         checks.push("Test historian lag, stale-tag quality, and replay behavior before trusting analytics outputs.".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "scada_operations") {
-        checks.push("Validate alarm semantics, acknowledgement flow, and operator-visible degraded modes.".to_string());
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "scada_operations")
+    {
+        checks.push(
+            "Validate alarm semantics, acknowledgement flow, and operator-visible degraded modes."
+                .to_string(),
+        );
     }
     if domain_signals.iter().any(|signal| signal == "simulation") {
         checks.push("Compare simulator assumptions against at least one declared real-world timing or protocol constraint.".to_string());
@@ -7882,7 +10788,10 @@ fn build_required_checks(
         checks.push("Clarify rollback and degraded-mode expectations before relying on destructive or stateful flows.".to_string());
     }
     if relevant_lessons.iter().any(|lesson| {
-        lesson.tags.iter().any(|tag| tag == "residue" || tag == "exploration")
+        lesson
+            .tags
+            .iter()
+            .any(|tag| tag == "residue" || tag == "exploration")
     }) {
         checks.push("Write or update exploration_log.json with strategy, failure constraint, surviving structure, reformulation, artifacts, and open questions before the run closes.".to_string());
     }
@@ -7932,7 +10841,11 @@ fn build_stale_memory_mitigation_plan(risks: &[ProjectResumeRisk]) -> Vec<String
                 risk.memory_id
             ));
         }
-        if risk.status.as_deref().is_some_and(|status| matches!(status, "superseded" | "challenged")) {
+        if risk
+            .status
+            .as_deref()
+            .is_some_and(|status| matches!(status, "superseded" | "challenged"))
+        {
             steps.push(format!(
                 "Find the newer evidence that replaces or challenges memory {} before planning continues.",
                 risk.memory_id
@@ -7992,7 +10905,11 @@ fn apply_stale_memory_mitigations(
                 risk.memory_id
             ));
         }
-        if risk.status.as_deref().is_some_and(|status| matches!(status, "superseded" | "challenged")) {
+        if risk
+            .status
+            .as_deref()
+            .is_some_and(|status| matches!(status, "superseded" | "challenged"))
+        {
             recommended_guardrails.push(format!(
                 "Do not rely on memory {} as settled truth until the newer contradicting evidence is reviewed.",
                 risk.memory_id
@@ -8167,11 +11084,17 @@ fn apply_evidence_exemplar_context(
 
     for citation in pattern_citations.iter().take(3) {
         push_unique(query_terms, &citation.summary);
-        push_unique(query_terms, &format!("pattern exemplar {}", citation.summary));
+        push_unique(
+            query_terms,
+            &format!("pattern exemplar {}", citation.summary),
+        );
     }
     for citation in causal_citations.iter().take(3) {
         push_unique(query_terms, &citation.summary);
-        push_unique(query_terms, &format!("causal exemplar {}", citation.summary));
+        push_unique(
+            query_terms,
+            &format!("causal exemplar {}", citation.summary),
+        );
     }
 
     if !pattern_citations.is_empty() {
@@ -8237,17 +11160,26 @@ fn build_coobie_open_questions(
     if domain_signals.iter().any(|signal| signal == "plc_control") {
         questions.push("Which PLC protocols, command acknowledgement semantics, and timeout budgets are expected on the floor?".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "high_speed_sensing") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "high_speed_sensing")
+    {
         questions.push("What sampling rates, burst sizes, and loss tolerances define acceptable behavior for incoming sensor data?".to_string());
     }
-    if domain_signals.iter().any(|signal| signal == "historian_integration") {
+    if domain_signals
+        .iter()
+        .any(|signal| signal == "historian_integration")
+    {
         questions.push("What historian freshness, replay, and tag-quality guarantees must the application respect?".to_string());
     }
     if domain_signals.iter().any(|signal| signal == "simulation") {
         questions.push("Which simulator behaviors are trusted representations of the plant, and which are convenience stubs only?".to_string());
     }
     if let Some(blueprint) = &spec_obj.scenario_blueprint {
-        if blueprint.pattern.eq_ignore_ascii_case("reference_oracle_regression") {
+        if blueprint
+            .pattern
+            .eq_ignore_ascii_case("reference_oracle_regression")
+        {
             if blueprint.hidden_oracles.is_empty() {
                 questions.push("Which external oracle or known-good reference implementation defines the hidden acceptance behavior for this run?".to_string());
             }
@@ -8269,7 +11201,10 @@ fn build_coobie_open_questions(
         questions.push("Which regulatory evidence expectations, such as GMP validation artifacts or audit trails, must this run preserve?".to_string());
     }
     if spec_obj.performance_expectations.is_empty() {
-        questions.push("What performance envelope should the system honor under realistic plant load?".to_string());
+        questions.push(
+            "What performance envelope should the system honor under realistic plant load?"
+                .to_string(),
+        );
     }
 
     questions.dedup();
@@ -8283,7 +11218,9 @@ fn render_target_git_summary(git: Option<&TargetGitMetadata>) -> String {
             git.branch.as_deref().unwrap_or("unknown"),
             git.commit.as_deref().unwrap_or("unknown"),
             git.remote_origin.as_deref().unwrap_or("unknown"),
-            git.clean.map(|value| if value { "true" } else { "false" }).unwrap_or("unknown"),
+            git.clean
+                .map(|value| if value { "true" } else { "false" })
+                .unwrap_or("unknown"),
             git.changed_paths.len(),
         ),
         None => "git metadata unavailable".to_string(),
@@ -8296,6 +11233,7 @@ fn build_worker_task_envelope(
     target_source: &TargetSourceMetadata,
     worker_harness: &WorkerHarnessConfig,
     briefing: &CoobieBriefing,
+    repo_root: &Path,
     workspace_root: &Path,
     run_dir: &Path,
     staged_product: &Path,
@@ -8305,7 +11243,12 @@ fn build_worker_task_envelope(
     allowed_paths.push(run_dir.join("spec.yaml").display().to_string());
     allowed_paths.push(run_dir.join("intent.json").display().to_string());
     allowed_paths.push(run_dir.join("coobie_briefing.json").display().to_string());
-    allowed_paths.push(run_dir.join("coobie_preflight_response.md").display().to_string());
+    allowed_paths.push(
+        run_dir
+            .join("coobie_preflight_response.md")
+            .display()
+            .to_string(),
+    );
 
     for entry in context_bundle
         .context_entries
@@ -8330,7 +11273,10 @@ fn build_worker_task_envelope(
     }
 
     let mut denied_paths = vec![
-        workspace_root.join("factory/scenarios/hidden").display().to_string(),
+        workspace_root
+            .join("factory/scenarios/hidden")
+            .display()
+            .to_string(),
         workspace_root.join("factory/memory").display().to_string(),
         Path::new(&target_source.source_path)
             .join(".harkonnen/project-memory")
@@ -8356,6 +11302,7 @@ fn build_worker_task_envelope(
     } else {
         worker_harness.return_artifacts.clone()
     };
+    let editable_paths = collect_staged_code_under_test_paths(spec_obj, target_source, repo_root);
 
     WorkerTaskEnvelope {
         job_id: run_id.to_string(),
@@ -8388,6 +11335,8 @@ fn build_worker_task_envelope(
         preferred_commands: briefing.preferred_forge_commands.clone(),
         guardrails: briefing.recommended_guardrails.clone(),
         required_checks: briefing.required_checks.clone(),
+        llm_edits: worker_harness.llm_edits,
+        editable_paths,
     }
 }
 
@@ -8588,6 +11537,12 @@ fn render_worker_task_envelope_markdown(envelope: &WorkerTaskEnvelope) -> String
 
 ## Required Checks
 {}
+
+## LLM Edits
+- Enabled: {}
+
+## Editable Paths
+{}
 ",
         envelope.job_id,
         envelope.spec_id,
@@ -8631,6 +11586,8 @@ fn render_worker_task_envelope_markdown(envelope: &WorkerTaskEnvelope) -> String
         ),
         render_list(&envelope.guardrails, "No guardrails recorded."),
         render_list(&envelope.required_checks, "No required checks recorded."),
+        if envelope.llm_edits { "true" } else { "false" },
+        render_list(&envelope.editable_paths, "No editable paths were resolved."),
     )
 }
 
@@ -8652,9 +11609,11 @@ fn render_plan_review_chain_markdown(chain: &PlanReviewChainArtifact) -> String 
             )
         })
         .collect::<Vec<_>>()
-        .join("
+        .join(
+            "
 
-");
+",
+        );
     format!(
         "# Trail Review Chain
 
@@ -8690,7 +11649,6 @@ fn fallback_worker_value(value: &str, fallback: &str) -> String {
     }
 }
 
-
 fn build_retriever_command_plan(
     spec_obj: &Spec,
     staged_product: &Path,
@@ -8706,7 +11664,8 @@ fn build_retriever_command_plan(
             label: trimmed.to_string(),
             raw_command: trimmed.to_string(),
             source: "spec.test_commands".to_string(),
-            rationale: "The spec declared this command as visible execution evidence for the run.".to_string(),
+            rationale: "The spec declared this command as visible execution evidence for the run."
+                .to_string(),
         });
     }
     if !commands.is_empty() {
@@ -8795,11 +11754,14 @@ fn build_retriever_command_plan(
             label: "go test ./...".to_string(),
             raw_command: "go test ./...".to_string(),
             source: "manifest_inference".to_string(),
-            rationale: "go.mod detected; the forge uses go test as bounded visible execution evidence.".to_string(),
+            rationale:
+                "go.mod detected; the forge uses go test as bounded visible execution evidence."
+                    .to_string(),
         });
     } else if pyproject_toml.exists() || requirements_txt.exists() {
         if let Some(python_command) = detect_python_command() {
-            let run_pytest = staged_product.join("tests").exists() || pyproject_mentions_pytest(&pyproject_toml)?;
+            let run_pytest = staged_product.join("tests").exists()
+                || pyproject_mentions_pytest(&pyproject_toml)?;
             let raw_command = if run_pytest {
                 if command_available("pytest") {
                     "pytest -q".to_string()
@@ -8891,7 +11853,10 @@ fn evaluate_retriever_hook(
         "rm -rf /",
     ] {
         if raw.contains(forbidden) {
-            reasons.push(format!("Command matched forbidden pattern '{}'.", forbidden));
+            reasons.push(format!(
+                "Command matched forbidden pattern '{}'.",
+                forbidden
+            ));
         }
     }
 
@@ -8912,8 +11877,9 @@ fn render_retriever_hooks_markdown(artifact: &RetrieverHookArtifact) -> String {
         artifact
             .records
             .iter()
-            .map(|record| format!(
-                "### {} :: {}
+            .map(|record| {
+                format!(
+                    "### {} :: {}
 - decision: {}
 - tool: {}
 - command: {}
@@ -8924,23 +11890,39 @@ fn render_retriever_hooks_markdown(artifact: &RetrieverHookArtifact) -> String {
 - exit_code: {}
 - log: {}
 - created_at: {}",
-                record.stage,
-                record.command_label,
-                record.decision,
-                record.tool,
-                record.raw_command,
-                record.source,
-                record.rationale,
-                if record.reasons.is_empty() { "none".to_string() } else { record.reasons.join(" | ") },
-                record.passed.map(|value| if value { "true" } else { "false" }.to_string()).unwrap_or_else(|| "n/a".to_string()),
-                record.exit_code.map(|value| value.to_string()).unwrap_or_else(|| "n/a".to_string()),
-                record.log_artifact.clone().unwrap_or_else(|| "n/a".to_string()),
-                record.created_at,
-            ))
+                    record.stage,
+                    record.command_label,
+                    record.decision,
+                    record.tool,
+                    record.raw_command,
+                    record.source,
+                    record.rationale,
+                    if record.reasons.is_empty() {
+                        "none".to_string()
+                    } else {
+                        record.reasons.join(" | ")
+                    },
+                    record
+                        .passed
+                        .map(|value| if value { "true" } else { "false" }.to_string())
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    record
+                        .exit_code
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    record
+                        .log_artifact
+                        .clone()
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    record.created_at,
+                )
+            })
             .collect::<Vec<_>>()
-            .join("
+            .join(
+                "
 
-")
+",
+            )
     };
     format!(
         "# Retriever Forge Hooks
@@ -8972,8 +11954,9 @@ fn render_retriever_execution_markdown(report: &RetrieverExecutionArtifact) -> S
         report
             .executed_commands
             .iter()
-            .map(|command| format!(
-                "### {}
+            .map(|command| {
+                format!(
+                    "### {}
 - source: {}
 - rationale: {}
 - command: {}
@@ -8983,30 +11966,37 @@ fn render_retriever_execution_markdown(report: &RetrieverExecutionArtifact) -> S
 - passed: {}
 - exit_code: {}
 - log: {}",
-                command.label,
-                command.source,
-                command.rationale,
-                command.raw_command,
-                if command.was_preferred { "true" } else { "false" },
-                command
-                    .preference_rank
-                    .map(|rank| rank.to_string())
-                    .unwrap_or_else(|| "n/a".to_string()),
-                command
-                    .preference_outcome
-                    .clone()
-                    .unwrap_or_else(|| "n/a".to_string()),
-                if command.passed { "true" } else { "false" },
-                command
-                    .exit_code
-                    .map(|code| code.to_string())
-                    .unwrap_or_else(|| "signal".to_string()),
-                command.log_artifact,
-            ))
+                    command.label,
+                    command.source,
+                    command.rationale,
+                    command.raw_command,
+                    if command.was_preferred {
+                        "true"
+                    } else {
+                        "false"
+                    },
+                    command
+                        .preference_rank
+                        .map(|rank| rank.to_string())
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    command
+                        .preference_outcome
+                        .clone()
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    if command.passed { "true" } else { "false" },
+                    command
+                        .exit_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "signal".to_string()),
+                    command.log_artifact,
+                )
+            })
             .collect::<Vec<_>>()
-            .join("
+            .join(
+                "
 
-")
+",
+            )
     };
     format!(
         "# Retriever Execution Report
@@ -9049,13 +12039,119 @@ fn render_retriever_execution_markdown(report: &RetrieverExecutionArtifact) -> S
         report.dispatch_artifact,
         report.continuity_artifact,
         report.hook_artifact,
-        render_list(&report.preferred_commands_offered, "No preferred commands were offered."),
-        render_list(&report.preferred_commands_selected, "No preferred commands were selected."),
-        render_list(&report.preferred_commands_helped, "No preferred commands helped in this run."),
-        render_list(&report.preferred_commands_stale, "No preferred commands went stale in this run."),
+        render_list(
+            &report.preferred_commands_offered,
+            "No preferred commands were offered."
+        ),
+        render_list(
+            &report.preferred_commands_selected,
+            "No preferred commands were selected."
+        ),
+        render_list(
+            &report.preferred_commands_helped,
+            "No preferred commands helped in this run."
+        ),
+        render_list(
+            &report.preferred_commands_stale,
+            "No preferred commands went stale in this run."
+        ),
         report.summary,
         command_sections,
         render_list(&report.returned_artifacts, "No artifacts were returned."),
+    )
+}
+
+fn render_mason_edit_proposal_markdown(proposal: &MasonEditProposalArtifact) -> String {
+    let edit_sections = if proposal.edits.is_empty() {
+        "No edits were proposed.".to_string()
+    } else {
+        proposal
+            .edits
+            .iter()
+            .map(|edit| {
+                format!(
+                    "### {}
+- action: {}
+- summary: {}
+- content_bytes: {}",
+                    edit.path,
+                    edit.action,
+                    edit.summary,
+                    edit.content.len()
+                )
+            })
+            .collect::<Vec<_>>()
+            .join(
+                "
+
+",
+            )
+    };
+
+    format!(
+        "# Mason Edit Proposal
+
+- Run: {}
+- Spec: {}
+- Product: {}
+- Generated at: {}
+
+## Summary
+{}
+
+## Rationale
+{}
+
+## Editable Paths
+{}
+
+## Context Paths
+{}
+
+## Edits
+{}
+",
+        proposal.run_id,
+        proposal.spec_id,
+        proposal.product,
+        proposal.generated_at,
+        proposal.summary,
+        render_list(&proposal.rationale, "No rationale recorded."),
+        render_list(&proposal.editable_paths, "No editable paths recorded."),
+        render_list(&proposal.context_paths, "No context paths recorded."),
+        edit_sections,
+    )
+}
+
+fn render_mason_edit_application_markdown(application: &MasonEditApplicationArtifact) -> String {
+    format!(
+        "# Mason Edit Application
+
+- Run: {}
+- Spec: {}
+- Product: {}
+- Generated at: {}
+- Status: {}
+- Proposal generated: {}
+
+## Summary
+{}
+
+## Changed Files
+{}
+",
+        application.run_id,
+        application.spec_id,
+        application.product,
+        application.generated_at,
+        application.status,
+        if application.proposal_generated {
+            "true"
+        } else {
+            "false"
+        },
+        application.summary,
+        render_list(&application.changed_files, "No files changed."),
     )
 }
 
@@ -9102,13 +12198,19 @@ fn render_retriever_dispatch_markdown(dispatch: &RetrieverDispatchArtifact) -> S
         dispatch.trail_drift_guard_artifact,
         dispatch.continuity_artifact,
         dispatch.dispatch_summary,
-        render_list(&dispatch.constraints_applied, "No constraints were captured."),
+        render_list(
+            &dispatch.constraints_applied,
+            "No constraints were captured."
+        ),
         render_list(&dispatch.next_actions, "No next actions were captured."),
         render_list(
             &dispatch.visible_success_conditions,
             "No visible success conditions were captured.",
         ),
-        render_list(&dispatch.return_artifacts, "No return artifacts were captured."),
+        render_list(
+            &dispatch.return_artifacts,
+            "No return artifacts were captured."
+        ),
     )
 }
 
@@ -9126,7 +12228,8 @@ fn build_retriever_context_bundle(
         Some(spec_obj),
         query_terms,
     )?;
-    let preload_notes = build_repo_local_preload_notes(&context_entries, &skill_entries, target_source);
+    let preload_notes =
+        build_repo_local_preload_notes(&context_entries, &skill_entries, target_source);
     Ok(RetrieverContextBundleArtifact {
         run_id: run_id.to_string(),
         spec_id: spec_obj.id.clone(),
@@ -9206,7 +12309,12 @@ fn discover_repo_local_context_entries(
         });
     }
 
-    entries.sort_by(|left, right| right.relevance.cmp(&left.relevance).then_with(|| left.path.cmp(&right.path)));
+    entries.sort_by(|left, right| {
+        right
+            .relevance
+            .cmp(&left.relevance)
+            .then_with(|| left.path.cmp(&right.path))
+    });
     let mut context_entries = Vec::new();
     let mut skill_entries = Vec::new();
     for entry in entries {
@@ -9263,8 +12371,12 @@ fn score_repo_local_document(
     query_terms: &[String],
 ) -> i32 {
     let mut score = 0;
-    let haystack = format!("{}
-{}", rel_path.to_lowercase(), raw.to_lowercase());
+    let haystack = format!(
+        "{}
+{}",
+        rel_path.to_lowercase(),
+        raw.to_lowercase()
+    );
     if rel_path.ends_with("instructions.md") {
         score += 40;
     }
@@ -9337,7 +12449,10 @@ fn build_repo_local_preload_notes(
             target_source.label
         ));
         if let Some(first) = context_entries.first() {
-            notes.push(format!("Start with '{}' because it is the highest-relevance repo-local context document.", first.label));
+            notes.push(format!(
+                "Start with '{}' because it is the highest-relevance repo-local context document.",
+                first.label
+            ));
         }
     } else {
         notes.push("No repo-local context files were discovered beyond the default project bootstrap files.".to_string());
@@ -9357,18 +12472,22 @@ fn render_retriever_context_bundle_markdown(bundle: &RetrieverContextBundleArtif
     let context_lines = bundle
         .context_entries
         .iter()
-        .map(|entry| format!(
-            "- {} [{} | relevance={}] {}",
-            entry.label, entry.path, entry.relevance, entry.summary
-        ))
+        .map(|entry| {
+            format!(
+                "- {} [{} | relevance={}] {}",
+                entry.label, entry.path, entry.relevance, entry.summary
+            )
+        })
         .collect::<Vec<_>>();
     let skill_lines = bundle
         .skill_entries
         .iter()
-        .map(|entry| format!(
-            "- {} [{} | relevance={}] {}",
-            entry.label, entry.path, entry.relevance, entry.summary
-        ))
+        .map(|entry| {
+            format!(
+                "- {} [{} | relevance={}] {}",
+                entry.label, entry.path, entry.relevance, entry.summary
+            )
+        })
         .collect::<Vec<_>>();
     format!(
         "# Retriever Context Bundle
@@ -9394,7 +12513,10 @@ fn render_retriever_context_bundle_markdown(bundle: &RetrieverContextBundleArtif
         bundle.generated_at,
         bundle.project_root,
         render_list(&bundle.preload_notes, "No preload notes were generated."),
-        render_list(&context_lines, "No repo-local context entries were discovered."),
+        render_list(
+            &context_lines,
+            "No repo-local context entries were discovered."
+        ),
         render_list(&skill_lines, "No repo-local skill entries were discovered."),
     )
 }
@@ -9406,7 +12528,8 @@ fn build_trail_drift_guard(
     staged_product: &Path,
     context_bundle: &RetrieverContextBundleArtifact,
 ) -> Result<TrailDriftGuardArtifact> {
-    let tracked_entries = collect_trail_drift_guard_entries(spec_obj, staged_product, context_bundle)?;
+    let tracked_entries =
+        collect_trail_drift_guard_entries(spec_obj, staged_product, context_bundle)?;
     Ok(TrailDriftGuardArtifact {
         run_id: run_id.to_string(),
         spec_id: spec_obj.id.clone(),
@@ -9528,7 +12651,11 @@ fn fingerprint_trail_drift_target(path: &Path) -> Result<String> {
     Ok(format!("{:016x}", hasher.finish()))
 }
 
-fn collect_paths_for_drift_fingerprint(root: &Path, path: &Path, acc: &mut Vec<PathBuf>) -> Result<()> {
+fn collect_paths_for_drift_fingerprint(
+    root: &Path,
+    path: &Path,
+    acc: &mut Vec<PathBuf>,
+) -> Result<()> {
     if path.is_file() {
         acc.push(path.to_path_buf());
         return Ok(());
@@ -9552,7 +12679,12 @@ fn render_trail_drift_guard_markdown(artifact: &TrailDriftGuardArtifact) -> Stri
     let lines = artifact
         .tracked_entries
         .iter()
-        .map(|entry| format!("- {} [{}] fingerprint={}", entry.role, entry.path, entry.fingerprint))
+        .map(|entry| {
+            format!(
+                "- {} [{}] fingerprint={}",
+                entry.role, entry.path, entry.fingerprint
+            )
+        })
         .collect::<Vec<_>>();
     format!(
         "# Trail Drift Guard
@@ -9616,14 +12748,20 @@ fn render_project_resume_packet_markdown(packet: &ProjectResumePacket) -> String
         packet
             .stale_memory
             .iter()
-            .map(|risk| format!(
-                "- {} [{} | severity={} score={}] {}",
-                risk.memory_id,
-                risk.status.clone().unwrap_or_else(|| "review".to_string()),
-                risk.severity,
-                risk.severity_score,
-                if risk.reasons.is_empty() { "no reasons recorded".to_string() } else { risk.reasons.join(" | ") }
-            ))
+            .map(|risk| {
+                format!(
+                    "- {} [{} | severity={} score={}] {}",
+                    risk.memory_id,
+                    risk.status.clone().unwrap_or_else(|| "review".to_string()),
+                    risk.severity,
+                    risk.severity_score,
+                    if risk.reasons.is_empty() {
+                        "no reasons recorded".to_string()
+                    } else {
+                        risk.reasons.join(" | ")
+                    }
+                )
+            })
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -9644,7 +12782,8 @@ fn render_evidence_time_range_summary(time_range: Option<&EvidenceTimeRange>) ->
             if let (Some(start), Some(end)) = (range.start_ms, range.end_ms) {
                 return format!("{}..{} ms", start, end);
             }
-            if let (Some(start), Some(end)) = (range.start_iso.as_deref(), range.end_iso.as_deref()) {
+            if let (Some(start), Some(end)) = (range.start_iso.as_deref(), range.end_iso.as_deref())
+            {
                 return format!("{}..{}", start, end);
             }
             if let Some(start) = range.start_ms {
@@ -9676,7 +12815,10 @@ fn annotation_time_span_ms(time_range: Option<&EvidenceTimeRange>) -> Option<i64
 fn overlap_bonus(needles: &[String], haystack: &[String], per_match: i32) -> i32 {
     let mut score = 0;
     for needle in needles {
-        if haystack.iter().any(|candidate| candidate.contains(needle) || needle.contains(candidate)) {
+        if haystack
+            .iter()
+            .any(|candidate| candidate.contains(needle) || needle.contains(candidate))
+        {
             score += per_match;
         }
     }
@@ -9720,7 +12862,10 @@ fn classify_evidence_match(window: &EvidenceWindowMatch) -> String {
         || (!window.matched_sources.is_empty() && window.matched_labels.len() >= 2)
     {
         "match".to_string()
-    } else if window.score >= 45 || !window.matched_labels.is_empty() || !window.matched_claims.is_empty() {
+    } else if window.score >= 45
+        || !window.matched_labels.is_empty()
+        || !window.matched_claims.is_empty()
+    {
         "near_match".to_string()
     } else {
         "mismatch".to_string()
@@ -9734,13 +12879,22 @@ fn confidence_from_match_score(score: i32) -> f64 {
 fn build_evidence_match_rationale(window: &EvidenceWindowMatch, match_type: &str) -> Vec<String> {
     let mut rationale = Vec::new();
     if !window.matched_labels.is_empty() {
-        rationale.push(format!("matched labels: {}", window.matched_labels.join(", ")));
+        rationale.push(format!(
+            "matched labels: {}",
+            window.matched_labels.join(", ")
+        ));
     }
     if !window.matched_claims.is_empty() {
-        rationale.push(format!("matched claims: {}", window.matched_claims.join(" | ")));
+        rationale.push(format!(
+            "matched claims: {}",
+            window.matched_claims.join(" | ")
+        ));
     }
     if !window.matched_sources.is_empty() {
-        rationale.push(format!("matched sources: {}", window.matched_sources.join(" | ")));
+        rationale.push(format!(
+            "matched sources: {}",
+            window.matched_sources.join(" | ")
+        ));
     }
     if let Some(delta) = window.time_span_delta_ms {
         rationale.push(format!("time-span delta: {} ms", delta));
@@ -9748,11 +12902,17 @@ fn build_evidence_match_rationale(window: &EvidenceWindowMatch, match_type: &str
     if rationale.is_empty() {
         rationale.push("match classification is based on broad query overlap only".to_string());
     }
-    rationale.push(format!("classified as {} from similarity score {}", match_type, window.score));
+    rationale.push(format!(
+        "classified as {} from similarity score {}",
+        match_type, window.score
+    ));
     rationale
 }
 
-fn build_evidence_match_assessment(rank: usize, window: EvidenceWindowMatch) -> EvidenceMatchAssessment {
+fn build_evidence_match_assessment(
+    rank: usize,
+    window: EvidenceWindowMatch,
+) -> EvidenceMatchAssessment {
     let match_type = classify_evidence_match(&window);
     let confidence = confidence_from_match_score(window.score);
     let rationale = build_evidence_match_rationale(&window, &match_type);
@@ -9825,7 +12985,10 @@ fn render_evidence_match_report(report: &EvidenceMatchReport) -> String {
             assessment.score,
             assessment.confidence * 100.0
         ));
-        lines.push(format!("  scenario={} dataset={} time={}", assessment.window.scenario, assessment.window.dataset, assessment.window.time_summary));
+        lines.push(format!(
+            "  scenario={} dataset={} time={}",
+            assessment.window.scenario, assessment.window.dataset, assessment.window.time_summary
+        ));
         if !assessment.rationale.is_empty() {
             lines.push(format!("  rationale={}", assessment.rationale.join(" | ")));
         }
@@ -9975,13 +13138,16 @@ fn build_annotation_history_event(
 ) -> EvidenceAnnotationHistoryEvent {
     EvidenceAnnotationHistoryEvent {
         event_id: format!("eah_{}", Uuid::new_v4().simple()),
-        bundle_name: normalize_evidence_bundle_name(bundle_name).unwrap_or_else(|_| bundle_name.trim().to_string()),
+        bundle_name: normalize_evidence_bundle_name(bundle_name)
+            .unwrap_or_else(|_| bundle_name.trim().to_string()),
         annotation_id: annotation.annotation_id.clone(),
         annotation_title: annotation.title.clone(),
         event_type: event_type.to_string(),
         status: effective_annotation_status(annotation),
         previous_status: previous_status.unwrap_or_default(),
-        actor: actor.filter(|value| !value.trim().is_empty()).unwrap_or_else(|| annotation_history_actor(annotation)),
+        actor: actor
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| annotation_history_actor(annotation)),
         note: note.unwrap_or_default(),
         promoted_ids,
         occurred_at: if !annotation.updated_at.trim().is_empty() {
@@ -10027,15 +13193,17 @@ fn collect_bundle_save_history_events(
                 Some("Annotation created through bundle save.".to_string()),
                 Vec::new(),
             )),
-            Some(previous_annotation) if !annotations_equal(previous_annotation, annotation) => events.push(build_annotation_history_event(
-                bundle_name,
-                annotation,
-                "updated",
-                Some(effective_annotation_status(previous_annotation)),
-                Some(annotation_history_actor(annotation)),
-                Some("Annotation updated through bundle save.".to_string()),
-                Vec::new(),
-            )),
+            Some(previous_annotation) if !annotations_equal(previous_annotation, annotation) => {
+                events.push(build_annotation_history_event(
+                    bundle_name,
+                    annotation,
+                    "updated",
+                    Some(effective_annotation_status(previous_annotation)),
+                    Some(annotation_history_actor(annotation)),
+                    Some("Annotation updated through bundle save.".to_string()),
+                    Vec::new(),
+                ))
+            }
             _ => {}
         }
     }
@@ -10072,11 +13240,19 @@ fn annotation_is_review_ready(annotation: &EvidenceAnnotation) -> bool {
     matches!(status.as_str(), "reviewed" | "approved")
 }
 
-fn resolve_evidence_promotion_destination<'a>(annotation: &EvidenceAnnotation, scope: &'a str) -> Option<&'a str> {
+fn resolve_evidence_promotion_destination<'a>(
+    annotation: &EvidenceAnnotation,
+    scope: &'a str,
+) -> Option<&'a str> {
     match scope {
         "project" => Some("project"),
         "core" => Some("core"),
-        "follow-bundle" => match annotation.promote_to_memory.trim().to_ascii_lowercase().as_str() {
+        "follow-bundle" => match annotation
+            .promote_to_memory
+            .trim()
+            .to_ascii_lowercase()
+            .as_str()
+        {
             "project" => Some("project"),
             "core" | "core_candidate" => Some("core"),
             _ => None,
@@ -10085,7 +13261,10 @@ fn resolve_evidence_promotion_destination<'a>(annotation: &EvidenceAnnotation, s
     }
 }
 
-fn build_evidence_memory_id(bundle: &EvidenceAnnotationBundle, annotation: &EvidenceAnnotation) -> String {
+fn build_evidence_memory_id(
+    bundle: &EvidenceAnnotationBundle,
+    annotation: &EvidenceAnnotation,
+) -> String {
     format!(
         "evidence-{}-{}",
         slugify_memory_fragment(&bundle.project),
@@ -10109,7 +13288,10 @@ fn slugify_memory_fragment(value: &str) -> String {
     out.trim_matches('-').to_string()
 }
 
-fn build_evidence_memory_summary(bundle: &EvidenceAnnotationBundle, annotation: &EvidenceAnnotation) -> String {
+fn build_evidence_memory_summary(
+    bundle: &EvidenceAnnotationBundle,
+    annotation: &EvidenceAnnotation,
+) -> String {
     let title = if annotation.title.trim().is_empty() {
         annotation.annotation_id.as_str()
     } else {
@@ -10148,10 +13330,18 @@ fn build_evidence_memory_tags(
     tags
 }
 
-fn collect_evidence_source_uris(bundle: &EvidenceAnnotationBundle, annotation: &EvidenceAnnotation) -> Vec<String> {
+fn collect_evidence_source_uris(
+    bundle: &EvidenceAnnotationBundle,
+    annotation: &EvidenceAnnotation,
+) -> Vec<String> {
     let mut paths = Vec::new();
     for source in &bundle.sources {
-        if annotation.source_ids.iter().any(|id| id == &source.source_id) && !source.uri.trim().is_empty() {
+        if annotation
+            .source_ids
+            .iter()
+            .any(|id| id == &source.source_id)
+            && !source.uri.trim().is_empty()
+        {
             let normalized = normalize_project_path(&source.uri);
             if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
                 paths.push(normalized);
@@ -10169,11 +13359,18 @@ fn render_evidence_memory_body(
     let source_lines = bundle
         .sources
         .iter()
-        .filter(|source| annotation.source_ids.iter().any(|id| id == &source.source_id))
+        .filter(|source| {
+            annotation
+                .source_ids
+                .iter()
+                .any(|id| id == &source.source_id)
+        })
         .map(render_evidence_source_line)
         .collect::<Vec<_>>()
-        .join("
-");
+        .join(
+            "
+",
+        );
     let anchor_lines = annotation
         .anchors
         .iter()
@@ -10183,14 +13380,20 @@ fn render_evidence_memory_body(
                 anchor.anchor_id,
                 anchor.kind,
                 anchor.source_id,
-                if anchor.signal_keys.is_empty() { "none".to_string() } else { anchor.signal_keys.join(", ") },
+                if anchor.signal_keys.is_empty() {
+                    "none".to_string()
+                } else {
+                    anchor.signal_keys.join(", ")
+                },
                 anchor.frame_index,
                 anchor.timestamp_ms
             )
         })
         .collect::<Vec<_>>()
-        .join("
-");
+        .join(
+            "
+",
+        );
     let claim_lines = annotation
         .claims
         .iter()
@@ -10200,16 +13403,27 @@ fn render_evidence_memory_body(
                 claim.relation,
                 claim.cause,
                 claim.effect,
-                claim.confidence
+                claim
+                    .confidence
                     .map(|value| format!("{value:.2}"))
                     .unwrap_or_else(|| "unknown".to_string()),
-                if claim.evidence_anchor_ids.is_empty() { "none".to_string() } else { claim.evidence_anchor_ids.join(", ") },
-                if claim.notes.trim().is_empty() { "none".to_string() } else { claim.notes.trim().to_string() }
+                if claim.evidence_anchor_ids.is_empty() {
+                    "none".to_string()
+                } else {
+                    claim.evidence_anchor_ids.join(", ")
+                },
+                if claim.notes.trim().is_empty() {
+                    "none".to_string()
+                } else {
+                    claim.notes.trim().to_string()
+                }
             )
         })
         .collect::<Vec<_>>()
-        .join("
-");
+        .join(
+            "
+",
+        );
 
     format!(
         "Bundle: {}
@@ -10243,15 +13457,45 @@ Annotation notes:
 ",
         bundle_path.display(),
         bundle.project,
-        if bundle.scenario.trim().is_empty() { "n/a" } else { bundle.scenario.trim() },
-        if bundle.dataset.trim().is_empty() { "n/a" } else { bundle.dataset.trim() },
+        if bundle.scenario.trim().is_empty() {
+            "n/a"
+        } else {
+            bundle.scenario.trim()
+        },
+        if bundle.dataset.trim().is_empty() {
+            "n/a"
+        } else {
+            bundle.dataset.trim()
+        },
         annotation.annotation_id,
-        if annotation.status.trim().is_empty() { "draft" } else { annotation.status.trim() },
-        if annotation.reviewed_by.trim().is_empty() { "n/a" } else { annotation.reviewed_by.trim() },
-        if annotation.reviewed_at.trim().is_empty() { "n/a" } else { annotation.reviewed_at.trim() },
-        if annotation.promote_to_memory.trim().is_empty() { "none" } else { annotation.promote_to_memory.trim() },
-        annotation.time_range.as_ref().and_then(|range| range.start_ms),
-        annotation.time_range.as_ref().and_then(|range| range.end_ms),
+        if annotation.status.trim().is_empty() {
+            "draft"
+        } else {
+            annotation.status.trim()
+        },
+        if annotation.reviewed_by.trim().is_empty() {
+            "n/a"
+        } else {
+            annotation.reviewed_by.trim()
+        },
+        if annotation.reviewed_at.trim().is_empty() {
+            "n/a"
+        } else {
+            annotation.reviewed_at.trim()
+        },
+        if annotation.promote_to_memory.trim().is_empty() {
+            "none"
+        } else {
+            annotation.promote_to_memory.trim()
+        },
+        annotation
+            .time_range
+            .as_ref()
+            .and_then(|range| range.start_ms),
+        annotation
+            .time_range
+            .as_ref()
+            .and_then(|range| range.end_ms),
         if bundle.notes.is_empty() {
             "- none".to_string()
         } else {
@@ -10260,15 +13504,41 @@ Annotation notes:
                 .iter()
                 .map(|note| format!("- {}", note))
                 .collect::<Vec<_>>()
-                .join("
-")
+                .join(
+                    "
+",
+                )
         },
-        if annotation.labels.is_empty() { "none".to_string() } else { annotation.labels.join(", ") },
-        if annotation.tags.is_empty() { "none".to_string() } else { annotation.tags.join(", ") },
-        if source_lines.is_empty() { "- none".to_string() } else { source_lines },
-        if anchor_lines.is_empty() { "- none".to_string() } else { anchor_lines },
-        if claim_lines.is_empty() { "- none".to_string() } else { claim_lines },
-        if annotation.notes.trim().is_empty() { "none".to_string() } else { annotation.notes.trim().to_string() },
+        if annotation.labels.is_empty() {
+            "none".to_string()
+        } else {
+            annotation.labels.join(", ")
+        },
+        if annotation.tags.is_empty() {
+            "none".to_string()
+        } else {
+            annotation.tags.join(", ")
+        },
+        if source_lines.is_empty() {
+            "- none".to_string()
+        } else {
+            source_lines
+        },
+        if anchor_lines.is_empty() {
+            "- none".to_string()
+        } else {
+            anchor_lines
+        },
+        if claim_lines.is_empty() {
+            "- none".to_string()
+        } else {
+            claim_lines
+        },
+        if annotation.notes.trim().is_empty() {
+            "none".to_string()
+        } else {
+            annotation.notes.trim().to_string()
+        },
     )
 }
 
@@ -10277,9 +13547,21 @@ fn render_evidence_source_line(source: &EvidenceSource) -> String {
         "- {} [{}] uri={} channels={} tags={}",
         source.source_id,
         source.kind,
-        if source.uri.trim().is_empty() { "n/a" } else { source.uri.trim() },
-        if source.channels.is_empty() { "none".to_string() } else { source.channels.join(", ") },
-        if source.tags.is_empty() { "none".to_string() } else { source.tags.join(", ") },
+        if source.uri.trim().is_empty() {
+            "n/a"
+        } else {
+            source.uri.trim()
+        },
+        if source.channels.is_empty() {
+            "none".to_string()
+        } else {
+            source.channels.join(", ")
+        },
+        if source.tags.is_empty() {
+            "none".to_string()
+        } else {
+            source.tags.join(", ")
+        },
     )
 }
 
@@ -10299,7 +13581,12 @@ fn build_evidence_memory_provenance(
     let mut observed_surfaces = bundle
         .sources
         .iter()
-        .filter(|source| annotation.source_ids.iter().any(|id| id == &source.source_id))
+        .filter(|source| {
+            annotation
+                .source_ids
+                .iter()
+                .any(|id| id == &source.source_id)
+        })
         .map(|source| format!("{}:{}", source.kind, source.label))
         .collect::<Vec<_>>();
     observed_surfaces.sort();
@@ -10310,7 +13597,10 @@ fn build_evidence_memory_provenance(
         None,
         None,
         Vec::new(),
-        vec!["evidence sources, dataset semantics, or reviewed causal interpretation change".to_string()],
+        vec![
+            "evidence sources, dataset semantics, or reviewed causal interpretation change"
+                .to_string(),
+        ],
         observed_paths,
         Vec::new(),
         observed_surfaces,
@@ -10333,9 +13623,18 @@ fn project_memory_provenance(
         source_path: Some(target_source.source_path.clone()),
         source_run_id: source_run_id.map(|value| value.to_string()),
         source_spec_id: source_spec_id.map(|value| value.to_string()),
-        git_branch: target_source.git.as_ref().and_then(|git| git.branch.clone()),
-        git_commit: target_source.git.as_ref().and_then(|git| git.commit.clone()),
-        git_remote: target_source.git.as_ref().and_then(|git| git.remote_origin.clone()),
+        git_branch: target_source
+            .git
+            .as_ref()
+            .and_then(|git| git.branch.clone()),
+        git_commit: target_source
+            .git
+            .as_ref()
+            .and_then(|git| git.commit.clone()),
+        git_remote: target_source
+            .git
+            .as_ref()
+            .and_then(|git| git.remote_origin.clone()),
         evidence_run_ids,
         stale_when,
         observed_paths,
@@ -10386,7 +13685,10 @@ fn project_paths_overlap(left: &str, right: &str) -> bool {
 fn intersect_project_paths(left: &[String], right: &[String]) -> Vec<String> {
     let mut matches = Vec::new();
     for candidate in left {
-        if right.iter().any(|observed| project_paths_overlap(candidate, observed)) {
+        if right
+            .iter()
+            .any(|observed| project_paths_overlap(candidate, observed))
+        {
             let normalized = normalize_project_path(candidate);
             if !normalized.is_empty() && !matches.iter().any(|existing| existing == &normalized) {
                 matches.push(normalized);
@@ -10426,9 +13728,11 @@ fn path_impact_score(path: &str) -> i32 {
         || path.starts_with("ui/src/")
         || path.starts_with("apps/")
         || path.starts_with("services/")
-        || ["rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "cs", "cpp", "c", "h", "hpp"]
-            .iter()
-            .any(|ext| path.ends_with(&format!(".{}", ext)))
+        || [
+            "rs", "py", "ts", "tsx", "js", "jsx", "go", "java", "cs", "cpp", "c", "h", "hpp",
+        ]
+        .iter()
+        .any(|ext| path.ends_with(&format!(".{}", ext)))
     {
         return 80;
     }
@@ -10464,7 +13768,11 @@ fn path_impact_score(path: &str) -> i32 {
 }
 
 fn max_path_impact_score(paths: &[String]) -> i32 {
-    paths.iter().map(|path| path_impact_score(path)).max().unwrap_or(0)
+    paths
+        .iter()
+        .map(|path| path_impact_score(path))
+        .max()
+        .unwrap_or(0)
 }
 
 fn looks_like_project_path(value: &str) -> bool {
@@ -10480,7 +13788,9 @@ fn looks_like_project_path(value: &str) -> bool {
 fn collect_spec_code_under_test_paths(spec_obj: &Spec) -> Vec<String> {
     let mut paths = Vec::new();
     for component in &spec_obj.project_components {
-        if component.role.eq_ignore_ascii_case("code_under_test") && looks_like_project_path(&component.path) {
+        if component.role.eq_ignore_ascii_case("code_under_test")
+            && looks_like_project_path(&component.path)
+        {
             let normalized = normalize_project_path(&component.path);
             if !normalized.is_empty() && !paths.iter().any(|existing| existing == &normalized) {
                 paths.push(normalized);
@@ -10498,6 +13808,61 @@ fn collect_spec_code_under_test_paths(spec_obj: &Spec) -> Vec<String> {
         }
     }
     paths
+}
+
+fn collect_staged_code_under_test_paths(
+    spec_obj: &Spec,
+    target_source: &TargetSourceMetadata,
+    repo_root: &Path,
+) -> Vec<String> {
+    let source_root = PathBuf::from(&target_source.source_path);
+    let mut resolved = Vec::new();
+    for raw in collect_spec_code_under_test_paths(spec_obj) {
+        if let Some(path) = resolve_path_for_staged_workspace(&raw, &source_root, repo_root) {
+            push_unique(&mut resolved, &path);
+        }
+    }
+    resolved
+}
+
+fn resolve_path_for_staged_workspace(
+    raw: &str,
+    source_root: &Path,
+    repo_root: &Path,
+) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+
+    let candidate = PathBuf::from(trimmed);
+    let candidates = if candidate.is_absolute() {
+        vec![candidate]
+    } else {
+        vec![source_root.join(trimmed), repo_root.join(trimmed)]
+    };
+
+    for candidate in candidates {
+        let Ok(canonical) = candidate.canonicalize() else {
+            continue;
+        };
+        if canonical == source_root {
+            return Some(".".to_string());
+        }
+        if canonical.starts_with(source_root) {
+            let Ok(relative) = canonical.strip_prefix(source_root) else {
+                continue;
+            };
+            let normalized = normalize_project_path(&relative.display().to_string());
+            return Some(if normalized.is_empty() {
+                ".".to_string()
+            } else {
+                normalized
+            });
+        }
+    }
+
+    None
 }
 
 fn collect_spec_provenance_paths(spec_obj: &Spec) -> Vec<String> {
@@ -10596,18 +13961,8 @@ fn detect_project_files(source_path: &Path) -> Vec<String> {
 
 fn detect_project_directories(source_path: &Path) -> Vec<String> {
     let candidates = [
-        "src",
-        "crates",
-        "ui",
-        "frontend",
-        "backend",
-        "apps",
-        "services",
-        "examples",
-        "tests",
-        "scripts",
-        "docs",
-        "data",
+        "src", "crates", "ui", "frontend", "backend", "apps", "services", "examples", "tests",
+        "scripts", "docs", "data",
     ];
     candidates
         .iter()
@@ -10628,7 +13983,8 @@ fn detect_project_commands(source_path: &Path) -> Vec<String> {
         commands.push("npm run build".to_string());
         commands.push("npm run dev".to_string());
     }
-    if source_path.join("pyproject.toml").exists() || source_path.join("requirements.txt").exists() {
+    if source_path.join("pyproject.toml").exists() || source_path.join("requirements.txt").exists()
+    {
         commands.push("python3 -m pytest".to_string());
     }
     commands.sort();
@@ -10639,7 +13995,13 @@ fn detect_project_commands(source_path: &Path) -> Vec<String> {
 fn normalize_memory_text(value: &str) -> String {
     value
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { ' ' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                ' '
+            }
+        })
         .collect::<String>()
         .split_whitespace()
         .collect::<Vec<_>>()
@@ -10647,7 +14009,15 @@ fn normalize_memory_text(value: &str) -> String {
 }
 
 fn shared_specific_tag_count(left: &[String], right: &[String]) -> usize {
-    let generic = ["lesson", "project-memory", "causal", "residue", "exploration", "dead-end", "strategy-register"];
+    let generic = [
+        "lesson",
+        "project-memory",
+        "causal",
+        "residue",
+        "exploration",
+        "dead-end",
+        "strategy-register",
+    ];
     let left = left
         .iter()
         .filter(|tag| !generic.contains(&tag.as_str()))
@@ -10677,13 +14047,23 @@ fn render_project_strategy_register_markdown(
         .map(|entry| {
             format!(
                 "- [{}] phase={} agent={} strategy={} failure_constraint={} reformulation={}",
-                entry.registry_id, entry.phase, entry.agent, entry.strategy, entry.failure_constraint, entry.reformulation
+                entry.registry_id,
+                entry.phase,
+                entry.agent,
+                entry.strategy,
+                entry.failure_constraint,
+                entry.reformulation
             )
         })
         .collect::<Vec<_>>()
         .join("\n");
 
-    format!("# Strategy Register\n\n- Project: {}\n- Entries: {}\n\n{}\n", target_source.label, entries.len(), lines)
+    format!(
+        "# Strategy Register\n\n- Project: {}\n- Entries: {}\n\n{}\n",
+        target_source.label,
+        entries.len(),
+        lines
+    )
 }
 
 fn render_project_memory_status_markdown(entries: &[MemoryEntry]) -> String {
@@ -10697,8 +14077,16 @@ fn render_project_memory_status_markdown(entries: &[MemoryEntry]) -> String {
             format!(
                 "- {} status={} superseded_by={} challenged_by={}",
                 entry.id,
-                entry.provenance.status.clone().unwrap_or_else(|| "active".to_string()),
-                entry.provenance.superseded_by.clone().unwrap_or_else(|| "none".to_string()),
+                entry
+                    .provenance
+                    .status
+                    .clone()
+                    .unwrap_or_else(|| "active".to_string()),
+                entry
+                    .provenance
+                    .superseded_by
+                    .clone()
+                    .unwrap_or_else(|| "none".to_string()),
                 if entry.provenance.challenged_by.is_empty() {
                     "none".to_string()
                 } else {
@@ -10711,7 +14099,6 @@ fn render_project_memory_status_markdown(entries: &[MemoryEntry]) -> String {
 
     format!("# Memory Status\n\n{}\n", lines)
 }
-
 
 fn derive_stale_memory_mitigation_status(
     risk: &ProjectResumeRisk,
@@ -10726,9 +14113,7 @@ fn derive_stale_memory_mitigation_status(
     if validation.passed && hidden_scenarios.passed && exploration_exists {
         return "satisfied".to_string();
     }
-    if validation.passed
-        && hidden_scenarios.passed
-        && !matches!(risk.severity.as_str(), "critical")
+    if validation.passed && hidden_scenarios.passed && !matches!(risk.severity.as_str(), "critical")
     {
         return "satisfied".to_string();
     }
@@ -10868,31 +14253,35 @@ fn render_stale_memory_history_markdown(
         })
         .collect::<Vec<_>>();
 
-    let latest_summary = history.records.last().map(|record| {
-        if record.entries.is_empty() {
-            "- Latest record had no active stale-memory risks.".to_string()
-        } else {
-            record
-                .entries
-                .iter()
-                .take(8)
-                .map(|entry| {
-                    format!(
-                        "- {} status={} severity={} score={} reduced_from_previous={}",
-                        entry.memory_id,
-                        entry.status,
-                        entry.severity,
-                        entry.severity_score,
-                        entry
-                            .risk_reduced_from_previous
-                            .map(|value| if value { "true" } else { "false" }.to_string())
-                            .unwrap_or_else(|| "unknown".to_string())
-                    )
-                })
-                .collect::<Vec<_>>()
-                .join("\n")
-        }
-    }).unwrap_or_else(|| "- No latest record available.".to_string());
+    let latest_summary = history
+        .records
+        .last()
+        .map(|record| {
+            if record.entries.is_empty() {
+                "- Latest record had no active stale-memory risks.".to_string()
+            } else {
+                record
+                    .entries
+                    .iter()
+                    .take(8)
+                    .map(|entry| {
+                        format!(
+                            "- {} status={} severity={} score={} reduced_from_previous={}",
+                            entry.memory_id,
+                            entry.status,
+                            entry.severity,
+                            entry.severity_score,
+                            entry
+                                .risk_reduced_from_previous
+                                .map(|value| if value { "true" } else { "false" }.to_string())
+                                .unwrap_or_else(|| "unknown".to_string())
+                        )
+                    })
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            }
+        })
+        .unwrap_or_else(|| "- No latest record available.".to_string());
 
     format!(
         "# Stale Memory History\n\n- Project: {}\n- Records retained: {}\n\n## Recent Runs\n{}\n\n## Latest Risk Snapshot\n{}\n",
@@ -10910,12 +14299,16 @@ fn detect_runtime_hints(
 ) -> Vec<String> {
     let mut hints = Vec::new();
     if detected_files.iter().any(|value| value == "Cargo.toml")
-        && detected_directories.iter().any(|value| value == "ui" || value == "frontend")
+        && detected_directories
+            .iter()
+            .any(|value| value == "ui" || value == "frontend")
     {
         hints.push("Repo appears to contain both backend and UI surfaces.".to_string());
     }
     if detected_directories.iter().any(|value| value == "examples") {
-        hints.push("Example datasets or reference integrations may live under examples/.".to_string());
+        hints.push(
+            "Example datasets or reference integrations may live under examples/.".to_string(),
+        );
     }
     if detected_directories.iter().any(|value| value == "tests") {
         hints.push("Repo exposes explicit test surfaces under tests/.".to_string());
@@ -10935,7 +14328,9 @@ fn render_project_scan_markdown(manifest: &ProjectScanManifest) -> String {
                 "branch={} commit={} remote={} clean={}",
                 git.branch.clone().unwrap_or_else(|| "unknown".to_string()),
                 git.commit.clone().unwrap_or_else(|| "unknown".to_string()),
-                git.remote_origin.clone().unwrap_or_else(|| "unknown".to_string()),
+                git.remote_origin
+                    .clone()
+                    .unwrap_or_else(|| "unknown".to_string()),
                 git.clean
                     .map(|value| if value { "true" } else { "false" }.to_string())
                     .unwrap_or_else(|| "unknown".to_string())
@@ -10993,13 +14388,23 @@ fn score_briefing_evidence(
 fn stable_key_fragment(value: &str) -> String {
     let mut fragment = value
         .chars()
-        .map(|ch| if ch.is_ascii_alphanumeric() { ch.to_ascii_lowercase() } else { '-' })
+        .map(|ch| {
+            if ch.is_ascii_alphanumeric() {
+                ch.to_ascii_lowercase()
+            } else {
+                '-'
+            }
+        })
         .collect::<String>();
     while fragment.contains("--") {
         fragment = fragment.replace("--", "-");
     }
     let fragment = fragment.trim_matches('-');
-    let fragment = if fragment.is_empty() { "dead-end" } else { fragment };
+    let fragment = if fragment.is_empty() {
+        "dead-end"
+    } else {
+        fragment
+    };
     fragment.chars().take(48).collect()
 }
 
@@ -11015,8 +14420,14 @@ fn render_project_component_lines(spec_obj: &Spec) -> Vec<String> {
         .project_components
         .iter()
         .map(|component| {
-            let mut details = vec![format!("role={}", fallback_component_value(&component.role))];
-            details.push(format!("kind={}", fallback_component_value(&component.kind)));
+            let mut details = vec![format!(
+                "role={}",
+                fallback_component_value(&component.role)
+            )];
+            details.push(format!(
+                "kind={}",
+                fallback_component_value(&component.kind)
+            ));
             details.push(format!("path={}", component.path));
             if !component.owner.trim().is_empty() {
                 details.push(format!("owner={}", component.owner.trim()));
@@ -11045,22 +14456,37 @@ fn render_scenario_blueprint_lines(spec_obj: &Spec) -> Vec<String> {
         lines.push(format!("objective={}", blueprint.objective.trim()));
     }
     if !blueprint.code_under_test.is_empty() {
-        lines.push(format!("code_under_test={}", blueprint.code_under_test.join(", ")));
+        lines.push(format!(
+            "code_under_test={}",
+            blueprint.code_under_test.join(", ")
+        ));
     }
     if !blueprint.hidden_oracles.is_empty() {
-        lines.push(format!("hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+        lines.push(format!(
+            "hidden_oracles={}",
+            blueprint.hidden_oracles.join(", ")
+        ));
     }
     if !blueprint.datasets.is_empty() {
         lines.push(format!("datasets={}", blueprint.datasets.join(", ")));
     }
     if !blueprint.runtime_surfaces.is_empty() {
-        lines.push(format!("runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+        lines.push(format!(
+            "runtime_surfaces={}",
+            blueprint.runtime_surfaces.join(", ")
+        ));
     }
     if !blueprint.coobie_memory_topics.is_empty() {
-        lines.push(format!("coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+        lines.push(format!(
+            "coobie_memory_topics={}",
+            blueprint.coobie_memory_topics.join(", ")
+        ));
     }
     if !blueprint.required_artifacts.is_empty() {
-        lines.push(format!("required_artifacts={}", blueprint.required_artifacts.join(", ")));
+        lines.push(format!(
+            "required_artifacts={}",
+            blueprint.required_artifacts.join(", ")
+        ));
     }
     lines
 }
@@ -11074,28 +14500,337 @@ fn fallback_component_value(value: &str) -> &str {
     }
 }
 
+fn summarize_pinned_skill_markdown(raw: &str, max_chars: usize) -> String {
+    let mut in_frontmatter = false;
+    let mut lines = Vec::new();
+    for line in raw.lines() {
+        let trimmed = line.trim();
+        if trimmed == "---" {
+            in_frontmatter = !in_frontmatter;
+            continue;
+        }
+        if in_frontmatter {
+            continue;
+        }
+        lines.push(line);
+    }
+    let cleaned = lines
+        .join(
+            "
+",
+        )
+        .trim()
+        .to_string();
+    if cleaned.chars().count() <= max_chars {
+        cleaned
+    } else {
+        let mut excerpt = cleaned.chars().take(max_chars).collect::<String>();
+        excerpt.push_str(
+            "
+...[truncated]",
+        );
+        excerpt
+    }
+}
+
+fn indent_block(text: &str, prefix: &str) -> String {
+    text.lines()
+        .map(|line| format!("{}{}", prefix, line))
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
+fn pinned_skill_matches_provider_route(source: &str, resolved_provider: &str) -> bool {
+    let source = source.trim().to_ascii_lowercase();
+    let provider = resolved_provider.trim().to_ascii_lowercase();
+    match source.as_str() {
+        "anthropic" => provider == "claude" || provider == "anthropic",
+        "openai" => provider == "openai" || provider == "codex",
+        "google" => provider == "gemini" || provider == "google",
+        _ => source == provider || source.is_empty(),
+    }
+}
+
+fn format_resolved_pinned_skill_excerpts(
+    entries: &[ResolvedPinnedSkillExcerpt],
+    resolved_provider: &str,
+) -> String {
+    if entries.is_empty() {
+        return format!(
+            "- No pinned external skills are mapped to this Labrador for provider route '{}'.",
+            resolved_provider
+        );
+    }
+
+    entries
+        .iter()
+        .map(|entry| {
+            format!(
+                "- {}
+  provider family: {}
+  source: {}
+  rationale: {}
+  excerpt:
+{}",
+                entry.id,
+                entry.provider_family,
+                entry.source,
+                entry.rationale,
+                indent_block(&entry.excerpt, "    "),
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+
+",
+        )
+}
+
+fn fingerprint_agent_prompt_bundle(bundle: &AgentPromptBundleArtifact) -> String {
+    let mut hasher = DefaultHasher::new();
+    bundle.agent_name.hash(&mut hasher);
+    bundle.display_name.hash(&mut hasher);
+    bundle.role.hash(&mut hasher);
+    bundle.resolved_provider.hash(&mut hasher);
+    bundle.resolved_model.hash(&mut hasher);
+    bundle.resolved_surface.hash(&mut hasher);
+    bundle.shared_personality.hash(&mut hasher);
+    bundle.personality_addendum.hash(&mut hasher);
+    bundle.curated_skill_bundle.hash(&mut hasher);
+    bundle.system_instruction.hash(&mut hasher);
+    bundle.repo_context_block.hash(&mut hasher);
+    for skill_id in &bundle.pinned_skill_ids {
+        skill_id.hash(&mut hasher);
+    }
+    for entry in &bundle.pinned_external_skills {
+        entry.id.hash(&mut hasher);
+        entry.source.hash(&mut hasher);
+        entry.provider_family.hash(&mut hasher);
+        entry.vendor_path.hash(&mut hasher);
+        entry.rationale.hash(&mut hasher);
+        entry.excerpt.hash(&mut hasher);
+    }
+    for entry in &bundle.repo_local_context_entries {
+        entry.label.hash(&mut hasher);
+        entry.path.hash(&mut hasher);
+        entry.category.hash(&mut hasher);
+        entry.scope.hash(&mut hasher);
+        entry.summary.hash(&mut hasher);
+        entry.relevance.hash(&mut hasher);
+    }
+    for entry in &bundle.repo_local_skill_entries {
+        entry.label.hash(&mut hasher);
+        entry.path.hash(&mut hasher);
+        entry.category.hash(&mut hasher);
+        entry.scope.hash(&mut hasher);
+        entry.summary.hash(&mut hasher);
+        entry.relevance.hash(&mut hasher);
+    }
+    format!("{:016x}", hasher.finish())
+}
+
+fn render_prompt_bundle_markdown(bundle: &AgentPromptBundleArtifact) -> String {
+    let pinned_skill_lines = if bundle.pinned_external_skills.is_empty() {
+        vec![format!(
+            "No provider-matched pinned external skills were resolved for route '{}'.",
+            bundle.resolved_provider
+        )]
+    } else {
+        bundle
+            .pinned_external_skills
+            .iter()
+            .map(|entry| format!("{} [{}]", entry.id, entry.provider_family))
+            .collect::<Vec<_>>()
+    };
+    let repo_context_lines = bundle
+        .repo_local_context_entries
+        .iter()
+        .take(8)
+        .map(|entry| format!("{} [{}]", entry.label, entry.path))
+        .collect::<Vec<_>>();
+    let repo_skill_lines = bundle
+        .repo_local_skill_entries
+        .iter()
+        .take(8)
+        .map(|entry| format!("{} [{}]", entry.label, entry.path))
+        .collect::<Vec<_>>();
+
+    format!(
+        "# Prompt Bundle
+
+- Agent: {}
+- Role: {}
+- Provider route: {}
+- Model: {}
+- Surface: {}
+- Fingerprint: {}
+
+## Pinned External Skills
+{}
+
+## Repo-Local Context
+{}
+
+## Repo-Local Skill Bundles
+{}
+
+## System Instruction
+```text
+{}
+```
+
+## Repo Context Block
+```text
+{}
+```
+",
+        bundle.display_name,
+        bundle.role,
+        bundle.resolved_provider,
+        bundle.resolved_model.as_deref().unwrap_or("unresolved"),
+        bundle.resolved_surface.as_deref().unwrap_or("unspecified"),
+        bundle.fingerprint,
+        render_list(
+            &pinned_skill_lines,
+            "No pinned external skills were resolved."
+        ),
+        render_list(
+            &repo_context_lines,
+            "No repo-local context entries were resolved."
+        ),
+        render_list(
+            &repo_skill_lines,
+            "No repo-local skill bundles were resolved."
+        ),
+        bundle.system_instruction,
+        bundle.repo_context_block,
+    )
+}
+
+fn render_phase_attributions_markdown(records: &[PhaseAttributionRecord]) -> String {
+    if records.is_empty() {
+        return "# Phase Attributions\n\n- No phase attributions recorded yet.".to_string();
+    }
+
+    let mut lines = vec!["# Phase Attributions".to_string(), String::new()];
+    for record in records {
+        lines.push(format!("## {} / {}", record.phase, record.agent_name));
+        lines.push(format!("- Episode: {}", record.episode_id));
+        lines.push(format!("- Outcome: {}", record.outcome));
+        lines.push(format!(
+            "- Confidence: {}",
+            record
+                .confidence
+                .map(|value| format!("{:.2}", value))
+                .unwrap_or_else(|| "unspecified".to_string())
+        ));
+        lines.push(format!(
+            "- Prompt bundle: {}",
+            record
+                .prompt_bundle_fingerprint
+                .as_deref()
+                .unwrap_or("none recorded")
+        ));
+        lines.push(format!(
+            "- Provider route: {}",
+            record
+                .prompt_bundle_provider
+                .as_deref()
+                .unwrap_or("none recorded")
+        ));
+        lines.push(format!(
+            "- Pinned skills: {}",
+            if record.pinned_skill_ids.is_empty() {
+                "none".to_string()
+            } else {
+                record.pinned_skill_ids.join(", ")
+            }
+        ));
+        lines.push(format!(
+            "- Memory ids: {}",
+            if record.project_memory_ids.is_empty() && record.core_memory_ids.is_empty() {
+                "none".to_string()
+            } else {
+                record
+                    .project_memory_ids
+                    .iter()
+                    .chain(record.core_memory_ids.iter())
+                    .cloned()
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            }
+        ));
+        lines.push(format!(
+            "- Required checks: {}",
+            if record.required_checks.is_empty() {
+                "none".to_string()
+            } else {
+                record.required_checks.join(" | ")
+            }
+        ));
+        lines.push(String::new());
+    }
+    lines.join("\n")
+}
+
+fn render_repo_local_prompt_lines(
+    entries: &[RepoLocalContextEntry],
+    empty_message: &str,
+) -> String {
+    if entries.is_empty() {
+        return format!("- {}", empty_message);
+    }
+    entries
+        .iter()
+        .take(6)
+        .map(|entry| {
+            format!(
+                "- {} [{} | relevance={}] {}",
+                entry.label, entry.category, entry.relevance, entry.summary
+            )
+        })
+        .collect::<Vec<_>>()
+        .join(
+            "
+",
+        )
+}
+
 fn render_list(items: &[String], empty_message: &str) -> String {
     if items.is_empty() {
         format!("- {}", empty_message)
     } else {
-        format!("- {}", items.join("
-- "))
+        format!(
+            "- {}",
+            items.join(
+                "
+- "
+            )
+        )
     }
 }
 
 fn contains_any(haystack: &str, needles: &[&str]) -> bool {
-    needles.iter().any(|needle| haystack.contains(&needle.to_lowercase()))
+    needles
+        .iter()
+        .any(|needle| haystack.contains(&needle.to_lowercase()))
 }
 
 fn format_memory_context(memory_hits: &[String]) -> String {
     if memory_hits.is_empty() {
         "No memory hits collected for this run.".to_string()
     } else {
-        memory_hits.join("
+        memory_hits.join(
+            "
 
 ---
 
-")
+",
+        )
     }
 }
 
@@ -11122,8 +14857,10 @@ fn format_memory_context_bundle(bundle: &MemoryContextBundle) -> String {
     sections.push("Combined Memory Hits".to_string());
     sections.push("--------------------".to_string());
     sections.push(format_memory_context(&bundle.memory_hits));
-    sections.join("
-") + "
+    sections.join(
+        "
+",
+    ) + "
 "
 }
 
@@ -11223,7 +14960,11 @@ fn detect_node_bootstrap(staged_product: &Path) -> Option<(String, Vec<String>, 
         if command_available("npm") {
             return Some((
                 "npm".to_string(),
-                vec!["install".to_string(), "--no-fund".to_string(), "--no-audit".to_string()],
+                vec![
+                    "install".to_string(),
+                    "--no-fund".to_string(),
+                    "--no-audit".to_string(),
+                ],
                 "npm install --no-fund --no-audit".to_string(),
             ));
         }
@@ -11240,7 +14981,11 @@ fn detect_node_bootstrap(staged_product: &Path) -> Option<(String, Vec<String>, 
         if command_available("npm") {
             return Some((
                 "npm".to_string(),
-                vec!["install".to_string(), "--no-fund".to_string(), "--no-audit".to_string()],
+                vec![
+                    "install".to_string(),
+                    "--no-fund".to_string(),
+                    "--no-audit".to_string(),
+                ],
                 "npm install --no-fund --no-audit".to_string(),
             ));
         }
@@ -11249,7 +14994,11 @@ fn detect_node_bootstrap(staged_product: &Path) -> Option<(String, Vec<String>, 
     if staged_product.join("package-lock.json").exists() && command_available("npm") {
         return Some((
             "npm".to_string(),
-            vec!["ci".to_string(), "--no-fund".to_string(), "--no-audit".to_string()],
+            vec![
+                "ci".to_string(),
+                "--no-fund".to_string(),
+                "--no-audit".to_string(),
+            ],
             "npm ci --no-fund --no-audit".to_string(),
         ));
     }
@@ -11257,7 +15006,11 @@ fn detect_node_bootstrap(staged_product: &Path) -> Option<(String, Vec<String>, 
     if command_available("npm") {
         return Some((
             "npm".to_string(),
-            vec!["install".to_string(), "--no-fund".to_string(), "--no-audit".to_string()],
+            vec![
+                "install".to_string(),
+                "--no-fund".to_string(),
+                "--no-audit".to_string(),
+            ],
             "npm install --no-fund --no-audit".to_string(),
         ));
     }
@@ -11319,7 +15072,9 @@ fn truncate_text(text: &str, max_len: usize) -> String {
 
 fn list_relative_files(root: &Path, current: &Path) -> Result<Vec<String>> {
     let mut files = Vec::new();
-    for entry in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
+    for entry in
+        std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))?
+    {
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
@@ -11342,8 +15097,192 @@ fn list_run_directory(run_dir: &Path) -> Result<Vec<String>> {
     Ok(files)
 }
 
+fn is_mason_context_candidate(path: &str) -> bool {
+    let normalized = normalize_project_path(path);
+    if normalized.is_empty() {
+        return false;
+    }
+    let blocked_prefixes = [
+        ".git/",
+        ".harkonnen/",
+        "target/",
+        "dist/",
+        "build/",
+        "node_modules/",
+        "factory/",
+    ];
+    if blocked_prefixes
+        .iter()
+        .any(|prefix| normalized.starts_with(prefix))
+    {
+        return false;
+    }
+    let Some(ext) = Path::new(&normalized)
+        .extension()
+        .and_then(|value| value.to_str())
+    else {
+        return matches!(
+            normalized.as_str(),
+            "Cargo.toml" | "go.mod" | "package.json" | "pyproject.toml" | "requirements.txt"
+        );
+    };
+    matches!(
+        ext,
+        "rs" | "toml"
+            | "json"
+            | "yaml"
+            | "yml"
+            | "md"
+            | "txt"
+            | "js"
+            | "jsx"
+            | "ts"
+            | "tsx"
+            | "py"
+            | "go"
+            | "java"
+            | "c"
+            | "cc"
+            | "cpp"
+            | "h"
+            | "hpp"
+            | "cs"
+    )
+}
+
+fn mason_context_priority(path: &str) -> (u8, usize, String) {
+    let normalized = normalize_project_path(path);
+    let priority = if normalized == "Cargo.toml"
+        || normalized.ends_with("/Cargo.toml")
+        || normalized == "package.json"
+        || normalized.ends_with("/package.json")
+        || normalized == "pyproject.toml"
+        || normalized.ends_with("/pyproject.toml")
+        || normalized == "go.mod"
+        || normalized.ends_with("/go.mod")
+    {
+        0
+    } else if normalized.ends_with("/src/lib.rs")
+        || normalized.ends_with("/src/main.rs")
+        || normalized.ends_with("/lib.rs")
+        || normalized.ends_with("/main.rs")
+    {
+        1
+    } else {
+        2
+    };
+    (priority, normalized.len(), normalized)
+}
+
+fn read_mason_context_file(
+    staged_product: &Path,
+    relative: &str,
+) -> Result<Option<MasonContextFile>> {
+    let path = join_workspace_relative_path(staged_product, relative)?;
+    let bytes = std::fs::read(&path).with_context(|| format!("reading {}", path.display()))?;
+    if bytes.contains(&0) {
+        return Ok(None);
+    }
+    let text = String::from_utf8_lossy(&bytes).to_string();
+    let max_chars = 4000usize;
+    let mut content = text.chars().take(max_chars).collect::<String>();
+    let truncated = text.chars().count() > max_chars;
+    if truncated {
+        content.push_str("\n...[truncated]");
+    }
+    Ok(Some(MasonContextFile {
+        path: normalize_project_path(relative),
+        content,
+        truncated,
+    }))
+}
+
+fn build_mason_context_files(
+    staged_product: &Path,
+    editable_paths: &[String],
+) -> Result<Vec<MasonContextFile>> {
+    let mut selected = Vec::new();
+    let mut seen = HashSet::new();
+
+    for relative in editable_paths {
+        let target = join_workspace_relative_path(staged_product, relative)?;
+        if target.is_file() {
+            let normalized = normalize_project_path(relative);
+            if is_mason_context_candidate(&normalized) && seen.insert(normalized.clone()) {
+                selected.push(normalized);
+            }
+            continue;
+        }
+        if !target.is_dir() {
+            continue;
+        }
+        let mut files = list_relative_files(staged_product, &target)?;
+        files.retain(|path| is_mason_context_candidate(path));
+        files.sort_by_key(|path| mason_context_priority(path));
+        for path in files {
+            if seen.insert(path.clone()) {
+                selected.push(path);
+            }
+            if selected.len() >= 8 {
+                break;
+            }
+        }
+        if selected.len() >= 8 {
+            break;
+        }
+    }
+
+    let mut context = Vec::new();
+    for relative in selected.into_iter().take(8) {
+        if let Some(file) = read_mason_context_file(staged_product, &relative)? {
+            context.push(file);
+        }
+    }
+    Ok(context)
+}
+
+fn join_workspace_relative_path(base: &Path, relative: &str) -> Result<PathBuf> {
+    let base = base.canonicalize()?;
+    let relative = Path::new(relative);
+    if relative.is_absolute() {
+        bail!("absolute paths are not allowed inside the staged workspace");
+    }
+
+    let mut joined = base.clone();
+    for component in relative.components() {
+        match component {
+            Component::Normal(value) => joined.push(value),
+            Component::CurDir => {}
+            _ => bail!("path escapes allowed workspace"),
+        }
+    }
+    Ok(joined)
+}
+
+fn path_allowed_for_edit(path: &str, editable_paths: &[String]) -> bool {
+    let path = normalize_project_path(path);
+    editable_paths.iter().any(|root| {
+        let root = normalize_project_path(root);
+        root == "." || path == root || path.starts_with(&format!("{root}/"))
+    })
+}
+
+fn parse_mason_edit_proposal(raw: &str) -> Result<MasonEditProposal> {
+    let stripped = raw
+        .trim()
+        .trim_start_matches("```json")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let proposal = serde_json::from_str::<MasonEditProposal>(stripped)
+        .with_context(|| "parsing Mason edit proposal JSON")?;
+    Ok(proposal)
+}
+
 fn copy_tree_contents(source_root: &Path, current: &Path, destination_root: &Path) -> Result<()> {
-    for entry in std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))? {
+    for entry in
+        std::fs::read_dir(current).with_context(|| format!("reading {}", current.display()))?
+    {
         let entry = entry?;
         let path = entry.path();
         let file_type = entry.file_type()?;
@@ -11360,8 +15299,9 @@ fn copy_tree_contents(source_root: &Path, current: &Path, destination_root: &Pat
                 std::fs::create_dir_all(parent)
                     .with_context(|| format!("creating {}", parent.display()))?;
             }
-            std::fs::copy(&path, &destination)
-                .with_context(|| format!("copying {} -> {}", path.display(), destination.display()))?;
+            std::fs::copy(&path, &destination).with_context(|| {
+                format!("copying {} -> {}", path.display(), destination.display())
+            })?;
         }
     }
     Ok(())
@@ -11394,6 +15334,106 @@ fn render_bundle_summary(run: &RunRecord, events: &[RunEvent]) -> String {
     }
 
     lines.join("\n") + "\n"
+}
+
+fn checkpoint_draft(run_id: &str, board: &BlackboardState, blocker: &str) -> CheckpointDraft {
+    let normalized = checkpoint_slug(blocker);
+    let phase = checkpoint_phase_for_blocker(blocker, &board.current_phase);
+    let agent =
+        checkpoint_agent_for_phase(phase.as_deref().unwrap_or(board.current_phase.as_str()));
+    let checkpoint_type = checkpoint_type_for_blocker(blocker).to_string();
+    let prompt = checkpoint_prompt_for_blocker(blocker, phase.as_deref(), agent.as_deref());
+    let context_json = serde_json::json!({
+        "blocker": blocker,
+        "current_phase": board.current_phase,
+        "active_goal": board.active_goal,
+        "policy_flags": board.policy_flags,
+        "artifact_refs": board.artifact_refs,
+        "agent_claims": board.agent_claims,
+    });
+
+    CheckpointDraft {
+        checkpoint_id: format!("checkpoint-{run_id}-{normalized}"),
+        phase,
+        agent,
+        checkpoint_type,
+        prompt,
+        context_json,
+    }
+}
+
+fn checkpoint_type_for_blocker(blocker: &str) -> &'static str {
+    match blocker {
+        "visible_validation_failed" => "needs_validation_review",
+        "hidden_scenarios_failed" => "needs_hidden_scenario_review",
+        "retriever_forge_failed" => "needs_operator_answer",
+        _ => "needs_operator_answer",
+    }
+}
+
+fn checkpoint_phase_for_blocker(blocker: &str, current_phase: &str) -> Option<String> {
+    match blocker {
+        "visible_validation_failed" => Some("validation".to_string()),
+        "hidden_scenarios_failed" => Some("hidden_scenarios".to_string()),
+        "retriever_forge_failed" => Some("retriever_forge".to_string()),
+        _ if current_phase.trim().is_empty() => None,
+        _ => Some(current_phase.to_string()),
+    }
+}
+
+fn checkpoint_agent_for_phase(phase: &str) -> Option<String> {
+    match phase {
+        "validation" => Some("bramble".to_string()),
+        "hidden_scenarios" => Some("sable".to_string()),
+        "retriever_forge" | "implementation" => Some("mason".to_string()),
+        "memory" => Some("coobie".to_string()),
+        "workspace" => Some("keeper".to_string()),
+        "tools" => Some("piper".to_string()),
+        "twin" => Some("ash".to_string()),
+        "artifacts" => Some("flint".to_string()),
+        "intake" => Some("scout".to_string()),
+        _ => None,
+    }
+}
+
+fn checkpoint_prompt_for_blocker(
+    blocker: &str,
+    phase: Option<&str>,
+    agent: Option<&str>,
+) -> String {
+    match blocker {
+        "visible_validation_failed" => "Bramble reported a visible validation failure. Review the evidence and decide whether to rerun, adjust the plan, or explicitly accept the risk.".to_string(),
+        "hidden_scenarios_failed" => "Sable found a hidden-scenario failure. Review the scenario evidence and provide an operator decision before treating the run as recovered.".to_string(),
+        "retriever_forge_failed" => "Mason's retriever forge packet failed. Provide revised direction or an operator decision before treating this blocker as resolved.".to_string(),
+        _ => format!(
+            "Operator review needed for blocker `{}`{}{}.",
+            blocker,
+            phase.map(|value| format!(" during phase `{value}`")).unwrap_or_default(),
+            agent.map(|value| format!(" for agent `{value}`")).unwrap_or_default(),
+        ),
+    }
+}
+
+fn checkpoint_slug(value: &str) -> String {
+    let mut slug = String::new();
+    let mut last_was_dash = false;
+    for ch in value.chars() {
+        let next = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else {
+            '-'
+        };
+        if next == '-' {
+            if !last_was_dash && !slug.is_empty() {
+                slug.push(next);
+            }
+            last_was_dash = true;
+        } else {
+            slug.push(next);
+            last_was_dash = false;
+        }
+    }
+    slug.trim_matches('-').to_string()
 }
 
 fn push_unique(list: &mut Vec<String>, value: &str) {
@@ -11455,45 +15495,70 @@ fn infer_intervention(events: &[RunEvent]) -> Option<String> {
         .map(|event| format!("{} completed: {}", event.agent, event.message))
 }
 
-
 fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
-    let mut out = String::from("# Labrador Response Log
+    let mut out = String::from(
+        "# Labrador Response Log
 
-");
+",
+    );
     for execution in agent_executions {
-        out.push_str(&format!("## {} ({})
+        out.push_str(&format!(
+            "## {} ({})
 
-", execution.display_name, execution.agent_name));
-        out.push_str(&format!("- Role: {}
-", execution.role));
-        out.push_str(&format!("- Provider: {}
-", execution.provider));
-        out.push_str(&format!("- Model: {}
-", execution.model));
-        out.push_str(&format!("- Mode: {}
-", execution.mode));
+",
+            execution.display_name, execution.agent_name
+        ));
+        out.push_str(&format!(
+            "- Role: {}
+",
+            execution.role
+        ));
+        out.push_str(&format!(
+            "- Provider: {}
+",
+            execution.provider
+        ));
+        out.push_str(&format!(
+            "- Model: {}
+",
+            execution.model
+        ));
+        out.push_str(&format!(
+            "- Mode: {}
+",
+            execution.mode
+        ));
         if !execution.summary.trim().is_empty() {
-            out.push_str(&format!("- Summary: {}
-", execution.summary.trim()));
+            out.push_str(&format!(
+                "- Summary: {}
+",
+                execution.summary.trim()
+            ));
         }
-        out.push_str("
+        out.push_str(
+            "
 ### Prompt
 
 ```text
-");
+",
+        );
         out.push_str(execution.prompt.trim());
-        out.push_str("
+        out.push_str(
+            "
 ```
 
 ### Output
 
 ```text
-");
+",
+        );
         out.push_str(execution.output.trim());
-        out.push_str("
+        out.push_str(
+            "
 ```
 
-");
+",
+        );
     }
     out
 }

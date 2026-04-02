@@ -5,8 +5,9 @@ use std::path::Path;
 use crate::{
     coobie::CausalReport,
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation, HiddenScenarioSummary,
-        LessonRecord, ProjectComponent, ProjectResumeRisk, ScenarioBlueprint, TwinEnvironment, ValidationSummary,
+        AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation,
+        HiddenScenarioSummary, LessonRecord, ProjectComponent, ProjectResumeRisk,
+        ScenarioBlueprint, TwinEnvironment, ValidationSummary,
     },
     orchestrator::AppContext,
 };
@@ -98,22 +99,37 @@ fn render_blueprint_lines(blueprint: Option<&ScenarioBlueprint>) -> Vec<String> 
         lines.push(format!("- objective={}", blueprint.objective.trim()));
     }
     if !blueprint.code_under_test.is_empty() {
-        lines.push(format!("- code_under_test={}", blueprint.code_under_test.join(", ")));
+        lines.push(format!(
+            "- code_under_test={}",
+            blueprint.code_under_test.join(", ")
+        ));
     }
     if !blueprint.hidden_oracles.is_empty() {
-        lines.push(format!("- hidden_oracles={}", blueprint.hidden_oracles.join(", ")));
+        lines.push(format!(
+            "- hidden_oracles={}",
+            blueprint.hidden_oracles.join(", ")
+        ));
     }
     if !blueprint.datasets.is_empty() {
         lines.push(format!("- datasets={}", blueprint.datasets.join(", ")));
     }
     if !blueprint.runtime_surfaces.is_empty() {
-        lines.push(format!("- runtime_surfaces={}", blueprint.runtime_surfaces.join(", ")));
+        lines.push(format!(
+            "- runtime_surfaces={}",
+            blueprint.runtime_surfaces.join(", ")
+        ));
     }
     if !blueprint.coobie_memory_topics.is_empty() {
-        lines.push(format!("- coobie_memory_topics={}", blueprint.coobie_memory_topics.join(", ")));
+        lines.push(format!(
+            "- coobie_memory_topics={}",
+            blueprint.coobie_memory_topics.join(", ")
+        ));
     }
     if !blueprint.required_artifacts.is_empty() {
-        lines.push(format!("- required_artifacts={}", blueprint.required_artifacts.join(", ")));
+        lines.push(format!(
+            "- required_artifacts={}",
+            blueprint.required_artifacts.join(", ")
+        ));
     }
     if lines.is_empty() {
         lines.push("- No explicit scenario blueprint recorded.".to_string());
@@ -155,8 +171,10 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
         read_optional_json(&run_dir.join("coobie_briefing.json")).await?;
     let causal_report: Option<CausalReport> =
         read_optional_json(&run_dir.join("causal_report.json")).await?;
-    let coobie_preflight_response = read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
-    let coobie_report_response = read_optional_text(&run_dir.join("coobie_report_response.md")).await?;
+    let coobie_preflight_response =
+        read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
+    let coobie_report_response =
+        read_optional_text(&run_dir.join("coobie_report_response.md")).await?;
 
     let mut report = format!(
         "Run Report\n==========\nRun ID: {}\nSpec ID: {}\nProduct: {}\nStatus: {}\nCreated: {}\nUpdated: {}\nWorkspace: {}\nArtifacts: {}\n",
@@ -331,13 +349,18 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
         report.push_str("No lessons were promoted for this run.\n");
     }
 
-    report.push_str("
+    report.push_str(
+        "
 Coobie Preflight
 -----------------
-");
+",
+    );
     if let Some(briefing) = coobie_briefing {
-        report.push_str(&format!("Generated: {}
-", briefing.generated_at));
+        report.push_str(&format!(
+            "Generated: {}
+",
+            briefing.generated_at
+        ));
         report.push_str(&format!(
             "Project memory root: {}
 ",
@@ -517,21 +540,33 @@ Coobie Preflight
                 briefing.regulatory_considerations.join(" | ")
             }
         ));
-        report.push_str("Project components:
-");
+        report.push_str(
+            "Project components:
+",
+        );
         for line in render_component_lines(&briefing.project_components) {
-            report.push_str(&format!("{}
-", line));
+            report.push_str(&format!(
+                "{}
+",
+                line
+            ));
         }
-        report.push_str("Scenario blueprint:
-");
+        report.push_str(
+            "Scenario blueprint:
+",
+        );
         for line in render_blueprint_lines(briefing.scenario_blueprint.as_ref()) {
-            report.push_str(&format!("{}
-", line));
+            report.push_str(&format!(
+                "{}
+",
+                line
+            ));
         }
     } else {
-        report.push_str("No Coobie preflight briefing written yet.
-");
+        report.push_str(
+            "No Coobie preflight briefing written yet.
+",
+        );
     }
 
     report.push_str("\nCoobie Responses\n-----------------\n");
@@ -549,7 +584,6 @@ Coobie Preflight
     } else {
         report.push_str("Report response: not yet generated.\n");
     }
-
 
     report.push_str("\nCoobie Causal Analysis\n----------------------\n");
     if let Some(causal) = causal_report {
@@ -571,12 +605,13 @@ Coobie Preflight
         }
         let scores = &causal.episode_scores;
         report.push_str(&format!(
-            "Scores: spec_clarity={:.2} change_scope={:.2} twin_fidelity={:.2} test_coverage={:.2} memory_retrieval={:.2}\n",
+            "Scores: spec_clarity={:.2} change_scope={:.2} twin_fidelity={:.2} test_coverage={:.2} memory_retrieval={:.2} phase_success={:.2}\n",
             scores.spec_clarity_score,
             scores.change_scope_score,
             scores.twin_fidelity_score,
             scores.test_coverage_score,
             scores.memory_retrieval_score,
+            scores.phase_success_score,
         ));
         if let Some(deep) = &causal.deep_causality {
             report.push_str(&format!(

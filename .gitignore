@@ -16,6 +16,8 @@ factory/artifacts/
 factory/workspaces/
 products/
 
-# Hugging Face model cache — downloaded by fastembed on first run (~33MB)
-# Lives at ~/.cache/huggingface/hub/ outside the repo; listed here as documentation.
-# If you vendor the model locally, add its path here too.
+# fastembed model cache — downloaded on first run, never committed
+.fastembed_cache/
+
+# Hugging Face model cache — lives at ~/.cache/huggingface/hub/ outside the repo
+# Listed here as documentation; not tracked by git.

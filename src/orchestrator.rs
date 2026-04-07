@@ -5459,11 +5459,9 @@ Produce the intent package JSON and incorporate Coobie guardrails, required chec
             build_implementation_plan(spec_obj, intent, briefing, staged_product, target_source);
 
         if let Some(provider) = llm::build_provider("mason", "default", &self.paths.setup) {
-            let memory_section = format_memory_context(&briefing.memory_hits);
             let spec_yaml =
                 serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
-            let intent_json = serde_json::to_string_pretty(intent).unwrap_or_default();
-            let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
+            let constraints = mason_slim_briefing(briefing);
             let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
             let system_instruction = prompt_support
                 .as_ref()
@@ -5471,10 +5469,10 @@ Produce the intent package JSON and incorporate Coobie guardrails, required chec
                     "{}
 
 Task contract:
-You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec, a Scout intent package, and prior memory context. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Intent Summary, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks, ## Prior Context. Be specific and avoid filler.",
+You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec and operating constraints. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks. Be specific and avoid filler.",
                     support.system_instruction
                 ))
-                .unwrap_or_else(|| "You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec, a Scout intent package, and prior memory context. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Intent Summary, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks, ## Prior Context. Be specific and avoid filler.".to_string());
+                .unwrap_or_else(|| "You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec and operating constraints. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks. Be specific and avoid filler.".to_string());
             let repo_context_block = prompt_support
                 .as_ref()
                 .map(|support| support.repo_context_block.as_str())
@@ -5494,30 +5492,16 @@ REPO-LOCAL SKILL BUNDLES:
 {spec_yaml}
 ```
 
-INTENT:
-```json
-{intent_json}
-```
-
 TARGET: {} ({})
 
-PRIOR MEMORY:
-{memory_section}
-
-COOBIE BRIEFING:
-```json
-{briefing_json}
-```
-
-COOBIE RESPONSE:
-{response}
+CONSTRAINTS:
+{constraints}
 
 {repo_context_block}
 
-Produce the implementation plan markdown and treat Coobie guardrails, required checks, repo-local constraints, and skill bundles as real operating constraints.",
+Produce the implementation plan markdown. Treat guardrails and required checks as hard constraints.",
                     target_source.label,
                     target_source.source_path,
-                    response = briefing.coobie_response,
                     repo_context_block = repo_context_block,
                 ),
             );
@@ -5565,9 +5549,9 @@ Produce the implementation plan markdown and treat Coobie guardrails, required c
         &self,
         run_id: &str,
         spec_obj: &Spec,
-        intent: &IntentPackage,
+        _intent: &IntentPackage,
         briefing: &CoobieBriefing,
-        implementation_plan: &str,
+        _implementation_plan: &str,
         target_source: &TargetSourceMetadata,
         staged_product: &Path,
         run_dir: &Path,
@@ -5630,8 +5614,7 @@ Produce the implementation plan markdown and treat Coobie guardrails, required c
 
         let spec_yaml =
             serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
-        let intent_json = serde_json::to_string_pretty(intent).unwrap_or_default();
-        let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
+        let constraints = mason_slim_briefing(briefing);
         let context_paths = context_files
             .iter()
             .map(|file| file.path.clone())
@@ -5640,22 +5623,14 @@ Produce the implementation plan markdown and treat Coobie guardrails, required c
             .iter()
             .map(|file| {
                 format!(
-                    "FILE: {}
-TRUNCATED: {}
-```text
-{}
-```",
+                    "FILE: {}{}\n```text\n{}\n```",
                     file.path,
-                    if file.truncated { "true" } else { "false" },
+                    if file.truncated { " [truncated]" } else { "" },
                     file.content
                 )
             })
             .collect::<Vec<_>>()
-            .join(
-                "
-
-",
-            );
+            .join("\n\n");
 
         let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
         let system_instruction = prompt_support
@@ -5688,32 +5663,20 @@ REPO-LOCAL SKILL BUNDLES:
 {spec_yaml}
 ```
 
-INTENT:
-```json
-{intent_json}
-```
-
-COOBIE BRIEFING:
-```json
-{briefing_json}
-```
-
-IMPLEMENTATION PLAN:
-```markdown
-{implementation_plan}
-```
-
 TARGET: {} ({})
 
 EDITABLE PATHS:
 {}
 
-CURRENT FILE CONTEXT:
-{}
+CONSTRAINTS:
+{constraints}
 
 {repo_context_block}
 
-Generate the smallest safe set of file writes needed to move the staged workspace toward the spec's requested behavior. Respect the declared skill bundles and repo-local guidance. If no safe edit is justified from this context, return edits as an empty array and explain why in rationale.",
+CURRENT FILE CONTEXT:
+{}
+
+Generate the smallest safe set of file writes needed to satisfy the spec's acceptance criteria. Only touch the editable paths. Respect guardrails and required checks as hard constraints. If no safe edit is justified, return edits as an empty array and explain why in rationale.",
                     target_source.label,
                     staged_product.display(),
                     render_list(&editable_paths, "No editable paths were resolved."),
@@ -5721,7 +5684,7 @@ Generate the smallest safe set of file writes needed to move the staged workspac
                     repo_context_block = repo_context_block,
                 )),
             ],
-            max_tokens: 12000,
+            max_tokens: 8000,
             temperature: 0.1,
         };
 
@@ -15232,7 +15195,7 @@ fn read_mason_context_file(
         return Ok(None);
     }
     let text = String::from_utf8_lossy(&bytes).to_string();
-    let max_chars = 4000usize;
+    let max_chars = 12000usize;
     let mut content = text.chars().take(max_chars).collect::<String>();
     let truncated = text.chars().count() > max_chars;
     if truncated {
@@ -15305,6 +15268,54 @@ fn join_workspace_relative_path(base: &Path, relative: &str) -> Result<PathBuf> 
         }
     }
     Ok(joined)
+}
+
+/// Compact constraint block sent to Mason — only what it needs to act.
+/// Strips all citation chains, reasoning histories, and memory blobs.
+fn mason_slim_briefing(briefing: &CoobieBriefing) -> String {
+    let mut out = String::new();
+
+    if !briefing.required_checks.is_empty() {
+        out.push_str("REQUIRED CHECKS:\n");
+        for c in &briefing.required_checks {
+            out.push_str(&format!("- {c}\n"));
+        }
+        out.push('\n');
+    }
+
+    if !briefing.recommended_guardrails.is_empty() {
+        out.push_str("GUARDRAILS:\n");
+        for g in &briefing.recommended_guardrails {
+            out.push_str(&format!("- {g}\n"));
+        }
+        out.push('\n');
+    }
+
+    if !briefing.application_risks.is_empty() {
+        out.push_str("RISKS:\n");
+        for r in &briefing.application_risks {
+            out.push_str(&format!("- {r}\n"));
+        }
+        out.push('\n');
+    }
+
+    // Coobie's distilled verdict — capped so it can't explode
+    let response = briefing.coobie_response.trim();
+    if !response.is_empty() {
+        let capped: String = response.chars().take(600).collect();
+        out.push_str("COOBIE SUMMARY:\n");
+        out.push_str(&capped);
+        if response.chars().count() > 600 {
+            out.push_str("...");
+        }
+        out.push('\n');
+    }
+
+    if out.is_empty() {
+        "No constraints loaded.".to_string()
+    } else {
+        out.trim_end().to_string()
+    }
 }
 
 fn path_allowed_for_edit(path: &str, editable_paths: &[String]) -> bool {

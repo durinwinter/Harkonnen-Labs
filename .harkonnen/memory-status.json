@@ -12,7 +12,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 9\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a, 9634317f-f69c-4da8-aa60-c29b748dc4a6, 2d9c4c73-bb52-414f-bc88-044d0e408e25",
-    "created_at": "2026-04-07T15:52:06.803476655+00:00",
+    "created_at": "2026-04-07T16:21:39.644335610+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -42,7 +42,16 @@
       "challenged_by": [
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -64,7 +73,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 6\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c",
-    "created_at": "2026-04-07T15:52:06.815476622+00:00",
+    "created_at": "2026-04-07T16:21:39.660335569+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -103,7 +112,71 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+    "tags": [
+      "lesson",
+      "residue",
+      "dead-end",
+      "strategy-register",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
+    "content": "Occurrences: 11\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a, 9634317f-f69c-4da8-aa60-c29b748dc4a6, 2d9c4c73-bb52-414f-bc88-044d0e408e25, a8d2f5c2-9b1a-4465-a539-b8e94e7315fa, 52075d9c-f696-4705-9870-9fe2d22d7db4",
+    "created_at": "2026-04-07T16:21:39.676335528+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -125,7 +198,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 7\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a",
-    "created_at": "2026-04-07T15:52:06.827476590+00:00",
+    "created_at": "2026-04-07T16:21:39.692335487+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -161,7 +234,68 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+    "tags": [
+      "lesson",
+      "residue",
+      "dead-end",
+      "strategy-register",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
+    "content": "Occurrences: 12\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 4 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a, 9634317f-f69c-4da8-aa60-c29b748dc4a6, 2d9c4c73-bb52-414f-bc88-044d0e408e25, a8d2f5c2-9b1a-4465-a539-b8e94e7315fa, 52075d9c-f696-4705-9870-9fe2d22d7db4, 8d0617f1-b52a-4c90-8525-5bc8afd57d27",
+    "created_at": "2026-04-07T16:21:39.708335446+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -183,7 +317,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 8\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a, 9634317f-f69c-4da8-aa60-c29b748dc4a6",
-    "created_at": "2026-04-07T15:52:06.838476560+00:00",
+    "created_at": "2026-04-07T16:21:39.724335404+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -216,7 +350,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -238,7 +381,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 3\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc",
-    "created_at": "2026-04-07T15:52:06.850476528+00:00",
+    "created_at": "2026-04-07T16:21:39.740335363+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -287,7 +430,74 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+    "tags": [
+      "lesson",
+      "residue",
+      "dead-end",
+      "strategy-register",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
+    "content": "Occurrences: 10\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6, 3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c, 5a42475f-4afd-4876-b9fc-20cb743a462a, 9634317f-f69c-4da8-aa60-c29b748dc4a6, 2d9c4c73-bb52-414f-bc88-044d0e408e25, a8d2f5c2-9b1a-4465-a539-b8e94e7315fa",
+    "created_at": "2026-04-07T16:21:39.755335324+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "ea32a062bad3845c86d11921b81777e15f342270",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -309,7 +519,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 4\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459",
-    "created_at": "2026-04-07T15:52:06.862476495+00:00",
+    "created_at": "2026-04-07T16:21:39.771335284+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -355,7 +565,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -377,7 +596,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 2\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049",
-    "created_at": "2026-04-07T15:52:06.874476463+00:00",
+    "created_at": "2026-04-07T16:21:39.787335243+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -429,7 +648,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -451,7 +679,7 @@
     ],
     "summary": "Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin",
     "content": "Occurrences: 5\nLatest failure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nLatest surviving structure: none\nLatest reformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nRun ids: 1647810b-cc75-474a-a65a-4da98ada47da, c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049, 9d66fcca-f152-409c-8b17-1caa6df47abc, bd89b27f-45c1-4a8a-a893-bc067a05b459, cf62669a-fa1c-4493-823a-eace5b5c53d6",
-    "created_at": "2026-04-07T15:52:06.886476430+00:00",
+    "created_at": "2026-04-07T16:21:39.803335201+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -494,7 +722,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -515,7 +752,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.898476398+00:00",
+    "created_at": "2026-04-07T16:21:39.819335160+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -553,7 +790,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -574,7 +820,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 2 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 2 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.910476365+00:00",
+    "created_at": "2026-04-07T16:21:39.835335119+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -627,7 +873,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -648,7 +903,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.922476333+00:00",
+    "created_at": "2026-04-07T16:21:39.851335078+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -699,7 +954,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -720,7 +984,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.934476300+00:00",
+    "created_at": "2026-04-07T16:21:39.868335034+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -774,7 +1038,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -795,7 +1068,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.946476268+00:00",
+    "created_at": "2026-04-07T16:21:39.883334995+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -836,7 +1109,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -857,7 +1139,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.958476235+00:00",
+    "created_at": "2026-04-07T16:21:39.899334954+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -913,7 +1195,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -934,7 +1225,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.971476200+00:00",
+    "created_at": "2026-04-07T16:21:39.915334913+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -979,7 +1270,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1000,7 +1300,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.984476165+00:00",
+    "created_at": "2026-04-07T16:21:39.931334872+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1032,7 +1332,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1053,7 +1362,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:06.996476133+00:00",
+    "created_at": "2026-04-07T16:21:39.947334831+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1082,7 +1391,66 @@
       "superseded_by": null,
       "challenged_by": [
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-exploration-hidden-scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+    "tags": [
+      "lesson",
+      "residue",
+      "exploration",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
+    "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
+    "created_at": "2026-04-07T16:21:39.963334789+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1103,7 +1471,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:07.008476100+00:00",
+    "created_at": "2026-04-07T16:21:39.979334748+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1138,7 +1506,125 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-exploration-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+    "tags": [
+      "lesson",
+      "residue",
+      "exploration",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
+    "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
+    "created_at": "2026-04-07T16:21:39.994334710+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-exploration-hidden-scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+    "tags": [
+      "lesson",
+      "residue",
+      "exploration",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
+    "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 4 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 4 scenario(s)' ?",
+    "created_at": "2026-04-07T16:21:40.010334668+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1159,7 +1645,7 @@
     ],
     "summary": "Residue exploration dead-end in hidden_scenarios: sable - pack is workin",
     "content": "Strategy: sable - pack is workin\nthasrealnotgrate\nEvaluating hidden scenarios\nFailure constraint: thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)\nSurviving structure: none\nReformulation: hidden_scenarios phase failed; preserve surviving structure and change strategy on retry\nArtifacts: hidden_scenarios.json\nParameters: confidence=0.50 | event_count=2\nOpen questions: What changed would let the hidden_scenarios phase succeed without repeating 'thasnotgrate\nthasrealnotgrate\nHidden scenario evaluation finished: 1 scenario(s)' ?",
-    "created_at": "2026-04-07T15:52:07.020476068+00:00",
+    "created_at": "2026-04-07T16:21:40.026334628+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1207,7 +1693,16 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1227,7 +1722,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.032476035+00:00",
+    "created_at": "2026-04-07T16:21:40.042334587+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1262,7 +1757,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1282,7 +1783,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.044476002+00:00",
+    "created_at": "2026-04-07T16:21:40.058334545+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1325,7 +1826,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1345,7 +1852,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.056475970+00:00",
+    "created_at": "2026-04-07T16:21:40.074334504+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1389,7 +1896,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1409,7 +1922,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.068475938+00:00",
+    "created_at": "2026-04-07T16:21:40.089334465+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1455,7 +1968,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1475,7 +1994,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.080475905+00:00",
+    "created_at": "2026-04-07T16:21:40.105334424+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1513,7 +2032,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1533,7 +2058,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.092475873+00:00",
+    "created_at": "2026-04-07T16:21:40.122334380+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1581,7 +2106,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1601,7 +2132,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.104475840+00:00",
+    "created_at": "2026-04-07T16:21:40.137334342+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1641,7 +2172,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1661,7 +2198,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.116475808+00:00",
+    "created_at": "2026-04-07T16:21:40.153334300+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1692,7 +2229,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1712,7 +2255,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.128475775+00:00",
+    "created_at": "2026-04-07T16:21:40.170334256+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1741,7 +2284,62 @@
       "superseded_by": null,
       "challenged_by": [
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-hidden-scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+    "tags": [
+      "lesson",
+      "causal",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "content": "Source episode: hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "created_at": "2026-04-07T16:21:40.185334219+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1761,7 +2359,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.140475743+00:00",
+    "created_at": "2026-04-07T16:21:40.201334177+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1794,7 +2392,117 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+    "tags": [
+      "lesson",
+      "causal",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "content": "Source episode: hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "created_at": "2026-04-07T16:21:40.217334136+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
+      ]
+    },
+    "recall_count": 0,
+    "last_recalled": null,
+    "loaded_for_run_count": 0,
+    "contributed_to_success_count": 0,
+    "contributed_to_failure_count": 0
+  },
+  {
+    "id": "lesson-hidden-scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+    "tags": [
+      "lesson",
+      "causal",
+      "project-memory",
+      "hidden_scenarios",
+      "sable"
+    ],
+    "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "content": "Source episode: hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
+    "created_at": "2026-04-07T16:21:40.233334095+00:00",
+    "provenance": {
+      "source_label": "Harkonnen-Labs",
+      "source_kind": "path",
+      "source_path": "/media/earthling/Caleb's Files1/Harkonnen-Labs",
+      "source_run_id": null,
+      "source_spec_id": null,
+      "git_branch": "main",
+      "git_commit": "7759bc733cc06087d2291bcf8ac460e4c320af96",
+      "git_remote": "https://github.com/durinwinter/Harkonnen-Labs.git",
+      "evidence_run_ids": [],
+      "stale_when": [
+        "implementation behavior",
+        "oracle semantics",
+        "or runtime assumptions change"
+      ],
+      "observed_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "code_under_test_paths": [
+        "src/llm.rs",
+        "src/capacity.rs"
+      ],
+      "observed_surfaces": [],
+      "status": "challenged",
+      "superseded_by": null,
+      "challenged_by": [
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1814,7 +2522,7 @@
     ],
     "summary": "Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
     "content": "Source episode: hidden_scenarios-f488d905-029f-45ab-addb-5f77bb64727a\nPhase: hidden_scenarios\nIntervention: No intervention recorded yet\nObserved pattern: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s",
-    "created_at": "2026-04-07T15:52:07.152475710+00:00",
+    "created_at": "2026-04-07T16:21:40.249334053+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1856,7 +2564,13 @@
         "lesson-exploration-hidden_scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
     "recall_count": 0,
@@ -1880,7 +2594,7 @@
     ],
     "summary": "Repeatable failure pattern in hidden_scenarios / sable via claude with anthropic/webapp-testing",
     "content": "Occurrences: 2\nSupporting runs: d63dd0b2-1179-4b03-b1a4-be371fce5b47\nProvider route: claude\nPrompt bundle fingerprint: e8b6470a2c051708\nPrompt bundle artifact: agents/sable_prompt_bundle.json\nPinned skills: anthropic/webapp-testing\nRequired checks: Visible validation must prove the main project still builds or executes in the staged workspace. | The twin narrative must state which external systems are simulated, stubbed, or still missing. | Revalidate stale memory lesson-exploration-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8 before relying on it; severity=high score=70. | Revalidate stale memory lesson-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8 before relying on it; severity=high score=70.\nGuardrails: Require every planning agent to consume Coobie's briefing before finalizing its output. | Prefer explicit state machines and quality-coded data flows over implicit happy-path assumptions. | Capture evidence artifacts for each critical validation claim instead of relying on narrative confidence. | Retrieve and cite project memory topics before planning: capacity, fallback, provider, llm. | Account for recurring cause 'Broad implementation scope (many agent phases active, wide file changes) increases the probability of hidden scenario failures.' early instead of waiting for validation to rediscover it. | Apply distilled lesson before acting: Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s. | Apply distilled lesson before acting: Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:hidden scenario evaluation finished scenario s. | Treat high-risk stale project memories as provisional until Coobie’s mitigation steps are satisfied. | Do not rely on memory lesson-exploration-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8 as settled truth until the newer contradicting evidence is reviewed. | Do not rely on memory lesson-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8 as settled truth until the newer contradicting evidence is reviewed.\nMemory ids: run-d63dd0b2-1179-4b03-b1a4-be371fce5b47 | 01-agent-roster | 02-setup-guide | 03-mcp-tools | 04-spec-format | coobie-openagent-roadmap | coobie-residue-roadmap | coobie-solitaire-agents-roadmap | imports__manual-drop-txt | lamdet-middle-peak-sling-note | reference-oracle-scenario-pattern\nRelevant lesson ids: lesson-hidden_scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8 | lesson-hidden_scenarios-79eaefb5-545a-4724-90f5-efd30b27496f | lesson-hidden_scenarios-af67a36a-ffbc-4774-a6ae-aabd475b01ec | lesson-hidden_scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c | lesson-hidden_scenarios-f613d94c-bc6a-4bd9-ac5d-cdb7dd80452d\nQuery terms: wire-fallback-for | Wire CapacityState::fallback_for into build_provider_with_capacity | The fallback_for method on CapacityState is defined but never called. build_provider_with_capacity manually walks the fallback_chain instead of using it. This spec asks Mason to refactor build_provider_with_capacity so it uses fallback_for to resolve the next available provider, eliminating the dead code warning and keeping the two implementations in sync. | Harkonnen-Labs | path | refactor build_provider_with_capacity in src/llm.rs to call fallback_for | remove the manual fallback_chain walk that duplicates fallback_for logic | keep all existing provider-selection behavior intact | eliminate the dead_code warning on CapacityState::fallback_for | only modify src/llm.rs and src/capacity.rs | do not change the public API of build_provider or build_provider_with_capacity | do not change provider selection order or fallback behavior | all existing callers must continue to compile | src/llm.rs — build_provider_with_capacity implementation | src/capacity.rs — CapacityState and fallback_for definition | src/llm.rs with refactored build_provider_with_capacity | no compiler warnings about unused fallback_for | cargo check passes with no errors | fallback_for is called from build_provider_with_capacity | the dead_code warning on fallback_for is gone | provider selection behavior is unchanged | rust | cargo | cargo check should complete in under 60 seconds | no secrets or credentials introduced | llm_provider_builder | code_under_test | source_file | src/llm.rs | build_provider_with_capacity is the target function | currently walks fallback_chain manually instead of using fallback_for | capacity_state | src/capacity.rs | fallback_for is defined but never called (dead_code warning) | should be the single source of truth for fallback resolution | refactor_dead_code | wire fallback_for into build_provider_with_capacity and verify cargo check passes | capacity | fallback | provider | llm",
-    "created_at": "2026-04-07T15:52:07.164475678+00:00",
+    "created_at": "2026-04-07T16:21:40.265334013+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -1936,14 +2650,23 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
-    "recall_count": 9,
-    "last_recalled": "2026-04-07T15:42:49.726645370+00:00",
-    "loaded_for_run_count": 9,
+    "recall_count": 12,
+    "last_recalled": "2026-04-07T16:20:25.528056027+00:00",
+    "loaded_for_run_count": 12,
     "contributed_to_success_count": 0,
-    "contributed_to_failure_count": 9
+    "contributed_to_failure_count": 12
   },
   {
     "id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-opus-no-pi",
@@ -1960,7 +2683,7 @@
     ],
     "summary": "Repeatable failure pattern in hidden_scenarios / sable via claude-opus with no-pinned-skills",
     "content": "Occurrences: 2\nSupporting runs: cf62669a-fa1c-4493-823a-eace5b5c53d6\nProvider route: claude-opus\nPrompt bundle fingerprint: ba68e799dd27fa2a\nPrompt bundle artifact: agents/sable_prompt_bundle.json\nPinned skills: none\nRequired checks: Visible validation must prove the main project still builds or executes in the staged workspace. | The twin narrative must state which external systems are simulated, stubbed, or still missing. | Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it. | Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it. | Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it. | Revalidate stale memory lesson-dead-end-cf62669a-fa1c-4493-823a-eace5b5c53d6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-cf62669a-fa1c-4493-823a-eace5b5c53d6-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it. | Explain what changed since retriever-forge evidence forge:cf62669a-fa1c-4493-823a-eace5b5c53d6 before claiming the same command path will now pass. | Explain what changed since retriever-forge evidence forge:bd89b27f-45c1-4a8a-a893-bc067a05b459 before claiming the same command path will now pass. | Explain what changed since retriever-forge evidence forge:9d66fcca-f152-409c-8b17-1caa6df47abc before claiming the same command path will now pass.\nGuardrails: Require every planning agent to consume Coobie's briefing before finalizing its output. | Prefer explicit state machines and quality-coded data flows over implicit happy-path assumptions. | Capture evidence artifacts for each critical validation claim instead of relying on narrative confidence. | Retrieve and cite project memory topics before planning: capacity, fallback, provider, llm. | Account for recurring cause 'Low twin fidelity may have caused false-negative hidden scenario failure — the simulated environment did not cover production conditions.' early instead of waiting for validation to rediscover it. | Apply distilled lesson before acting: Repeatable failure pattern in hidden_scenarios / sable via claude with anthropic/webapp-testing. | Respect learned intervention from Coobie memory: Inspect the hidden_scenarios / sable prompt bundle, provider route, pinned skills, and required checks before rerunning this phase.. | Apply distilled lesson before acting: Repeated failure pattern in hidden_scenarios: hidden_scenarios:sable:thasnotgrate thasrealnotgrate hidden scenario evaluation finished scenario s. | Treat high-risk stale project memories as provisional until Coobie’s mitigation steps are satisfied. | Do not rely on memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas as settled truth until the newer contradicting evidence is reviewed. | Do not rely on memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas as settled truth until the newer contradicting evidence is reviewed. | Do not rely on memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas as settled truth until the newer contradicting evidence is reviewed. | When a prior stale-memory mitigation reduced severity, preserve that check path instead of rediscovering it from scratch. | Respect prior retriever-forge evidence from cf62669a-fa1c-4493-823a-eace5b5c53d6 before rerunning the same bounded command path. | Reuse the successful retriever-forge evidence path recorded in cf62669a-fa1c-4493-823a-eace5b5c53d6 instead of inventing a new bounded execution route without cause. | Respect prior retriever-forge evidence from bd89b27f-45c1-4a8a-a893-bc067a05b459 before rerunning the same bounded command path. | Reuse the successful retriever-forge evidence path recorded in bd89b27f-45c1-4a8a-a893-bc067a05b459 instead of inventing a new bounded execution route without cause. | Respect prior retriever-forge evidence from 9d66fcca-f152-409c-8b17-1caa6df47abc before rerunning the same bounded command path. | Reuse the successful retriever-forge evidence path recorded in 9d66fcca-f152-409c-8b17-1caa6df47abc instead of inventing a new bounded execution route without cause. | Prefer the previously helpful bounded command path cited in forge-preference:cf62669a-fa1c-4493-823a-eace5b5c53d6:cargo-check-quiet unless current repo evidence contradicts it. | Prefer the previously helpful bounded command path cited in forge-preference:bd89b27f-45c1-4a8a-a893-bc067a05b459:cargo-check-quiet unless current repo evidence contradicts it. | Prefer the previously helpful bounded command path cited in forge-preference:9d66fcca-f152-409c-8b17-1caa6df47abc:cargo-check-quiet unless current repo evidence contradicts it. | Prefer the previously helpful bounded command path cited in forge-preference:c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049:cargo-check-quiet unless current repo evidence contradicts it.\nMemory ids: lesson-phase-pattern-hidden-scenarios-sable-failure-claude-anthropic | run-1647810b-cc75-474a-a65a-4da98ada47da | run-9d66fcca-f152-409c-8b17-1caa6df47abc | run-bd89b27f-45c1-4a8a-a893-bc067a05b459 | run-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049 | run-cf62669a-fa1c-4493-823a-eace5b5c53d6 | run-d63dd0b2-1179-4b03-b1a4-be371fce5b47 | 01-agent-roster | 02-setup-guide | 03-mcp-tools | 04-spec-format | coobie-openagent-roadmap | coobie-residue-roadmap | coobie-solitaire-agents-roadmap | imports__manual-drop-txt | lamdet-middle-peak-sling-note | reference-oracle-scenario-pattern\nRelevant lesson ids: lesson-phase-pattern-hidden-scenarios-sable-failure-claude-anthropic- | lesson-hidden_scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac | lesson-hidden_scenarios-f488d905-029f-45ab-addb-5f77bb64727a | lesson-hidden_scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd | lesson-hidden_scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6\nQuery terms: wire-fallback-for | Wire CapacityState::fallback_for into build_provider_with_capacity | The fallback_for method on CapacityState is defined but never called. build_provider_with_capacity manually walks the fallback_chain instead of using it. This spec asks Mason to refactor build_provider_with_capacity so it uses fallback_for to resolve the next available provider, eliminating the dead code warning and keeping the two implementations in sync. | Harkonnen-Labs | path | refactor build_provider_with_capacity in src/llm.rs to call fallback_for | remove the manual fallback_chain walk that duplicates fallback_for logic | keep all existing provider-selection behavior intact | eliminate the dead_code warning on CapacityState::fallback_for | only modify src/llm.rs and src/capacity.rs | do not change the public API of build_provider or build_provider_with_capacity | do not change provider selection order or fallback behavior | all existing callers must continue to compile | src/llm.rs — build_provider_with_capacity implementation | src/capacity.rs — CapacityState and fallback_for definition | src/llm.rs with refactored build_provider_with_capacity | no compiler warnings about unused fallback_for | cargo check passes with no errors | fallback_for is called from build_provider_with_capacity | the dead_code warning on fallback_for is gone | provider selection behavior is unchanged | rust | cargo | cargo check should complete in under 60 seconds | no secrets or credentials introduced | llm_provider_builder | code_under_test | source_file | src/llm.rs | build_provider_with_capacity is the target function | currently walks fallback_chain manually instead of using fallback_for | capacity_state | src/capacity.rs | fallback_for is defined but never called (dead_code warning) | should be the single source of truth for fallback resolution | refactor_dead_code | wire fallback_for into build_provider_with_capacity and verify cargo check passes | capacity | fallback | provider | llm",
-    "created_at": "2026-04-07T15:52:07.176475646+00:00",
+    "created_at": "2026-04-07T16:21:40.281333972+00:00",
     "provenance": {
       "source_label": "Harkonnen-Labs",
       "source_kind": "path",
@@ -2001,13 +2724,22 @@
         "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
         "lesson-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
         "lesson-exploration-hidden_scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
-        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas"
+        "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+        "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+        "lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas",
+        "lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09",
+        "lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas"
       ]
     },
-    "recall_count": 4,
-    "last_recalled": "2026-04-07T15:42:49.726645370+00:00",
-    "loaded_for_run_count": 4,
+    "recall_count": 7,
+    "last_recalled": "2026-04-07T16:20:25.528056027+00:00",
+    "loaded_for_run_count": 7,
     "contributed_to_success_count": 0,
-    "contributed_to_failure_count": 4
+    "contributed_to_failure_count": 7
   }
 ]

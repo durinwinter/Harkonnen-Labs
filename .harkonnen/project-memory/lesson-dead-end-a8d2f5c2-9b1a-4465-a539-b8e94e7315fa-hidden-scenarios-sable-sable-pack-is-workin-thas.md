@@ -1,8 +1,6 @@
 ---
 tags: [lesson, residue, dead-end, strategy-register, project-memory, hidden_scenarios, sable]
 summary: Recurring dead-end strategy in hidden_scenarios / sable: sable - pack is workin
-thasrealnotgrate
-Evaluating hidden scenarios
 source_label: Harkonnen-Labs
 source_kind: path
 source_path: /media/earthling/Caleb's Files1/Harkonnen-Labs
@@ -12,6 +10,8 @@ git_remote: https://github.com/durinwinter/Harkonnen-Labs.git
 stale_when: [implementation behavior, oracle semantics, or runtime assumptions change]
 observed_paths: [src/llm.rs, src/capacity.rs]
 code_under_test_paths: [src/llm.rs, src/capacity.rs]
+status: challenged
+challenged_by: [lesson-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69, lesson-exploration-hidden_scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69, lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas, lesson-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff, lesson-exploration-hidden_scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff, lesson-dead-end-8d0617f1-b52a-4c90-8525-5bc8afd57d27-hidden-scenarios-sable-sable-pack-is-workin-thas, lesson-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09, lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09, lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas]
 ---
 
 Occurrences: 10

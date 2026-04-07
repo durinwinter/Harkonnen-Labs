@@ -65,11 +65,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 10,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 10,
+      "recall_count": 13,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 13,
       "contributed_to_success_count": 0,
-      "contributed_to_failure_count": 10
+      "contributed_to_failure_count": 13
     },
     {
       "id": "02-setup-guide",
@@ -102,11 +102,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 10,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 10,
+      "recall_count": 13,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 13,
       "contributed_to_success_count": 0,
-      "contributed_to_failure_count": 10
+      "contributed_to_failure_count": 13
     },
     {
       "id": "03-mcp-tools",
@@ -142,11 +142,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 23,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 23,
+      "recall_count": 26,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 26,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 14
+      "contributed_to_failure_count": 17
     },
     {
       "id": "04-spec-format",
@@ -179,11 +179,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 23,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 23,
+      "recall_count": 26,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 26,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 14
+      "contributed_to_failure_count": 17
     },
     {
       "id": "coobie-causaloid-roadmap",
@@ -256,11 +256,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 23,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 23,
+      "recall_count": 26,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 26,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 14
+      "contributed_to_failure_count": 17
     },
     {
       "id": "coobie-residue-roadmap",
@@ -295,11 +295,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 23,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 23,
+      "recall_count": 26,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 26,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 14
+      "contributed_to_failure_count": 17
     },
     {
       "id": "coobie-solitaire-agents-roadmap",
@@ -334,11 +334,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 10,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 10,
+      "recall_count": 13,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 13,
       "contributed_to_success_count": 0,
-      "contributed_to_failure_count": 10
+      "contributed_to_failure_count": 13
     },
     {
       "id": "imports__coobie-memory-note",
@@ -405,11 +405,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 23,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 23,
+      "recall_count": 26,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 26,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 14
+      "contributed_to_failure_count": 17
     },
     {
       "id": "lamdet-middle-peak-sling-note",
@@ -442,11 +442,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 12,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 12,
+      "recall_count": 15,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 15,
       "contributed_to_success_count": 1,
-      "contributed_to_failure_count": 11
+      "contributed_to_failure_count": 14
     },
     {
       "id": "lesson-hidden-scenarios-a4f5609e-3750-4c9c-ac15-cbfc8d5f689c",
@@ -655,11 +655,11 @@
         "superseded_by": null,
         "challenged_by": []
       },
-      "recall_count": 18,
-      "last_recalled": "2026-04-07T15:42:49.733793973+00:00",
-      "loaded_for_run_count": 18,
+      "recall_count": 21,
+      "last_recalled": "2026-04-07T16:20:25.537463231+00:00",
+      "loaded_for_run_count": 21,
       "contributed_to_success_count": 5,
-      "contributed_to_failure_count": 13
+      "contributed_to_failure_count": 16
     },
     {
       "id": "run-28a77447-2921-4022-ac30-fc79e17a1742",

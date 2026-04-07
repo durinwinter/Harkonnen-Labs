@@ -3126,6 +3126,2115 @@
         }
       ],
       "resolved_since_previous": []
+    },
+    {
+      "run_id": "52075d9c-f696-4705-9870-9fe2d22d7db4",
+      "spec_id": "wire-fallback-for",
+      "product": "Harkonnen-Labs",
+      "generated_at": "2026-04-07T16:10:53.952371921+00:00",
+      "entries": [
+        {
+          "memory_id": "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity high score 70 (previous_score=none; reduced_from_previous=unknown; mitigation_steps=Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=high score=70. | Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=high score=70.; evidence=exploration_log.json present | visible validation passed | 2 mitigation step(s) generated | 1 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Reuse prior mitigation evidence: memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=none; reduced_from_previous=unknown; mitigation_steps=Revalidate memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "1 mitigation step(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Reuse prior mitigation evidence: memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "1 mitigation step(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-cf62669a-fa1c-4493-823a-eace5b5c53d6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-anthropic",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-opus-no-pi",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-1647810b-cc75-474a-a65a-4da98ada47da",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-2d9c4c73-bb52-414f-bc88-044d0e408e25",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-5a42475f-4afd-4876-b9fc-20cb743a462a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-9634317f-f69c-4da8-aa60-c29b748dc4a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-9d66fcca-f152-409c-8b17-1caa6df47abc",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-bd89b27f-45c1-4a8a-a893-bc067a05b459",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-cf62669a-fa1c-4493-823a-eace5b5c53d6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-d63dd0b2-1179-4b03-b1a4-be371fce5b47",
+          "severity": "medium",
+          "severity_score": 35,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 35,
+          "risk_reduced_from_previous": false
+        }
+      ],
+      "resolved_since_previous": []
+    },
+    {
+      "run_id": "8d0617f1-b52a-4c90-8525-5bc8afd57d27",
+      "spec_id": "wire-fallback-for",
+      "product": "Harkonnen-Labs",
+      "generated_at": "2026-04-07T16:20:15.099141370+00:00",
+      "entries": [
+        {
+          "memory_id": "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=none; reduced_from_previous=unknown; mitigation_steps=Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-cf62669a-fa1c-4493-823a-eace5b5c53d6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-anthropic",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-opus-no-pi",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-1647810b-cc75-474a-a65a-4da98ada47da",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-2d9c4c73-bb52-414f-bc88-044d0e408e25",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-5a42475f-4afd-4876-b9fc-20cb743a462a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-9634317f-f69c-4da8-aa60-c29b748dc4a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-9d66fcca-f152-409c-8b17-1caa6df47abc",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-bd89b27f-45c1-4a8a-a893-bc067a05b459",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-cf62669a-fa1c-4493-823a-eace5b5c53d6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-d63dd0b2-1179-4b03-b1a4-be371fce5b47",
+          "severity": "medium",
+          "severity_score": 35,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 35,
+          "risk_reduced_from_previous": false
+        }
+      ],
+      "resolved_since_previous": []
+    },
+    {
+      "run_id": "b5db6db6-0a13-494e-91a5-663af6cd8c2a",
+      "spec_id": "wire-fallback-for",
+      "product": "Harkonnen-Labs",
+      "generated_at": "2026-04-07T16:21:40.327262119+00:00",
+      "entries": [
+        {
+          "memory_id": "lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=none; reduced_from_previous=unknown; mitigation_steps=Revalidate memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-2d9c4c73-bb52-414f-bc88-044d0e408e25-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.",
+            "Reuse prior mitigation evidence: memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=95; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues. | Reuse prior mitigation evidence: memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas was partially_satisfied at severity critical score 95 (previous_score=70; reduced_from_previous=false; mitigation_steps=Revalidate memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95. | Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas. | Find the newer evidence that replaces or challenges memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues.; related_checks=Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 3 mitigation step(s) generated | 2 mitigation check(s) generated); related_checks=Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95. | Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it.; evidence=exploration_log.json present | visible validation passed | 4 mitigation step(s) generated | 2 mitigation check(s) generated)"
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-5a42475f-4afd-4876-b9fc-20cb743a462a-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "4 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [
+            "Revalidate stale memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it; severity=critical score=95.",
+            "Run targeted validation against the changed code_under_test paths for memory lesson-dead-end-9634317f-f69c-4da8-aa60-c29b748dc4a6-hidden-scenarios-sable-sable-pack-is-workin-thas before Mason, Ash, or Bramble reuses it."
+          ],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated",
+            "2 mitigation check(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [
+            "Revalidate memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before relying on it because severity=critical score=95.",
+            "Run targeted checks against the changed code-under-test paths linked to memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas.",
+            "Find the newer evidence that replaces or challenges memory lesson-dead-end-9d66fcca-f152-409c-8b17-1caa6df47abc-hidden-scenarios-sable-sable-pack-is-workin-thas before planning continues."
+          ],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed",
+            "3 mitigation step(s) generated"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-bd89b27f-45c1-4a8a-a893-bc067a05b459-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-cf62669a-fa1c-4493-823a-eace5b5c53d6-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-01e6b5bb-e1cd-454d-a9df-025c941dc0a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-3a2f8730-116c-463f-bb5a-0e08ec33e3bd",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-44c0a6ed-cdd8-44cd-ad10-179ed769ffe6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-6927195b-b8ff-4dea-8ccf-5dc5e89ab38a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-77951de8-3754-4beb-89d4-2f25f67edb2b",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-781bed0b-c9fd-490e-8a6f-6f91c98978ac",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-89581934-1986-44c0-9c5d-1e48d67a4020",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-a0ef19d7-49bd-4550-9d75-7bc4292b8811",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-c4b5724e-38cc-4191-86b0-1eb6efad5ade",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-f488d905-029f-45ab-addb-5f77bb64727a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-anthropic",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-phase-pattern-hidden-scenarios-sable-failure-claude-opus-no-pi",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-1647810b-cc75-474a-a65a-4da98ada47da",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-2d9c4c73-bb52-414f-bc88-044d0e408e25",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-3bc96a3c-2dbd-43eb-9ac1-14ee29d7764c",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-5a42475f-4afd-4876-b9fc-20cb743a462a",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-9634317f-f69c-4da8-aa60-c29b748dc4a6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-9d66fcca-f152-409c-8b17-1caa6df47abc",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-a8d2f5c2-9b1a-4465-a539-b8e94e7315fa",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-bd89b27f-45c1-4a8a-a893-bc067a05b459",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-c4ee92c5-2d93-40ae-bdfc-4cc98ee9e049",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "run-cf62669a-fa1c-4493-823a-eace5b5c53d6",
+          "severity": "critical",
+          "severity_score": 95,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 95,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-dead-end-52075d9c-f696-4705-9870-9fe2d22d7db4-hidden-scenarios-sable-sable-pack-is-workin-thas",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-exploration-hidden-scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-281ce3b5-9e46-43cd-a9aa-8f1c3de193f8",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-deb11a7b-48c3-4650-a20c-bb3206ad0b69",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 70,
+          "risk_reduced_from_previous": false
+        },
+        {
+          "memory_id": "lesson-hidden-scenarios-e04b7367-d414-4b5a-942b-39b2de3722ff",
+          "severity": "high",
+          "severity_score": 70,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": null,
+          "risk_reduced_from_previous": null
+        },
+        {
+          "memory_id": "run-d63dd0b2-1179-4b03-b1a4-be371fce5b47",
+          "severity": "medium",
+          "severity_score": 35,
+          "mitigation_steps": [],
+          "related_checks": [],
+          "status": "partially_satisfied",
+          "evidence": [
+            "exploration_log.json present",
+            "visible validation passed"
+          ],
+          "previous_severity_score": 35,
+          "risk_reduced_from_previous": false
+        }
+      ],
+      "resolved_since_previous": []
     }
   ]
 }

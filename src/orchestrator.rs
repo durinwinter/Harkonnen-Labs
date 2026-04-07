@@ -5642,7 +5642,7 @@ Task contract:
 You are Mason, an implementation specialist for a software factory. Produce valid JSON only. Return an object with keys summary (string), rationale (array of strings), and edits (array). Each edit must contain path (relative path inside the staged workspace), action (must be 'write'), summary (string), and content (the full file contents after your edit). Only edit files within the provided editable paths. Do not emit markdown. Do not explain outside the JSON object.",
                 support.system_instruction
             ))
-            .unwrap_or_else(|| "You are Mason, an implementation specialist for a software factory. Produce valid JSON only. Return an object with keys summary (string), rationale (array of strings), and edits (array). Each edit must contain path (relative path inside the staged workspace), action (must be 'write'), summary (string), and content (the full file contents after your edit). Only edit files within the provided editable paths. Do not emit markdown. Do not explain outside the JSON object.".to_string());
+            .unwrap_or_else(|| "You are Mason, an implementation specialist for a software factory. You must respond with a single raw JSON object and nothing else — no prose before it, no explanation after it, no markdown fences. The object must have exactly these keys: \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). Each edit must have: \"path\" (relative path in staged workspace), \"action\" (must be the string \"write\"), \"summary\" (string), \"content\" (full file contents after edit). Only edit files listed in EDITABLE PATHS. If no edit is needed, return edits as an empty array.".to_string());
         let repo_context_block = prompt_support
             .as_ref()
             .map(|support| support.repo_context_block.as_str())
@@ -5676,7 +5676,7 @@ CONSTRAINTS:
 CURRENT FILE CONTEXT:
 {}
 
-Generate the smallest safe set of file writes needed to satisfy the spec's acceptance criteria. Only touch the editable paths. Respect guardrails and required checks as hard constraints. If no safe edit is justified, return edits as an empty array and explain why in rationale.",
+Respond with a single JSON object only — no prose, no markdown, no explanation outside the object. If no edit is needed, return edits as an empty array. Do not write any text outside this JSON object.",
                     target_source.label,
                     staged_product.display(),
                     render_list(&editable_paths, "No editable paths were resolved."),
@@ -5708,9 +5708,14 @@ Generate the smallest safe set of file writes needed to satisfy the spec's accep
             }
         };
 
+        // Write raw response to disk before parsing so failures are diagnosable.
+        let raw_response_path = run_dir.join("mason_raw_response.txt");
+        let _ = tokio::fs::write(&raw_response_path, &response.content).await;
+
         let proposal = match parse_mason_edit_proposal(&response.content) {
             Ok(proposal) => proposal,
             Err(error) => {
+                let preview: String = response.content.chars().take(500).collect();
                 let application = MasonEditApplicationArtifact {
                     run_id: run_id.to_string(),
                     spec_id: spec_obj.id.clone(),
@@ -5718,8 +5723,8 @@ Generate the smallest safe set of file writes needed to satisfy the spec's accep
                     generated_at: Utc::now().to_rfc3339(),
                     status: "invalid_llm_edit_response".to_string(),
                     summary: format!(
-                        "Mason edit lane produced an invalid JSON edit proposal: {}",
-                        error
+                        "Mason edit lane produced an invalid JSON edit proposal: {}\nRaw response preview: {}",
+                        error, preview
                     ),
                     proposal_generated: false,
                     changed_files: Vec::new(),

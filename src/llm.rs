@@ -193,33 +193,56 @@ impl LlmProvider for AnthropicClient {
             messages,
         };
 
-        let resp = self
-            .http
-            .post("https://api.anthropic.com/v1/messages")
-            .header("x-api-key", &self.api_key)
-            .header("anthropic-version", "2023-06-01")
-            .header("content-type", "application/json")
-            .json(&body)
-            .send()
-            .await
-            .context("Anthropic API request failed")?;
+        // Retry up to 3 times on 429 rate-limit responses, honouring Retry-After.
+        let max_attempts = 3u32;
+        let mut attempt = 0u32;
+        loop {
+            attempt += 1;
+            let resp = self
+                .http
+                .post("https://api.anthropic.com/v1/messages")
+                .header("x-api-key", &self.api_key)
+                .header("anthropic-version", "2023-06-01")
+                .header("content-type", "application/json")
+                .json(&body)
+                .send()
+                .await
+                .context("Anthropic API request failed")?;
 
-        let status = resp.status();
-        if !status.is_success() {
-            let body = resp.text().await.unwrap_or_default();
-            bail!("Anthropic API error {}: {}", status, body);
+            let status = resp.status();
+            if status.as_u16() == 429 && attempt < max_attempts {
+                let retry_after = resp
+                    .headers()
+                    .get("retry-after")
+                    .and_then(|v| v.to_str().ok())
+                    .and_then(|s| s.parse::<u64>().ok())
+                    .unwrap_or(65);
+                tracing::warn!(
+                    attempt,
+                    retry_after,
+                    "Anthropic rate limit hit — waiting {retry_after}s before retry"
+                );
+                tokio::time::sleep(Duration::from_secs(retry_after)).await;
+                continue;
+            }
+
+            if !status.is_success() {
+                let body = resp.text().await.unwrap_or_default();
+                bail!("Anthropic API error {}: {}", status, body);
+            }
+
+            let parsed: AnthropicResponse =
+                resp.json().await.context("parsing Anthropic response")?;
+
+            let content = parsed
+                .content
+                .into_iter()
+                .map(|c| c.text)
+                .collect::<Vec<_>>()
+                .join("");
+
+            return Ok(LlmResponse { content });
         }
-
-        let parsed: AnthropicResponse = resp.json().await.context("parsing Anthropic response")?;
-
-        let content = parsed
-            .content
-            .into_iter()
-            .map(|c| c.text)
-            .collect::<Vec<_>>()
-            .join("");
-
-        Ok(LlmResponse { content })
     }
 }
 

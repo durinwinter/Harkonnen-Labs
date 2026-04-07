@@ -86,18 +86,9 @@ pub fn build_provider_with_capacity(
 
     // Build ordered list of providers to try: preferred first, then fallbacks.
     let candidates: Vec<String> = if let Some(cap) = capacity {
-        if cap.is_available(&resolved_name) {
-            vec![resolved_name.clone()]
-        } else {
-            // Preferred is unavailable — try fallback chain, skip unavailable entries.
-            let mut chain = cap.fallback_chain.clone();
-            if !chain.contains(&resolved_name) {
-                chain.insert(0, resolved_name.clone());
-            }
-            chain
-                .into_iter()
-                .filter(|name| name != &resolved_name && cap.is_available(name))
-                .collect()
+        match cap.fallback_for(&resolved_name) {
+            None => vec![resolved_name.clone()], // preferred is available (or unknown) — use it
+            Some(fb) => vec![fb],                // preferred is unavailable — use best alternative
         }
     } else {
         vec![resolved_name.clone()]

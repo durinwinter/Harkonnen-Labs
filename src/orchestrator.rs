@@ -2684,6 +2684,27 @@ next_actions={}",
                             format!("# Sable Generated Scenario Rationale\n\n{rationale}"),
                         )
                         .await;
+
+                        // ── Feed Sable's reasoning into project memory ────────
+                        if let Ok(proj_store) = self.project_memory_store(&target_source).await {
+                            let (id, tags, mem_summary, content, prov) =
+                                sable_rationale_to_memory_entry(
+                                    &rationale,
+                                    &spec_obj.id,
+                                    &spec_obj.title,
+                                    run_id,
+                                    summary.passed,
+                                );
+                            if let Err(e) = proj_store
+                                .store_with_metadata(&id, tags, &mem_summary, &content, prov)
+                                .await
+                            {
+                                tracing::warn!("Sable rationale memory write failed: {e}");
+                            } else {
+                                tracing::info!("Sable rationale written to project memory: {id}");
+                            }
+                        }
+
                         summary
                     }
                     None => HiddenScenarioSummary {
@@ -3063,6 +3084,22 @@ Top memory hits:
                     push_unique(&mut blackboard.artifact_refs, "coobie_report_response.md");
                     push_unique(&mut blackboard.artifact_refs, "causal_summary.md");
                     let _ = self.sync_blackboard(&blackboard, Some(&run_dir)).await;
+
+                    // ── Feed causal insight back into project memory ──────────
+                    // This closes the loop: next run's Coobie preflight will
+                    // semantically retrieve this entry and adjust its guidance.
+                    if let Ok(proj_store) = self.project_memory_store(&target_source).await {
+                        let (id, tags, summary, content, prov) =
+                            causal_report_to_memory_entry(&report, &spec_obj.id, &spec_obj.title);
+                        if let Err(e) = proj_store
+                            .store_with_metadata(&id, tags, &summary, &content, prov)
+                            .await
+                        {
+                            tracing::warn!("causal memory write failed: {e}");
+                        } else {
+                            tracing::info!("causal insight written to project memory: {id}");
+                        }
+                    }
                 }
                 Err(err) => tracing::warn!("Coobie emit_report failed: {err}"),
             }
@@ -15810,4 +15847,172 @@ fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
         );
     }
     out
+}
+
+// ── Causal feedback loop ──────────────────────────────────────────────────────
+//
+// After every run, Coobie's causal report and Sable's scenario rationale are
+// written back into the project memory store as structured entries. On the next
+// run the semantic retrieval layer finds them, so Coobie's pre-run guidance
+// improves automatically without any manual curation.
+
+/// Build a structured memory entry from a completed CausalReport.
+/// Stored in project memory, tagged so semantic search can surface it.
+fn causal_report_to_memory_entry(
+    report: &crate::coobie::CausalReport,
+    spec_id: &str,
+    spec_title: &str,
+) -> (String, Vec<String>, String, String, crate::memory::MemoryProvenance) {
+    let id = format!("causal-{}-{}", spec_id, &report.run_id[..report.run_id.len().min(8)]);
+
+    let mut tags = vec![
+        "causal".to_string(),
+        format!("spec:{}", spec_id),
+        format!("run:{}", &report.run_id[..report.run_id.len().min(8)]),
+    ];
+    if let Some(ref cause) = report.primary_cause {
+        // e.g. "SPEC_AMBIGUITY" → tag "cause:spec_ambiguity"
+        tags.push(format!("cause:{}", cause.split_whitespace().next().unwrap_or("unknown").to_lowercase()));
+    }
+    if report.episode_scores.scenario_passed {
+        tags.push("outcome:scenario_passed".to_string());
+    } else {
+        tags.push("outcome:scenario_failed".to_string());
+    }
+    if report.episode_scores.validation_passed {
+        tags.push("outcome:validation_passed".to_string());
+    }
+
+    let pass_label = if report.episode_scores.scenario_passed && report.episode_scores.validation_passed {
+        "passed"
+    } else if report.episode_scores.validation_passed {
+        "validation-only"
+    } else {
+        "failed"
+    };
+
+    let summary = format!(
+        "Causal analysis for spec '{}' run {} — {} (primary: {:.0}% confidence)",
+        spec_title,
+        &report.run_id[..report.run_id.len().min(8)],
+        pass_label,
+        report.primary_confidence * 100.0,
+    );
+
+    let mut content = String::new();
+
+    // Primary cause
+    content.push_str(&format!("## Outcome: {}\n\n", pass_label));
+    if let Some(ref cause) = report.primary_cause {
+        content.push_str(&format!(
+            "**Primary cause** ({:.0}% confidence): {}\n\n",
+            report.primary_confidence * 100.0,
+            cause,
+        ));
+    } else {
+        content.push_str("No dominant cause identified.\n\n");
+    }
+
+    // Contributing causes
+    if !report.contributing_causes.is_empty() {
+        content.push_str("**Contributing causes:**\n");
+        for c in &report.contributing_causes {
+            content.push_str(&format!("- {}\n", c));
+        }
+        content.push('\n');
+    }
+
+    // Episode scores
+    let s = &report.episode_scores;
+    content.push_str("**Episode scores:**\n");
+    content.push_str(&format!("- spec_clarity: {:.2}\n", s.spec_clarity_score));
+    content.push_str(&format!("- change_scope: {:.2}\n", s.change_scope_score));
+    content.push_str(&format!("- twin_fidelity: {:.2}\n", s.twin_fidelity_score));
+    content.push_str(&format!("- test_coverage: {:.2}\n", s.test_coverage_score));
+    content.push_str(&format!("- memory_retrieval: {:.2}\n", s.memory_retrieval_score));
+    content.push_str(&format!("- phase_success: {:.2}\n\n", s.phase_success_score));
+
+    // Active deep signals
+    if let Some(ref deep) = report.deep_causality {
+        if !deep.active_signals.is_empty() {
+            content.push_str("**Active causal signals:**\n");
+            for sig in &deep.active_signals {
+                content.push_str(&format!(
+                    "- {} (strength {:.0}%): {}\n",
+                    sig.cause_id,
+                    sig.activation_strength * 100.0,
+                    sig.question,
+                ));
+            }
+            content.push('\n');
+        }
+    }
+
+    // Recommended interventions
+    if !report.recommended_interventions.is_empty() {
+        content.push_str("**Recommended interventions:**\n");
+        for plan in &report.recommended_interventions {
+            content.push_str(&format!("- [{}] {}\n", plan.target, plan.action));
+        }
+        content.push('\n');
+    }
+
+    let provenance = crate::memory::MemoryProvenance {
+        source_label: Some(format!("causal_report:{}", report.run_id)),
+        source_kind: Some("causal_report".to_string()),
+        source_run_id: Some(report.run_id.clone()),
+        source_spec_id: Some(spec_id.to_string()),
+        stale_when: vec![
+            "spec acceptance criteria change significantly".to_string(),
+            "twin environment is redesigned".to_string(),
+        ],
+        ..crate::memory::MemoryProvenance::default()
+    };
+
+    (id, tags, summary, content, provenance)
+}
+
+/// Build a structured memory entry from Sable's scenario generation rationale.
+fn sable_rationale_to_memory_entry(
+    rationale: &str,
+    spec_id: &str,
+    spec_title: &str,
+    run_id: &str,
+    scenarios_passed: bool,
+) -> (String, Vec<String>, String, String, crate::memory::MemoryProvenance) {
+    let id = format!("sable-rationale-{}-{}", spec_id, &run_id[..run_id.len().min(8)]);
+
+    let tags = vec![
+        "sable".to_string(),
+        "scenario-rationale".to_string(),
+        format!("spec:{}", spec_id),
+        format!("run:{}", &run_id[..run_id.len().min(8)]),
+        if scenarios_passed { "outcome:scenario_passed".to_string() } else { "outcome:scenario_failed".to_string() },
+    ];
+
+    let summary = format!(
+        "Sable scenario rationale for spec '{}' run {} — {}",
+        spec_title,
+        &run_id[..run_id.len().min(8)],
+        if scenarios_passed { "scenarios passed" } else { "scenarios failed" },
+    );
+
+    let content = format!(
+        "## Sable's Scenario Design Rationale\n\nSpec: {}\nRun: {}\nOutcome: {}\n\n{}",
+        spec_title,
+        run_id,
+        if scenarios_passed { "scenarios passed" } else { "scenarios failed" },
+        rationale.trim(),
+    );
+
+    let provenance = crate::memory::MemoryProvenance {
+        source_label: Some(format!("sable_rationale:{}", run_id)),
+        source_kind: Some("sable_rationale".to_string()),
+        source_run_id: Some(run_id.to_string()),
+        source_spec_id: Some(spec_id.to_string()),
+        stale_when: vec!["spec scope or acceptance criteria change significantly".to_string()],
+        ..crate::memory::MemoryProvenance::default()
+    };
+
+    (id, tags, summary, content, provenance)
 }

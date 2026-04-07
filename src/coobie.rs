@@ -32,9 +32,9 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::models::{
-    CausalHypothesis, CoobieBriefing, CoobieEvidenceCitation, CounterfactualEstimate,
-    CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord, ProjectComponent,
-    ProjectResumeRisk, ScenarioBlueprint,
+    CausalHypothesis, CausalStreak, CoobieBriefing, CoobieEvidenceCitation,
+    CounterfactualEstimate, CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord,
+    ProjectComponent, ProjectResumeRisk, ScenarioBlueprint,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -58,7 +58,8 @@ pub trait CoobieReasoner: Send + Sync {
     ) -> Result<CounterfactualOutcome>;
 
     /// Emit the full structured causal report for a run.
-    async fn emit_report(&self, run_id: &str) -> Result<CausalReport>;
+    /// `spec_id` is used to compute cross-run causal streaks for this spec.
+    async fn emit_report(&self, run_id: &str, spec_id: &str) -> Result<CausalReport>;
 }
 
 // ── Report ────────────────────────────────────────────────────────────────────
@@ -76,6 +77,10 @@ pub struct CausalReport {
     pub episode_scores: EpisodeScores,
     #[serde(default)]
     pub deep_causality: Option<DeepCausalityAnalysis>,
+    /// Causes that have fired on ≥ 2 consecutive runs of the same spec.
+    /// Populated when spec_id is available at report time.
+    #[serde(default)]
+    pub streaks: Vec<CausalStreak>,
     pub generated_at: String,
 }
 
@@ -945,6 +950,31 @@ pub fn render_coobie_report_response(report: &CausalReport) -> String {
         })
         .unwrap_or_else(|| "No counterfactual prediction was available.".to_string());
 
+    let streaks_section = if report.streaks.is_empty() {
+        "- No recurring cause streaks detected.".to_string()
+    } else {
+        report
+            .streaks
+            .iter()
+            .map(|s| {
+                if s.escalate {
+                    format!(
+                        "- ⚠ {} has fired {} consecutive times — ESCALATE to Scout for spec rework",
+                        s.cause_id, s.streak_len
+                    )
+                } else {
+                    format!(
+                        "- {} has fired {} consecutive times (+{:.0}% confidence boost)",
+                        s.cause_id,
+                        s.streak_len,
+                        s.confidence_boost * 100.0,
+                    )
+                }
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+
     let pidgin = crate::pidgin::coobie_report_pidgin(report);
 
     format!(
@@ -961,6 +991,9 @@ I completed a causal review for run `{}`.
 ## Contributing Causes
 {}
 
+## Recurring Streaks
+{}
+
 ## Recommended Interventions
 {}
 
@@ -975,6 +1008,7 @@ I completed a causal review for run `{}`.
         primary,
         report.primary_confidence * 100.0,
         contributing,
+        streaks_section,
         interventions,
         deep_signals,
         counterfactual,
@@ -1281,6 +1315,86 @@ impl SqliteCoobie {
         Ok(rows.iter().map(|r| r.get::<String, _>("run_id")).collect())
     }
 
+    /// Count how many consecutive recent runs of `spec_id` had `cause_id` fire,
+    /// starting from the most recent run. Returns 0 if the cause has never fired.
+    ///
+    /// "Consecutive" means looking at the last `window` runs for this spec
+    /// (ordered newest-first) and counting from the front while the cause fires.
+    /// The streak resets as soon as a run is found where the cause did NOT fire.
+    async fn detect_cause_streak(&self, spec_id: &str, cause_id: &str, window: i64) -> Result<usize> {
+        // Ordered list of recent run_ids for this spec, newest first.
+        let run_rows = sqlx::query(
+            r#"
+            SELECT r.run_id
+            FROM runs r
+            WHERE r.spec_id = ?1
+            ORDER BY r.created_at DESC
+            LIMIT ?2
+            "#,
+        )
+        .bind(spec_id)
+        .bind(window)
+        .fetch_all(&self.pool)
+        .await?;
+
+        use sqlx::Row;
+        let mut streak = 0usize;
+        for row in &run_rows {
+            let run_id: String = row.get("run_id");
+            // Did this cause fire in this run?
+            let fired: i64 = sqlx::query_scalar(
+                "SELECT COUNT(*) FROM causal_hypotheses WHERE run_id = ?1 AND cause_id = ?2",
+            )
+            .bind(&run_id)
+            .bind(cause_id)
+            .fetch_one(&self.pool)
+            .await
+            .unwrap_or(0);
+
+            if fired > 0 {
+                streak += 1;
+            } else {
+                break; // streak is broken
+            }
+        }
+        Ok(streak)
+    }
+
+    /// Compute streaks for all active causes in `hypotheses` for this `spec_id`.
+    async fn compute_streaks(
+        &self,
+        spec_id: &str,
+        hypotheses: &[CausalHypothesis],
+    ) -> Vec<CausalStreak> {
+        let mut streaks = Vec::new();
+        for h in hypotheses {
+            let streak_len = self
+                .detect_cause_streak(spec_id, &h.cause_id, 10)
+                .await
+                .unwrap_or(0);
+            if streak_len < 2 {
+                continue;
+            }
+            // Confidence boost: +0.05 per extra run beyond 1, capped at +0.20.
+            let confidence_boost = ((streak_len - 1) as f32 * 0.05).min(0.20);
+            let escalate = streak_len >= 3;
+            streaks.push(CausalStreak {
+                cause_id: h.cause_id.clone(),
+                streak_len,
+                description: format!(
+                    "'{}' has fired on {} consecutive runs of this spec{}.",
+                    h.cause_id,
+                    streak_len,
+                    if escalate { " — standard interventions are not breaking the cycle" } else { "" },
+                ),
+                confidence_boost,
+                escalate,
+            });
+        }
+        streaks.sort_by(|a, b| b.streak_len.cmp(&a.streak_len));
+        streaks
+    }
+
     /// Estimate counterfactual outcome: what fraction of runs that had this
     /// cause_id diagnosed AND the intervention applied later passed scenarios?
     async fn counterfactual_estimate(
@@ -1458,9 +1572,64 @@ impl CoobieReasoner for SqliteCoobie {
         })
     }
 
-    async fn emit_report(&self, run_id: &str) -> Result<CausalReport> {
+    async fn emit_report(&self, run_id: &str, spec_id: &str) -> Result<CausalReport> {
         let mut hypotheses = self.diagnose(run_id).await?;
-        let interventions = self.recommend_interventions(run_id).await?;
+
+        // ── Streak detection ──────────────────────────────────────────────────
+        // Compute cross-run streaks before we build counterfactuals, so streak
+        // boosts are reflected in the final confidence and intervention list.
+        let streaks = self.compute_streaks(spec_id, &hypotheses).await;
+        let streak_map: HashMap<&str, &CausalStreak> =
+            streaks.iter().map(|s| (s.cause_id.as_str(), s)).collect();
+
+        // Apply streak confidence boost and, for escalated causes, prepend a
+        // Scout escalation description to the hypothesis.
+        for h in &mut hypotheses {
+            if let Some(streak) = streak_map.get(h.cause_id.as_str()) {
+                h.confidence = (h.confidence + streak.confidence_boost).min(0.95);
+                if streak.escalate {
+                    h.description = format!(
+                        "[ESCALATE — {} consecutive runs] {}",
+                        streak.streak_len, h.description
+                    );
+                }
+            }
+        }
+
+        // Re-sort after boosts (confidence may have shifted ranks).
+        hypotheses.sort_by(|a, b| {
+            b.confidence
+                .partial_cmp(&a.confidence)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
+
+        let mut interventions = self.recommend_interventions(run_id).await?;
+
+        // For any cause that has escalated, prepend a Scout escalation
+        // intervention before the standard one.
+        let mut escalation_plans: Vec<InterventionPlan> = streaks
+            .iter()
+            .filter(|s| s.escalate)
+            .map(|s| InterventionPlan {
+                target: "scout".to_string(),
+                action: format!(
+                    "Escalate '{}' to Scout for spec-level rework — this cause has fired on {} \
+                     consecutive runs and standard interventions have not broken the cycle. \
+                     Scout should re-examine acceptance criteria, scope, and hidden oracle \
+                     assumptions from scratch.",
+                    s.cause_id, s.streak_len
+                ),
+                expected_impact: format!(
+                    "Breaking a {}-run streak requires structural spec changes, not incremental \
+                     fixes. Scout rework estimated to reset failure cycle.",
+                    s.streak_len
+                ),
+            })
+            .collect();
+        if !escalation_plans.is_empty() {
+            escalation_plans.append(&mut interventions);
+            interventions = escalation_plans;
+        }
 
         for h in &mut hypotheses {
             if let Some(rule) = CAUSAL_RULES.iter().find(|r| r.id == h.cause_id) {
@@ -1520,6 +1689,7 @@ impl CoobieReasoner for SqliteCoobie {
             counterfactual_prediction: counterfactual,
             episode_scores: scores,
             deep_causality: Some(deep_causality),
+            streaks,
             generated_at: Utc::now().to_rfc3339(),
         })
     }

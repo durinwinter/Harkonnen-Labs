@@ -755,3 +755,17 @@ pub struct CounterfactualOutcome {
     pub prediction: String,
     pub confidence_gain: f32,
 }
+
+/// A causal pattern that has fired on consecutive runs of the same spec.
+/// Streak length ≥ 3 triggers escalation — the standard intervention alone
+/// is not breaking the cycle.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalStreak {
+    pub cause_id: String,
+    pub streak_len: usize,
+    pub description: String,
+    /// Confidence boost applied to the hypothesis because of the streak.
+    pub confidence_boost: f32,
+    /// True when streak_len >= 3 — escalation intervention is recommended.
+    pub escalate: bool,
+}

@@ -131,6 +131,20 @@ struct CollectedMemoryHits {
     ids: Vec<String>,
 }
 
+/// A causal cause that has fired on prior runs of a specific spec.
+/// Used to drive concrete preflight guidance in Coobie's briefing.
+#[derive(Debug, Clone)]
+struct SpecCauseSignal {
+    cause_id: String,
+    #[allow(dead_code)]
+    description: String,
+    occurrences: usize,
+    scenario_pass_rate: f32,
+    streak_len: usize,
+    /// True when streak_len >= 3 — escalation is recommended.
+    escalate: bool,
+}
+
 #[derive(Debug, Clone, Default)]
 pub struct EvidencePromotionResult {
     pub promoted_ids: Vec<String>,
@@ -3067,7 +3081,7 @@ Top memory hits:
         if let Err(err) = self.coobie.ingest_episode(&factory_episode).await {
             tracing::warn!("Coobie ingest failed: {err}");
         } else {
-            match self.coobie.emit_report(run_id).await {
+            match self.coobie.emit_report(run_id, &spec_obj.id).await {
                 Ok(report) => {
                     let report_response = crate::coobie::render_coobie_report_response(&report);
                     let _ = self
@@ -3921,6 +3935,105 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                 .cmp(&left.occurrences)
                 .then_with(|| right.last_seen_at.cmp(&left.last_seen_at))
         });
+        signals.truncate(limit);
+        Ok(signals)
+    }
+
+    /// Spec-scoped cause summary — returns causes that fired on *this spec's* runs,
+    /// newest first, with per-cause consecutive streak length attached.
+    /// Falls back gracefully to an empty list (the global summary is still used
+    /// alongside this one in the briefing builder).
+    async fn summarize_prior_causes_for_spec(
+        &self,
+        spec_id: &str,
+        limit: usize,
+    ) -> Result<Vec<SpecCauseSignal>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT h.cause_id, h.description, h.created_at, s.scenario_passed
+            FROM causal_hypotheses h
+            JOIN runs r ON r.run_id = h.run_id
+            LEFT JOIN coobie_episode_scores s ON s.run_id = h.run_id
+            WHERE r.spec_id = ?1
+            ORDER BY h.created_at DESC
+            "#,
+        )
+        .bind(spec_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        // Aggregate per cause_id: total occurrences, scenario successes, streak.
+        // Key: cause_id → (description, occurrences, scenario_successes, streak_len)
+        let mut map: HashMap<String, (String, usize, usize, usize)> = HashMap::new();
+        // Process rows newest-first to build streaks correctly.
+        let cause_order: Vec<String> = indexmap_ordered_keys(&rows, "cause_id");
+        for row in &rows {
+            let cause_id = row.get::<String, _>("cause_id");
+            let description = row.get::<String, _>("description");
+            let scenario_passed = row.get::<Option<i64>, _>("scenario_passed").unwrap_or(0) != 0;
+            let entry = map.entry(cause_id.clone()).or_insert_with(|| (description, 0, 0, 0));
+            entry.1 += 1;
+            if scenario_passed {
+                entry.2 += 1;
+            }
+        }
+
+        // Compute streak per cause using per-spec run order (at most 6 causes, 10 runs).
+        let run_rows = sqlx::query(
+            r#"
+            SELECT DISTINCT r.run_id, r.created_at
+            FROM runs r
+            WHERE r.spec_id = ?1
+            ORDER BY r.created_at DESC
+            LIMIT 10
+            "#,
+        )
+        .bind(spec_id)
+        .fetch_all(&self.pool)
+        .await
+        .unwrap_or_default();
+
+        for (cause_id, entry) in map.iter_mut() {
+            let mut streak = 0usize;
+            for run_row in &run_rows {
+                let run_id: String = run_row.get("run_id");
+                let fired: i64 = sqlx::query_scalar(
+                    "SELECT COUNT(*) FROM causal_hypotheses WHERE run_id = ?1 AND cause_id = ?2",
+                )
+                .bind(&run_id)
+                .bind(cause_id.as_str())
+                .fetch_one(&self.pool)
+                .await
+                .unwrap_or(0);
+                if fired > 0 {
+                    streak += 1;
+                } else {
+                    break;
+                }
+            }
+            entry.3 = streak;
+        }
+
+        let mut signals: Vec<SpecCauseSignal> = cause_order
+            .iter()
+            .filter_map(|cause_id| {
+                let (description, occurrences, scenario_successes, streak_len) = map.get(cause_id)?;
+                Some(SpecCauseSignal {
+                    cause_id: cause_id.clone(),
+                    description: description.clone(),
+                    occurrences: *occurrences,
+                    scenario_pass_rate: if *occurrences > 0 {
+                        *scenario_successes as f32 / *occurrences as f32
+                    } else {
+                        0.0
+                    },
+                    streak_len: *streak_len,
+                    escalate: *streak_len >= 3,
+                })
+            })
+            .collect();
+
+        signals.sort_by(|a, b| b.streak_len.cmp(&a.streak_len).then(b.occurrences.cmp(&a.occurrences)));
         signals.truncate(limit);
         Ok(signals)
     }
@@ -5138,6 +5251,22 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             &mut required_checks,
             &mut open_questions,
         );
+
+        // ── Phase 3: causal priors influence preflight ────────────────────────
+        // Query this spec's causal history and inject concrete, cause-specific
+        // checks and guardrails — not generic heuristics.
+        let spec_causes = self
+            .summarize_prior_causes_for_spec(&spec_obj.id, 6)
+            .await
+            .unwrap_or_default();
+        if !spec_causes.is_empty() {
+            apply_causal_preflight_guidance(
+                &spec_causes,
+                &mut required_checks,
+                &mut recommended_guardrails,
+                &mut open_questions,
+            );
+        }
 
         let mut briefing = CoobieBriefing {
             spec_id: spec_obj.id.clone(),
@@ -15849,6 +15978,145 @@ fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
     out
 }
 
+// ── Causal preflight guidance ─────────────────────────────────────────────────
+
+/// Extract ordered unique values of `col` from a slice of sqlx rows, preserving
+/// first-seen order (used to maintain newest-first cause ordering).
+fn indexmap_ordered_keys(rows: &[sqlx::sqlite::SqliteRow], col: &str) -> Vec<String> {
+    let mut seen: Vec<String> = Vec::new();
+    let mut set = std::collections::HashSet::new();
+    for row in rows {
+        let val = row.get::<String, _>(col);
+        if set.insert(val.clone()) {
+            seen.push(val);
+        }
+    }
+    seen
+}
+
+/// Translate spec-scoped causal history into concrete preflight checks,
+/// guardrails, and open questions that Mason and the other agents will see
+/// before touching any code.
+///
+/// This is the core of Phase 1 intelligence: instead of generic heuristics,
+/// Coobie's briefing says exactly what failed last time and what to do about it.
+fn apply_causal_preflight_guidance(
+    spec_causes: &[SpecCauseSignal],
+    required_checks: &mut Vec<String>,
+    recommended_guardrails: &mut Vec<String>,
+    open_questions: &mut Vec<String>,
+) {
+    for cause in spec_causes {
+        let streak_prefix = if cause.streak_len >= 2 {
+            format!("[{} consecutive runs] ", cause.streak_len)
+        } else {
+            String::new()
+        };
+
+        match cause.cause_id.as_str() {
+            "SPEC_AMBIGUITY" => {
+                required_checks.push(format!(
+                    "{}SPEC_AMBIGUITY fired on {} prior run(s) of this spec — before implementation, \
+                     confirm that every acceptance criterion has an explicit pass/fail condition and \
+                     at least one failure-mode example.",
+                    streak_prefix, cause.occurrences,
+                ));
+                if cause.scenario_pass_rate < 0.5 {
+                    recommended_guardrails.push(
+                        "Spec clarity is historically low for this spec — require Scout to validate \
+                         acceptance criteria completeness before Mason begins.".to_string(),
+                    );
+                }
+                if cause.escalate {
+                    open_questions.push(format!(
+                        "SPEC_AMBIGUITY has fired {} consecutive times — does this spec need \
+                         structural rework rather than incremental clarification?",
+                        cause.streak_len,
+                    ));
+                }
+            }
+            "TEST_BLIND_SPOT" => {
+                required_checks.push(format!(
+                    "{}TEST_BLIND_SPOT fired on {} prior run(s) — include at least one explicit \
+                     failure-path test (expired credential, invalid input, permission boundary, \
+                     or timeout) in the acceptance criteria before this run proceeds.",
+                    streak_prefix, cause.occurrences,
+                ));
+                recommended_guardrails.push(
+                    "Visible tests have previously passed while hidden scenarios failed on this spec — \
+                     do not treat a green test suite as a proxy for scenario readiness.".to_string(),
+                );
+                if cause.escalate {
+                    open_questions.push(format!(
+                        "TEST_BLIND_SPOT has fired {} times on this spec — are the acceptance \
+                         criteria systematically missing failure-mode coverage, or is the test \
+                         strategy itself misaligned with Sable's adversarial lens?",
+                        cause.streak_len,
+                    ));
+                }
+            }
+            "TWIN_GAP" => {
+                required_checks.push(format!(
+                    "{}TWIN_GAP fired on {} prior run(s) — enumerate which production conditions \
+                     (auth expiry, third-party errors, network partitions) are NOT simulated in \
+                     the twin before Mason writes code that depends on them.",
+                    streak_prefix, cause.occurrences,
+                ));
+                recommended_guardrails.push(
+                    "Twin fidelity has been a recurring gap on this spec — treat every external \
+                     dependency as a stub risk and call it out explicitly in the twin narrative.".to_string(),
+                );
+            }
+            "NO_PRIOR_MEMORY" => {
+                recommended_guardrails.push(format!(
+                    "{}Memory retrieval was insufficient on {} prior run(s) of this spec — \
+                     seed Coobie memory with domain context before re-attempting if the \
+                     semantic retrieval hit count is still low.",
+                    streak_prefix, cause.occurrences,
+                ));
+            }
+            "BROAD_SCOPE" => {
+                required_checks.push(format!(
+                    "{}BROAD_SCOPE fired on {} prior run(s) — confirm this run's deliverable \
+                     is the minimum scope that satisfies the acceptance criteria; flag any \
+                     out-of-scope agent activity for Mason to avoid.",
+                    streak_prefix, cause.occurrences,
+                ));
+                if cause.escalate {
+                    open_questions.push(format!(
+                        "BROAD_SCOPE has escalated after {} consecutive runs — should this spec \
+                         be split into smaller deliverables before the next attempt?",
+                        cause.streak_len,
+                    ));
+                }
+            }
+            "PACK_BREAKDOWN" => {
+                required_checks.push(format!(
+                    "{}PACK_BREAKDOWN fired on {} prior run(s) — identify which Labrador phase \
+                     degraded last time and verify its prompt bundle and provider route before \
+                     starting this run.",
+                    streak_prefix, cause.occurrences,
+                ));
+                if cause.escalate {
+                    open_questions.push(format!(
+                        "PACK_BREAKDOWN has recurred {} consecutive times — is the pack's phase \
+                         sequencing or agent routing structurally misaligned with this spec type?",
+                        cause.streak_len,
+                    ));
+                }
+            }
+            _ => {
+                // Unknown cause ID — surface it generically so it's not silently dropped.
+                recommended_guardrails.push(format!(
+                    "{}Causal pattern '{}' fired on {} prior run(s) of this spec — \
+                     review the causal_report.json from the last run before proceeding.",
+                    streak_prefix, cause.cause_id, cause.occurrences,
+                ));
+            }
+        }
+    }
+}
+
 // ── Causal feedback loop ──────────────────────────────────────────────────────
 //
 // After every run, Coobie's causal report and Sable's scenario rationale are
@@ -15881,6 +16149,12 @@ fn causal_report_to_memory_entry(
     }
     if report.episode_scores.validation_passed {
         tags.push("outcome:validation_passed".to_string());
+    }
+    for streak in &report.streaks {
+        tags.push(format!("streak:{}", streak.cause_id.to_lowercase()));
+        if streak.escalate {
+            tags.push("escalation-required".to_string());
+        }
     }
 
     let pass_label = if report.episode_scores.scenario_passed && report.episode_scores.validation_passed {
@@ -15931,6 +16205,20 @@ fn causal_report_to_memory_entry(
     content.push_str(&format!("- test_coverage: {:.2}\n", s.test_coverage_score));
     content.push_str(&format!("- memory_retrieval: {:.2}\n", s.memory_retrieval_score));
     content.push_str(&format!("- phase_success: {:.2}\n\n", s.phase_success_score));
+
+    // Streak warnings — most important signal for future preflight
+    if !report.streaks.is_empty() {
+        content.push_str("**Recurring cause streaks:**\n");
+        for streak in &report.streaks {
+            content.push_str(&format!(
+                "- {} × {} runs{}\n",
+                streak.cause_id,
+                streak.streak_len,
+                if streak.escalate { " ⚠ ESCALATE to Scout" } else { "" },
+            ));
+        }
+        content.push('\n');
+    }
 
     // Active deep signals
     if let Some(ref deep) = report.deep_causality {

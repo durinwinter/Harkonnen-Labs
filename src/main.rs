@@ -6,6 +6,7 @@ mod claude_pack;
 mod cli;
 mod config;
 mod coobie;
+mod coobie_palace;
 mod db;
 mod llm;
 mod memory;

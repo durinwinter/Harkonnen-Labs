@@ -1,10 +1,15 @@
 use axum::{
     extract::{Path, Query, State},
     http::StatusCode,
-    response::IntoResponse,
+    response::{
+        sse::{Event, KeepAlive, Sse},
+        IntoResponse,
+    },
     routing::{get, post},
     Json, Router,
 };
+use tokio_stream::wrappers::BroadcastStream;
+use tokio_stream::StreamExt as _;
 use chrono::{DateTime, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::HashMap;
@@ -538,6 +543,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs", get(list_runs))
         .route("/api/runs/:id", get(get_run))
         .route("/api/runs/:id/events", get(get_run_events))
+        .route("/api/runs/:id/events/stream", get(get_run_events_stream))
         .route("/api/runs/:id/blackboard", get(get_run_blackboard))
         .route(
             "/api/runs/:id/blackboard/:role",
@@ -709,6 +715,42 @@ async fn get_run_events(
         Ok(events) => (StatusCode::OK, Json(events)).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+/// SSE endpoint — streams `LiveEvent` values as they happen for a given run.
+///
+/// Each SSE `data` field is a JSON-encoded `LiveEvent`.  The stream stays open
+/// until the client disconnects; a 15-second keepalive comment is sent to
+/// prevent proxy timeouts.
+async fn get_run_events_stream(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> Sse<impl tokio_stream::Stream<Item = Result<Event, std::convert::Infallible>>> {
+    let rx = app.event_tx.subscribe();
+    let run_id = id.clone();
+    let stream = BroadcastStream::new(rx).filter_map(move |msg| {
+        let run_id = run_id.clone();
+        match msg {
+            Ok(live_event) => {
+                // Only forward events that belong to this run.
+                let matches = match &live_event {
+                    crate::models::LiveEvent::RunEvent(e) => e.run_id == run_id,
+                    crate::models::LiveEvent::BuildOutput { run_id: rid, .. } => *rid == run_id,
+                };
+                if matches {
+                    match serde_json::to_string(&live_event) {
+                        Ok(json) => Some(Ok(Event::default().data(json))),
+                        Err(_) => None,
+                    }
+                } else {
+                    None
+                }
+            }
+            // Lagged receiver — skip the missed entries and continue.
+            Err(_) => None,
+        }
+    });
+    Sse::new(stream).keep_alive(KeepAlive::default())
 }
 
 async fn get_run_blackboard(

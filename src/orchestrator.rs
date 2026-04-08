@@ -7,7 +7,7 @@ use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
 use tokio::fs::OpenOptions;
-use tokio::io::AsyncWriteExt;
+use tokio::io::{AsyncBufReadExt, AsyncWriteExt};
 use tokio::process::Command;
 use tokio::sync::RwLock;
 use uuid::Uuid;
@@ -25,9 +25,9 @@ use crate::{
         EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
         EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
         HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord,
-        PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk, RunCheckpointRecord, RunEvent,
-        RunRecord, ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
-        WorkerHarnessConfig,
+        LiveEvent, PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk,
+        RunCheckpointRecord, RunEvent, RunRecord, ScenarioResult, Spec, TwinEnvironment,
+        TwinService, ValidationSummary, WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -44,6 +44,10 @@ pub struct AppContext {
     /// Semantic memory — None if fastembed failed to initialise (e.g. first run
     /// with no internet, or ONNX runtime unavailable). Falls back to keyword.
     pub embedding_store: Option<crate::embeddings::EmbeddingStore>,
+    /// In-process broadcast channel: every `record_event` call and every
+    /// Piper build output line is sent here.  SSE subscribers clone a receiver
+    /// from this sender.  Capacity 512 — lagging receivers are dropped silently.
+    pub event_tx: tokio::sync::broadcast::Sender<crate::models::LiveEvent>,
 }
 
 #[derive(Debug, Clone)]
@@ -136,7 +140,6 @@ struct CollectedMemoryHits {
 #[derive(Debug, Clone)]
 struct SpecCauseSignal {
     cause_id: String,
-    #[allow(dead_code)]
     description: String,
     occurrences: usize,
     scenario_pass_rate: f32,
@@ -491,6 +494,18 @@ struct MasonEditApplicationArtifact {
     git_branch: Option<String>,
 }
 
+/// Result of a `piper_execute_build` call.
+#[derive(Debug, Clone)]
+struct PiperBuildResult {
+    #[allow(dead_code)] // retained for future artifact serialization
+    commands: Vec<String>,
+    combined_output: String,
+    exit_code: i32,
+    succeeded: bool,
+    /// True when no build commands were detected and execution was skipped.
+    skipped: bool,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct ResolvedPinnedSkillExcerpt {
     id: String,
@@ -613,6 +628,7 @@ impl AppContext {
                 None
             }
         };
+        let (event_tx, _) = tokio::sync::broadcast::channel(512);
         Ok(Self {
             paths,
             pool,
@@ -620,6 +636,7 @@ impl AppContext {
             blackboard: Arc::new(RwLock::new(BlackboardState::default())),
             coobie,
             embedding_store,
+            event_tx,
         })
     }
 
@@ -2227,6 +2244,159 @@ next_actions={}",
         release_agent(&mut blackboard, "mason");
         push_unique(&mut blackboard.resolved_items, "implementation");
         self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
+        // -----------------------------------------------------------------------
+        // Build phase — Piper executes real build commands; Mason fixes failures.
+        // Only runs when a worker_harness is configured (opt-in code execution).
+        // -----------------------------------------------------------------------
+        if spec_obj.worker_harness.is_some() {
+            let build_commands =
+                AppContext::detect_build_commands(spec_obj, &staged_product);
+            if !build_commands.is_empty() {
+                let build_episode = self
+                    .start_episode(run_id, "build", "Execute build commands and verify")
+                    .await?;
+                blackboard.current_phase = "build".to_string();
+                blackboard.active_goal = "Run build commands and fix failures".to_string();
+                claim_agent(&mut blackboard, "piper", "execute build commands");
+                self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+                self.update_run_status(run_id, "build").await?;
+                self.record_event(
+                    run_id,
+                    Some(&build_episode),
+                    "build",
+                    "piper",
+                    "running",
+                    &format!(
+                        "Running {} build command(s): {}",
+                        build_commands.len(),
+                        build_commands.join(" && ")
+                    ),
+                    log_path,
+                )
+                .await?;
+
+                let mut build_result = self
+                    .piper_execute_build(
+                        run_id,
+                        spec_obj,
+                        &staged_product,
+                        log_path,
+                        &build_episode,
+                    )
+                    .await?;
+
+                // Mason fix loop — up to 3 iterations on failure.
+                if !build_result.succeeded && !build_result.skipped {
+                    release_agent(&mut blackboard, "piper");
+                    claim_agent(&mut blackboard, "mason", "fix build failure");
+                    self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
+                    for iteration in 1u32..=3 {
+                        match self
+                            .mason_fix_from_build_failure(
+                                run_id,
+                                spec_obj,
+                                &briefing,
+                                target_source,
+                                &staged_product,
+                                &build_result.combined_output,
+                                iteration,
+                                log_path,
+                                &build_episode,
+                            )
+                            .await?
+                        {
+                            Some(proposal) if !proposal.edits.is_empty() => {
+                                let changed =
+                                    apply_mason_proposal_edits(&proposal, &staged_product)
+                                        .await?;
+                                self.record_event(
+                                    run_id,
+                                    Some(&build_episode),
+                                    "build",
+                                    "mason",
+                                    "running",
+                                    &format!(
+                                        "Iteration {iteration}: applied {} fix edit(s) — re-running build",
+                                        changed.len()
+                                    ),
+                                    log_path,
+                                )
+                                .await?;
+                                release_agent(&mut blackboard, "mason");
+                                claim_agent(&mut blackboard, "piper", "re-run build after fix");
+                                self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
+                                build_result = self
+                                    .piper_execute_build(
+                                        run_id,
+                                        spec_obj,
+                                        &staged_product,
+                                        log_path,
+                                        &build_episode,
+                                    )
+                                    .await?;
+
+                                if build_result.succeeded {
+                                    break;
+                                }
+                                release_agent(&mut blackboard, "piper");
+                                claim_agent(&mut blackboard, "mason", "fix build failure");
+                                self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+                            }
+                            _ => {
+                                // No proposal or empty edits — stop trying.
+                                break;
+                            }
+                        }
+                    }
+                    // Make sure the final claim holder is released.
+                    release_agent(&mut blackboard, "mason");
+                    release_agent(&mut blackboard, "piper");
+                } else {
+                    release_agent(&mut blackboard, "piper");
+                }
+
+                let build_outcome = if build_result.skipped {
+                    "skipped"
+                } else if build_result.succeeded {
+                    "success"
+                } else {
+                    "failed"
+                };
+                self.record_event(
+                    run_id,
+                    Some(&build_episode),
+                    "build",
+                    "piper",
+                    build_outcome,
+                    &format!(
+                        "Build {build_outcome} (exit {})",
+                        build_result.exit_code
+                    ),
+                    log_path,
+                )
+                .await?;
+
+                // Write build output to the run directory for artifact packaging.
+                tokio::fs::write(
+                    run_dir.join("build_output.txt"),
+                    &build_result.combined_output,
+                )
+                .await?;
+                push_unique(&mut blackboard.artifact_refs, "build_output.txt");
+
+                self.finish_episode(
+                    &build_episode,
+                    build_outcome,
+                    if build_result.succeeded { Some(1.0) } else { Some(0.0) },
+                )
+                .await?;
+                push_unique(&mut blackboard.resolved_items, "build");
+                self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+            }
+        }
 
         let tools_episode = self
             .start_episode(run_id, "tools", "Review tool and MCP availability")
@@ -5268,6 +5438,39 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             );
         }
 
+        // ── Coobie Palace: patrol the patch ───────────────────────────────────
+        // Project spec causes into dens, compute compound scents, and inject
+        // den-level context on top of the flat per-cause guidance above.
+        // Adds compound recall ("the whole spec den smells") that flat rules miss.
+        if !spec_causes.is_empty() {
+            let palace_causes: Vec<crate::coobie_palace::CauseSnapshot> = spec_causes
+                .iter()
+                .map(|c| crate::coobie_palace::CauseSnapshot {
+                    cause_id: c.cause_id.clone(),
+                    description: c.description.clone(),
+                    occurrences: c.occurrences,
+                    scenario_pass_rate: c.scenario_pass_rate,
+                    streak_len: c.streak_len,
+                    escalate: c.escalate,
+                })
+                .collect();
+            let patch_patrol = crate::coobie_palace::patrol(&palace_causes);
+            if !patch_patrol.is_clear() {
+                tracing::debug!(
+                    patch_weight = patch_patrol.patch_weight,
+                    active_dens = patch_patrol.active_den_count,
+                    "{}",
+                    patch_patrol.summary,
+                );
+                crate::coobie_palace::apply_patrol_to_briefing(
+                    &patch_patrol,
+                    &mut required_checks,
+                    &mut recommended_guardrails,
+                    &mut open_questions,
+                );
+            }
+        }
+
         let mut briefing = CoobieBriefing {
             spec_id: spec_obj.id.clone(),
             product: target_source.label.clone(),
@@ -6215,6 +6418,268 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         }
 
         stub
+    }
+
+    // -----------------------------------------------------------------------
+    // Piper: real build execution
+    // -----------------------------------------------------------------------
+
+    /// Detect which build command(s) to run for the staged workspace.
+    ///
+    /// Priority:
+    /// 1. `spec.test_commands` if non-empty
+    /// 2. Project-type auto-detection from the staged workspace root
+    fn detect_build_commands(spec_obj: &Spec, staged_product: &Path) -> Vec<String> {
+        if !spec_obj.test_commands.is_empty() {
+            return spec_obj.test_commands.clone();
+        }
+        // Auto-detect by manifest file presence
+        if staged_product.join("Cargo.toml").exists() {
+            return vec!["cargo build".to_string()];
+        }
+        if staged_product.join("package.json").exists() {
+            if staged_product.join("yarn.lock").exists() {
+                return vec!["yarn build".to_string()];
+            }
+            return vec!["npm run build".to_string()];
+        }
+        if staged_product.join("pyproject.toml").exists()
+            || staged_product.join("setup.py").exists()
+        {
+            return vec!["python -m build".to_string()];
+        }
+        if staged_product.join("Makefile").exists() {
+            return vec!["make".to_string()];
+        }
+        vec![]
+    }
+
+    /// Execute build commands for the staged workspace, streaming every
+    /// stdout/stderr line as a `LiveEvent::BuildOutput` on the broadcast channel.
+    ///
+    /// Returns a `PiperBuildResult` that records combined output and whether
+    /// the build succeeded.
+    async fn piper_execute_build(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        staged_product: &Path,
+        log_path: &Path,
+        episode_id: &str,
+    ) -> Result<PiperBuildResult> {
+        let commands = Self::detect_build_commands(spec_obj, staged_product);
+        if commands.is_empty() {
+            return Ok(PiperBuildResult {
+                commands: vec![],
+                combined_output: String::new(),
+                exit_code: 0,
+                succeeded: true,
+                skipped: true,
+            });
+        }
+
+        let mut combined_output = String::new();
+        let mut final_exit = 0i32;
+
+        for cmd_str in &commands {
+            self.record_event(
+                run_id,
+                Some(episode_id),
+                "build",
+                "piper",
+                "running",
+                &format!("$ {}", cmd_str),
+                log_path,
+            )
+            .await?;
+
+            let mut parts = cmd_str.split_whitespace();
+            let prog = parts.next().unwrap_or("sh");
+            let args: Vec<&str> = parts.collect();
+
+            let mut child = tokio::process::Command::new(prog)
+                .args(&args)
+                .current_dir(staged_product)
+                .stdout(std::process::Stdio::piped())
+                .stderr(std::process::Stdio::piped())
+                .spawn()
+                .with_context(|| format!("spawning build command: {}", cmd_str))?;
+
+            let stdout = child.stdout.take().expect("stdout piped");
+            let stderr = child.stderr.take().expect("stderr piped");
+
+            let mut stdout_lines =
+                tokio::io::BufReader::new(stdout).lines();
+            let mut stderr_lines =
+                tokio::io::BufReader::new(stderr).lines();
+            let mut done_out = false;
+            let mut done_err = false;
+
+            loop {
+                tokio::select! {
+                    line = stdout_lines.next_line(), if !done_out => {
+                        match line? {
+                            Some(l) => {
+                                combined_output.push_str(&l);
+                                combined_output.push('\n');
+                                let _ = self.event_tx.send(LiveEvent::BuildOutput {
+                                    run_id: run_id.to_string(),
+                                    phase: "build".to_string(),
+                                    agent: "piper".to_string(),
+                                    line: l,
+                                    stream: "stdout".to_string(),
+                                    created_at: Utc::now(),
+                                });
+                            }
+                            None => done_out = true,
+                        }
+                    }
+                    line = stderr_lines.next_line(), if !done_err => {
+                        match line? {
+                            Some(l) => {
+                                combined_output.push_str(&l);
+                                combined_output.push('\n');
+                                let _ = self.event_tx.send(LiveEvent::BuildOutput {
+                                    run_id: run_id.to_string(),
+                                    phase: "build".to_string(),
+                                    agent: "piper".to_string(),
+                                    line: l,
+                                    stream: "stderr".to_string(),
+                                    created_at: Utc::now(),
+                                });
+                            }
+                            None => done_err = true,
+                        }
+                    }
+                }
+                if done_out && done_err {
+                    break;
+                }
+            }
+
+            let exit_status = child.wait().await?;
+            final_exit = exit_status.code().unwrap_or(-1);
+
+            let verdict = if exit_status.success() { "complete" } else { "failed" };
+            self.record_event(
+                run_id,
+                Some(episode_id),
+                "build",
+                "piper",
+                verdict,
+                &format!("exit {}", final_exit),
+                log_path,
+            )
+            .await?;
+
+            if !exit_status.success() {
+                break; // stop on first failing command
+            }
+        }
+
+        let succeeded = final_exit == 0;
+        Ok(PiperBuildResult {
+            commands: commands.clone(),
+            combined_output,
+            exit_code: final_exit,
+            succeeded,
+            skipped: false,
+        })
+    }
+
+    /// Ask Mason to generate a correction patch given a build failure output.
+    /// Returns a `MasonEditProposal` or None if no LLM is available / no fix
+    /// was produced.
+    async fn mason_fix_from_build_failure(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        briefing: &CoobieBriefing,
+        target_source: &TargetSourceMetadata,
+        staged_product: &Path,
+        build_output: &str,
+        iteration: u32,
+        log_path: &Path,
+        episode_id: &str,
+    ) -> Result<Option<MasonEditProposal>> {
+        let Some(provider) = llm::build_provider("mason", "default", &self.paths.setup) else {
+            return Ok(None);
+        };
+
+        self.record_event(
+            run_id,
+            Some(episode_id),
+            "build",
+            "mason",
+            "running",
+            &format!("Fix iteration {iteration}: analysing build failure"),
+            log_path,
+        )
+        .await?;
+
+        let editable_paths =
+            collect_staged_code_under_test_paths(spec_obj, target_source, &self.paths.root);
+        let context_files = build_mason_context_files(staged_product, &editable_paths)?;
+        if context_files.is_empty() {
+            return Ok(None);
+        }
+
+        let context_block = context_files
+            .iter()
+            .map(|f| {
+                format!(
+                    "FILE: {}{}\n```text\n{}\n```",
+                    f.path,
+                    if f.truncated { " [truncated]" } else { "" },
+                    f.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let editable_list = editable_paths.join(", ");
+
+        let spec_yaml =
+            serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+        let constraints = mason_slim_briefing(briefing);
+
+        let req = LlmRequest::simple(
+            "You are Mason, an implementation specialist for a software factory. A build command failed. Produce valid JSON only — a single raw object with keys: \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). Each edit: \"path\" (relative path in staged workspace), \"action\" (must be \"write\"), \"summary\" (string), \"content\" (full file contents after edit). Only edit files in EDITABLE PATHS. If you cannot fix the problem, return edits as an empty array.",
+            format!(
+                "SPEC:\n```yaml\n{spec_yaml}\n```\n\nCONSTRAINTS:\n{constraints}\n\nEDITABLE PATHS: {editable_list}\n\nFILE CONTEXT:\n{context_block}\n\nBUILD FAILURE OUTPUT (iteration {iteration}):\n```\n{build_output}\n```\n\nFix the errors and return the corrected file contents as a JSON edit proposal.",
+            ),
+        );
+
+        let response = match provider.complete(req).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Mason fix LLM call failed ({})", e);
+                return Ok(None);
+            }
+        };
+
+        match parse_mason_edit_proposal(&response.content) {
+            Ok(proposal) => {
+                self.record_event(
+                    run_id,
+                    Some(episode_id),
+                    "build",
+                    "mason",
+                    "complete",
+                    &format!(
+                        "Fix iteration {iteration}: {} edit(s) proposed",
+                        proposal.edits.len()
+                    ),
+                    log_path,
+                )
+                .await?;
+                Ok(Some(proposal))
+            }
+            Err(e) => {
+                tracing::warn!("Mason fix proposal parse failed ({})", e);
+                Ok(None)
+            }
+        }
     }
 
     async fn execute_retriever_forge(
@@ -8072,7 +8537,7 @@ Write the twin environment narrative and identify any simulation gaps against Co
         );
         file.write_all(line.as_bytes()).await?;
 
-        Ok(RunEvent {
+        let live = RunEvent {
             event_id: result.last_insert_rowid(),
             run_id: run_id.to_string(),
             episode_id: episode_id.map(|value| value.to_string()),
@@ -8081,7 +8546,11 @@ Write the twin environment narrative and identify any simulation gaps against Co
             status: status.to_string(),
             message: message.to_string(),
             created_at,
-        })
+        };
+        let _ = self
+            .event_tx
+            .send(crate::models::LiveEvent::RunEvent(live.clone()));
+        Ok(live)
     }
 
     /// Build and write `exploration_log.md` to the run directory.
@@ -16303,4 +16772,28 @@ fn sable_rationale_to_memory_entry(
     };
 
     (id, tags, summary, content, provenance)
+}
+
+/// Apply a `MasonEditProposal`'s edits to the staged workspace.
+///
+/// Returns the list of relative paths that were actually written (skips files
+/// whose content was already identical).
+async fn apply_mason_proposal_edits(
+    proposal: &MasonEditProposal,
+    staged_product: &Path,
+) -> Result<Vec<String>> {
+    let mut changed = Vec::new();
+    for edit in &proposal.edits {
+        let normalized = normalize_project_path(&edit.path);
+        let destination = join_workspace_relative_path(staged_product, &normalized)?;
+        if let Some(parent) = destination.parent() {
+            tokio::fs::create_dir_all(parent).await?;
+        }
+        let existing = tokio::fs::read_to_string(&destination).await.ok();
+        if existing.as_deref() != Some(edit.content.as_str()) {
+            tokio::fs::write(&destination, &edit.content).await?;
+            push_unique(&mut changed, &normalized);
+        }
+    }
+    Ok(changed)
 }

@@ -1,0 +1,212 @@
+version: 1
+suites:
+  - id: "local_regression"
+    title: "Local Regression Gate"
+    subsystem: "factory"
+    category: "regression"
+    tier: "required"
+    description: >-
+      Fast always-on benchmark gate for Harkonnen core changes. This is the
+      default suite for local development and CI.
+    default_selected: true
+    baseline_reference: >-
+      Internal baseline: 100% of steps must pass on every change before broader
+      benchmark claims are updated.
+    tags:
+      - "local"
+      - "ci"
+      - "regression"
+    steps:
+      - id: "cargo_fmt_check"
+        label: "cargo fmt --check"
+        program: "cargo"
+        args:
+          - "fmt"
+          - "--check"
+      - id: "cargo_check"
+        label: "cargo check"
+        program: "cargo"
+        args:
+          - "check"
+      - id: "cargo_test"
+        label: "cargo test -q"
+        program: "cargo"
+        args:
+          - "test"
+          - "-q"
+
+  - id: "coobie_longmemeval"
+    title: "Coobie on LongMemEval"
+    subsystem: "coobie"
+    category: "long_term_memory"
+    tier: "target"
+    description: >-
+      External long-term assistant-memory benchmark for PackChat-style recall,
+      multi-session reasoning, knowledge updates, temporal reasoning, and abstention.
+    benchmark_url: "https://github.com/xiaowu0162/LongMemEval"
+    baseline_reference: >-
+      Compare against reproduced full-context and reproduced memory baselines,
+      then cite the LongMemEval paper/project page in GitHub reporting.
+    required_env:
+      - "LONGMEMEVAL_DATASET"
+    setup_notes:
+      - "Set LONGMEMEVAL_DATASET to a local LongMemEval JSON dataset file such as longmemeval_s_cleaned.json."
+      - "Optionally set LONGMEMEVAL_LIMIT for smoke runs and LONGMEMEVAL_OUTPUT_DIR for custom artifact paths."
+      - "Optionally set LONGMEMEVAL_OFFICIAL_EVAL_COMMAND and LONGMEMEVAL_OFFICIAL_EVAL_ROOT to run the official evaluator after prediction generation."
+    tags:
+      - "external"
+      - "memory"
+      - "coobie"
+      - "packchat"
+    steps:
+      - id: "longmemeval_adapter"
+        label: "LongMemEval adapter"
+        builtin: "longmemeval"
+
+  - id: "longmemeval_raw_llm"
+    title: "Raw LLM Baseline on LongMemEval"
+    subsystem: "baseline"
+    category: "long_term_memory"
+    tier: "target"
+    description: >-
+      Direct model-only LongMemEval baseline using the active provider without
+      PackChat system prompts or Harkonnen conversation orchestration.
+    benchmark_url: "https://github.com/xiaowu0162/LongMemEval"
+    baseline_reference: >-
+      Use this as the local raw-model baseline so GitHub reporting can show what
+      Harkonnen adds over the same underlying LLM.
+    required_env:
+      - "LONGMEMEVAL_DATASET"
+    setup_notes:
+      - "Set LONGMEMEVAL_DATASET to a local LongMemEval JSON dataset file such as longmemeval_s_cleaned.json."
+      - "This suite sets LONGMEMEVAL_MODE=direct and uses the active setup provider directly."
+      - "Optionally set LONGMEMEVAL_DIRECT_PROVIDER to target a named setup provider such as codex."
+    tags:
+      - "external"
+      - "baseline"
+      - "memory"
+      - "llm"
+    steps:
+      - id: "longmemeval_direct_adapter"
+        label: "LongMemEval raw-model adapter"
+        builtin: "longmemeval"
+        env:
+          LONGMEMEVAL_MODE: "direct"
+
+  - id: "coobie_locomo"
+    title: "Coobie on LoCoMo"
+    subsystem: "coobie"
+    category: "long_horizon_dialogue"
+    tier: "target"
+    description: >-
+      External benchmark for very long-term conversational memory, event summarization,
+      and temporal dialogue reasoning.
+    benchmark_url: "https://github.com/snap-research/locomo"
+    leaderboard_url: "https://aclanthology.org/2024.acl-long.747/"
+    baseline_reference: >-
+      Compare against reproduced full-context and retrieval baselines; report the
+      exact evaluation task split and metric used.
+    required_env:
+      - "LOCOMO_COMMAND"
+    setup_notes:
+      - "Clone LoCoMo locally and point LOCOMO_ROOT at that checkout if desired."
+      - "Set LOCOMO_COMMAND to the exact command that runs the Harkonnen adapter on the benchmark."
+      - "Start with the QA task before adding event summarization or multimodal tasks."
+    tags:
+      - "external"
+      - "memory"
+      - "coobie"
+      - "dialogue"
+    steps:
+      - id: "locomo_adapter"
+        label: "LoCoMo adapter"
+        program: "./scripts/benchmark-locomo.sh"
+
+  - id: "packchat_tau2"
+    title: "PackChat on tau2-bench"
+    subsystem: "packchat"
+    category: "tool_agent_user"
+    tier: "target"
+    description: >-
+      External multi-turn tool-agent-user benchmark for policy-following and
+      task completion across realistic domains.
+    benchmark_url: "https://github.com/sierra-research/tau2-bench"
+    leaderboard_url: "https://sierra.ai/blog/t-bench-leaderboard"
+    baseline_reference: >-
+      Compare against the tau leaderboard using the benchmark's Pass^1 and Pass^4
+      metrics, and include trajectories when publishing results.
+    required_env:
+      - "TAU2_BENCH_COMMAND"
+    setup_notes:
+      - "Clone tau2-bench locally and point TAU2_BENCH_ROOT at that checkout if desired."
+      - "Set TAU2_BENCH_COMMAND to the exact command that runs the Harkonnen agent adapter."
+      - "Publish the benchmark domain mix used for the score: retail, airline, and telecom."
+    tags:
+      - "external"
+      - "packchat"
+      - "policy"
+      - "tools"
+    steps:
+      - id: "tau2_adapter"
+        label: "tau2-bench adapter"
+        program: "./scripts/benchmark-tau2.sh"
+
+  - id: "mason_swebench_verified"
+    title: "Mason/Piper/Bramble on SWE-bench Verified"
+    subsystem: "code_loop"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Public software-engineering benchmark for issue resolution on human-verified tasks.
+    benchmark_url: "https://www.swebench.com/verified.html"
+    leaderboard_url: "https://www.swebench.com/"
+    baseline_reference: >-
+      Report official % Resolved and note that SWE-bench Verified remains useful for
+      continuity but should not be the only frontier coding benchmark cited.
+    required_env:
+      - "SWEBENCH_COMMAND"
+    setup_notes:
+      - "Set SWEBENCH_COMMAND to the exact local or cloud command that runs the Harkonnen Verified adapter."
+      - "If using a local checkout, point SWEBENCH_ROOT at the SWE-bench repository."
+      - "Pair Verified reporting with SWE-bench Pro or an equivalent harder benchmark when publishing frontier claims."
+    tags:
+      - "external"
+      - "mason"
+      - "piper"
+      - "bramble"
+      - "coding"
+      - "verified"
+    steps:
+      - id: "swebench_verified_adapter"
+        label: "SWE-bench Verified adapter"
+        program: "./scripts/benchmark-swebench.sh"
+
+  - id: "mason_swebench_pro"
+    title: "Mason/Piper/Bramble on SWE-bench Pro"
+    subsystem: "code_loop"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Harder software-engineering benchmark for stronger public claims about the coding loop.
+    benchmark_url: "https://labs.scale.com/papers/swe_bench_pro"
+    leaderboard_url: "https://www.swebench.com/"
+    baseline_reference: >-
+      Report % Resolved alongside the exact task set, evaluation recipe, and model routing
+      so readers can compare Harkonnen against frontier-oriented baselines.
+    required_env:
+      - "SWEBENCH_PRO_COMMAND"
+    setup_notes:
+      - "Set SWEBENCH_PRO_COMMAND to the exact local or cloud command that runs the Harkonnen Pro adapter."
+      - "If using a local checkout, point SWEBENCH_PRO_ROOT at the SWE-bench repository or adapter workspace."
+      - "Keep Verified and Pro scores side by side so continuity and frontier difficulty are both visible."
+    tags:
+      - "external"
+      - "mason"
+      - "piper"
+      - "bramble"
+      - "coding"
+      - "pro"
+    steps:
+      - id: "swebench_pro_adapter"
+        label: "SWE-bench Pro adapter"
+        program: "./scripts/benchmark-swebench-pro.sh"

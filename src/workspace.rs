@@ -21,7 +21,9 @@ pub async fn stage_target_workspace(source: &Path, workspace_root: &Path) -> Res
 
     // Canonicalize both paths so we can detect if destination is inside source
     // and exclude that subtree from the copy to prevent recursive explosion.
-    let source_canon = source.canonicalize().unwrap_or_else(|_| source.to_path_buf());
+    let source_canon = source
+        .canonicalize()
+        .unwrap_or_else(|_| source.to_path_buf());
     let dest_canon = destination
         .canonicalize()
         .unwrap_or_else(|_| destination.to_path_buf());

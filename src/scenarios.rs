@@ -4,12 +4,12 @@ use serde_json::Value as JsonValue;
 use std::path::Path;
 
 use crate::llm::{self, LlmRequest, Message};
+use crate::models::Spec;
 use crate::models::{
     AgentExecution, HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary,
     RunEvent, TwinEnvironment, ValidationSummary,
 };
 use crate::setup::SetupConfig;
-use crate::models::Spec;
 
 #[derive(Debug, Clone, Deserialize)]
 pub struct AttemptThreshold {
@@ -531,12 +531,14 @@ fn parse_sable_check(check: &SableGeneratedCheck) -> Option<HiddenScenarioCheck>
     match check.kind.as_str() {
         "validation_passed" => Some(HiddenScenarioCheck::ValidationPassed),
         "exploration_log_exists" => Some(HiddenScenarioCheck::ExplorationLogExists),
-        "artifact_exists" => check.path.as_ref().map(|p| HiddenScenarioCheck::ArtifactExists {
-            path: p.clone(),
-        }),
-        "agent_executed" => check.agent.as_ref().map(|a| HiddenScenarioCheck::AgentExecuted {
-            agent: a.clone(),
-        }),
+        "artifact_exists" => check
+            .path
+            .as_ref()
+            .map(|p| HiddenScenarioCheck::ArtifactExists { path: p.clone() }),
+        "agent_executed" => check
+            .agent
+            .as_ref()
+            .map(|a| HiddenScenarioCheck::AgentExecuted { agent: a.clone() }),
         "event_present" => match (&check.phase, &check.agent) {
             (Some(phase), Some(agent)) => Some(HiddenScenarioCheck::EventPresent {
                 phase: phase.clone(),
@@ -554,7 +556,10 @@ fn parse_sable_check(check: &SableGeneratedCheck) -> Option<HiddenScenarioCheck>
             _ => None,
         },
         _ => {
-            tracing::warn!("Sable generated unknown check kind '{}' — skipping", check.kind);
+            tracing::warn!(
+                "Sable generated unknown check kind '{}' — skipping",
+                check.kind
+            );
             None
         }
     }
@@ -586,7 +591,10 @@ pub async fn sable_generate_and_evaluate(
         .filter_map(|e| e.file_name().into_string().ok())
         .collect();
 
-    let agents_ran: Vec<&str> = agent_executions.iter().map(|a| a.agent_name.as_str()).collect();
+    let agents_ran: Vec<&str> = agent_executions
+        .iter()
+        .map(|a| a.agent_name.as_str())
+        .collect();
     let spec_yaml = serde_yaml::to_string(spec).unwrap_or_default();
     let validation_summary = serde_json::to_string_pretty(validation).unwrap_or_default();
 
@@ -650,7 +658,11 @@ Focus on what could pass visible validation but still fail the spec's intent.",
     let payload: SableGeneratedPayload = match serde_json::from_str(stripped) {
         Ok(p) => p,
         Err(e) => {
-            tracing::warn!("Sable returned invalid JSON ({}): {}", e, &raw[..raw.len().min(300)]);
+            tracing::warn!(
+                "Sable returned invalid JSON ({}): {}",
+                e,
+                &raw[..raw.len().min(300)]
+            );
             return None;
         }
     };
@@ -664,11 +676,7 @@ Focus on what could pass visible validation but still fail the spec's intent.",
             spec_id: spec.id.clone(),
             title: s.title.clone(),
             description: s.description.clone(),
-            checks: s
-                .checks
-                .iter()
-                .filter_map(parse_sable_check)
-                .collect(),
+            checks: s.checks.iter().filter_map(parse_sable_check).collect(),
         })
         .collect();
 

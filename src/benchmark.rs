@@ -1,0 +1,764 @@
+use anyhow::{bail, Context, Result};
+use chrono::{DateTime, Utc};
+use serde::{Deserialize, Serialize};
+use std::collections::BTreeMap;
+use std::env;
+use std::path::{Path, PathBuf};
+use std::time::Instant;
+use tokio::process::Command;
+
+use crate::{config::Paths, longmemeval};
+
+const SKIP_EXIT_CODE: i32 = 10;
+const OUTPUT_LIMIT: usize = 8_000;
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkManifest {
+    pub version: u32,
+    #[serde(default)]
+    pub suites: Vec<BenchmarkSuite>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkSuite {
+    pub id: String,
+    pub title: String,
+    pub subsystem: String,
+    pub category: String,
+    pub tier: String,
+    pub description: String,
+    #[serde(default)]
+    pub benchmark_url: Option<String>,
+    #[serde(default)]
+    pub leaderboard_url: Option<String>,
+    #[serde(default)]
+    pub baseline_reference: Option<String>,
+    #[serde(default)]
+    pub setup_notes: Vec<String>,
+    #[serde(default)]
+    pub required_env: Vec<String>,
+    #[serde(default)]
+    pub working_dir: Option<String>,
+    #[serde(default)]
+    pub working_dir_env: Option<String>,
+    #[serde(default)]
+    pub default_selected: bool,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    #[serde(default)]
+    pub steps: Vec<BenchmarkStep>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkStep {
+    pub id: String,
+    #[serde(default)]
+    pub builtin: Option<String>,
+    #[serde(default)]
+    pub program: String,
+    #[serde(default)]
+    pub label: Option<String>,
+    #[serde(default)]
+    pub args: Vec<String>,
+    #[serde(default)]
+    pub cwd: Option<String>,
+    #[serde(default)]
+    pub cwd_env: Option<String>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum BenchmarkStatus {
+    Passed,
+    Failed,
+    Skipped,
+}
+
+impl BenchmarkStatus {
+    pub fn as_str(&self) -> &'static str {
+        match self {
+            Self::Passed => "passed",
+            Self::Failed => "failed",
+            Self::Skipped => "skipped",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkRunSummary {
+    pub total: usize,
+    pub passed: usize,
+    pub failed: usize,
+    pub skipped: usize,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkStepResult {
+    pub id: String,
+    pub label: String,
+    pub status: BenchmarkStatus,
+    pub program: String,
+    pub args: Vec<String>,
+    pub cwd: String,
+    pub duration_ms: u128,
+    pub exit_code: Option<i32>,
+    pub stdout: String,
+    pub stderr: String,
+    #[serde(default)]
+    pub reason: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkSuiteResult {
+    pub id: String,
+    pub title: String,
+    pub subsystem: String,
+    pub category: String,
+    pub tier: String,
+    pub description: String,
+    #[serde(default)]
+    pub benchmark_url: Option<String>,
+    #[serde(default)]
+    pub leaderboard_url: Option<String>,
+    #[serde(default)]
+    pub baseline_reference: Option<String>,
+    #[serde(default)]
+    pub setup_notes: Vec<String>,
+    #[serde(default)]
+    pub required_env: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+    pub status: BenchmarkStatus,
+    pub duration_ms: u128,
+    #[serde(default)]
+    pub reason: Option<String>,
+    #[serde(default)]
+    pub steps: Vec<BenchmarkStepResult>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkRunReport {
+    pub version: u32,
+    pub generated_at: DateTime<Utc>,
+    pub manifest_path: String,
+    pub repo_root: String,
+    pub selected_suites: Vec<String>,
+    pub summary: BenchmarkRunSummary,
+    pub suites: Vec<BenchmarkSuiteResult>,
+}
+
+#[derive(Debug, Clone)]
+pub struct BenchmarkRunOutput {
+    pub json_path: PathBuf,
+    pub markdown_path: PathBuf,
+    pub report: BenchmarkRunReport,
+}
+
+pub fn default_manifest_path(paths: &Paths) -> PathBuf {
+    paths.factory.join("benchmarks").join("suites.yaml")
+}
+
+pub fn default_output_path(paths: &Paths) -> PathBuf {
+    let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
+    paths
+        .artifacts
+        .join("benchmarks")
+        .join(format!("benchmark-run-{}.json", stamp))
+}
+
+pub fn load_manifest(path: &Path) -> Result<BenchmarkManifest> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("reading benchmark manifest {}", path.display()))?;
+    let ext = path
+        .extension()
+        .and_then(|value| value.to_str())
+        .unwrap_or_default()
+        .to_ascii_lowercase();
+    let manifest = if ext == "json" {
+        serde_json::from_str(&raw)
+            .with_context(|| format!("parsing benchmark manifest json {}", path.display()))?
+    } else {
+        serde_yaml::from_str(&raw)
+            .or_else(|_| serde_json::from_str(&raw))
+            .with_context(|| format!("parsing benchmark manifest {}", path.display()))?
+    };
+    Ok(manifest)
+}
+
+pub fn render_manifest_overview(manifest: &BenchmarkManifest) -> String {
+    if manifest.suites.is_empty() {
+        return "No benchmark suites configured.".to_string();
+    }
+
+    let mut lines = vec![
+        "Benchmark Suites".to_string(),
+        "================".to_string(),
+    ];
+    for suite in &manifest.suites {
+        lines.push(format!(
+            "- {} [{} | {} | default={}]",
+            suite.id,
+            suite.subsystem,
+            suite.tier,
+            if suite.default_selected { "yes" } else { "no" }
+        ));
+        lines.push(format!("  {}", suite.title));
+        lines.push(format!("  {}", suite.description));
+        if !suite.required_env.is_empty() {
+            lines.push(format!("  requires env: {}", suite.required_env.join(", ")));
+        }
+        if let Some(url) = &suite.benchmark_url {
+            lines.push(format!("  benchmark: {}", url));
+        }
+        if let Some(reference) = &suite.baseline_reference {
+            lines.push(format!("  baseline: {}", reference));
+        }
+    }
+    lines.join("\n")
+}
+
+pub async fn run_benchmarks(
+    paths: &Paths,
+    manifest_path: &Path,
+    selected_suite_ids: &[String],
+    run_all: bool,
+    output_path: Option<&Path>,
+) -> Result<BenchmarkRunOutput> {
+    let manifest = load_manifest(manifest_path)?;
+    let suites = select_suites(&manifest, selected_suite_ids, run_all)?;
+
+    let mut results = Vec::new();
+    for suite in suites {
+        results.push(run_suite(paths, &suite).await?);
+    }
+
+    let summary = summarize(&results);
+    let selected_ids = results
+        .iter()
+        .map(|suite| suite.id.clone())
+        .collect::<Vec<_>>();
+    let report = BenchmarkRunReport {
+        version: manifest.version,
+        generated_at: Utc::now(),
+        manifest_path: manifest_path.display().to_string(),
+        repo_root: paths.root.display().to_string(),
+        selected_suites: selected_ids,
+        summary,
+        suites: results,
+    };
+
+    let json_path = output_path
+        .map(PathBuf::from)
+        .unwrap_or_else(|| default_output_path(paths));
+    let markdown_path = json_path.with_extension("md");
+    if let Some(parent) = json_path.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("creating benchmark output dir {}", parent.display()))?;
+    }
+
+    let raw_json = serde_json::to_string_pretty(&report)?;
+    tokio::fs::write(&json_path, raw_json)
+        .await
+        .with_context(|| format!("writing benchmark report {}", json_path.display()))?;
+    let markdown = render_report_markdown(&report);
+    tokio::fs::write(&markdown_path, markdown)
+        .await
+        .with_context(|| format!("writing benchmark markdown {}", markdown_path.display()))?;
+
+    Ok(BenchmarkRunOutput {
+        json_path,
+        markdown_path,
+        report,
+    })
+}
+
+pub fn load_run_report(path: &Path) -> Result<BenchmarkRunReport> {
+    let raw = std::fs::read_to_string(path)
+        .with_context(|| format!("reading benchmark run report {}", path.display()))?;
+    serde_json::from_str(&raw)
+        .with_context(|| format!("parsing benchmark run report {}", path.display()))
+}
+
+pub fn render_report_markdown(report: &BenchmarkRunReport) -> String {
+    let mut lines = vec![
+        "# Benchmark Report".to_string(),
+        String::new(),
+        format!("- Generated: {}", report.generated_at),
+        format!("- Manifest: {}", report.manifest_path),
+        format!("- Repo root: {}", report.repo_root),
+        format!(
+            "- Summary: total={} passed={} failed={} skipped={}",
+            report.summary.total,
+            report.summary.passed,
+            report.summary.failed,
+            report.summary.skipped
+        ),
+        String::new(),
+        "## Suite Summary".to_string(),
+        String::new(),
+        "| Suite | Subsystem | Tier | Status | Duration ms |".to_string(),
+        "| --- | --- | --- | --- | ---: |".to_string(),
+    ];
+
+    for suite in &report.suites {
+        lines.push(format!(
+            "| {} | {} | {} | {} | {} |",
+            suite.id,
+            suite.subsystem,
+            suite.tier,
+            suite.status.as_str(),
+            suite.duration_ms
+        ));
+    }
+
+    for suite in &report.suites {
+        lines.push(String::new());
+        lines.push(format!("## {} ({})", suite.title, suite.id));
+        lines.push(String::new());
+        lines.push(format!("- Status: {}", suite.status.as_str()));
+        lines.push(format!("- Subsystem: {}", suite.subsystem));
+        lines.push(format!("- Category: {}", suite.category));
+        lines.push(format!("- Tier: {}", suite.tier));
+        lines.push(format!("- Duration: {} ms", suite.duration_ms));
+        if let Some(url) = &suite.benchmark_url {
+            lines.push(format!("- Benchmark: {}", url));
+        }
+        if let Some(url) = &suite.leaderboard_url {
+            lines.push(format!("- Leaderboard: {}", url));
+        }
+        if let Some(reference) = &suite.baseline_reference {
+            lines.push(format!("- Baseline: {}", reference));
+        }
+        if let Some(reason) = &suite.reason {
+            lines.push(format!("- Reason: {}", reason));
+        }
+        if !suite.required_env.is_empty() {
+            lines.push(format!("- Required env: {}", suite.required_env.join(", ")));
+        }
+        if !suite.setup_notes.is_empty() {
+            lines.push("- Setup notes:".to_string());
+            for note in &suite.setup_notes {
+                lines.push(format!("  - {}", note));
+            }
+        }
+        if !suite.steps.is_empty() {
+            lines.push(String::new());
+            lines.push("### Steps".to_string());
+            lines.push(String::new());
+            lines.push("| Step | Status | Exit | Duration ms |".to_string());
+            lines.push("| --- | --- | ---: | ---: |".to_string());
+            for step in &suite.steps {
+                lines.push(format!(
+                    "| {} | {} | {} | {} |",
+                    step.label,
+                    step.status.as_str(),
+                    step.exit_code
+                        .map(|code| code.to_string())
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    step.duration_ms
+                ));
+            }
+        }
+    }
+
+    lines.push(String::new());
+    lines.join("\n")
+}
+
+fn select_suites(
+    manifest: &BenchmarkManifest,
+    selected_suite_ids: &[String],
+    run_all: bool,
+) -> Result<Vec<BenchmarkSuite>> {
+    if manifest.suites.is_empty() {
+        bail!("benchmark manifest defines no suites");
+    }
+
+    let suites = if run_all {
+        manifest.suites.clone()
+    } else if !selected_suite_ids.is_empty() {
+        let mut selected = Vec::new();
+        for suite_id in selected_suite_ids {
+            let suite = manifest
+                .suites
+                .iter()
+                .find(|suite| suite.id == *suite_id)
+                .with_context(|| format!("benchmark suite not found: {}", suite_id))?;
+            selected.push(suite.clone());
+        }
+        selected
+    } else {
+        let defaults = manifest
+            .suites
+            .iter()
+            .filter(|suite| suite.default_selected)
+            .cloned()
+            .collect::<Vec<_>>();
+        if defaults.is_empty() {
+            bail!("no default benchmark suites configured; use --all or --suite");
+        }
+        defaults
+    };
+
+    Ok(suites)
+}
+
+async fn run_suite(paths: &Paths, suite: &BenchmarkSuite) -> Result<BenchmarkSuiteResult> {
+    let suite_started = Instant::now();
+    let missing_env = suite
+        .required_env
+        .iter()
+        .filter(|name| match env::var(name) {
+            Ok(value) => value.trim().is_empty(),
+            Err(_) => true,
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+
+    if !missing_env.is_empty() {
+        return Ok(BenchmarkSuiteResult {
+            id: suite.id.clone(),
+            title: suite.title.clone(),
+            subsystem: suite.subsystem.clone(),
+            category: suite.category.clone(),
+            tier: suite.tier.clone(),
+            description: suite.description.clone(),
+            benchmark_url: suite.benchmark_url.clone(),
+            leaderboard_url: suite.leaderboard_url.clone(),
+            baseline_reference: suite.baseline_reference.clone(),
+            setup_notes: suite.setup_notes.clone(),
+            required_env: suite.required_env.clone(),
+            tags: suite.tags.clone(),
+            status: BenchmarkStatus::Skipped,
+            duration_ms: suite_started.elapsed().as_millis(),
+            reason: Some(format!("missing required env: {}", missing_env.join(", "))),
+            steps: Vec::new(),
+        });
+    }
+
+    if suite.steps.is_empty() {
+        return Ok(BenchmarkSuiteResult {
+            id: suite.id.clone(),
+            title: suite.title.clone(),
+            subsystem: suite.subsystem.clone(),
+            category: suite.category.clone(),
+            tier: suite.tier.clone(),
+            description: suite.description.clone(),
+            benchmark_url: suite.benchmark_url.clone(),
+            leaderboard_url: suite.leaderboard_url.clone(),
+            baseline_reference: suite.baseline_reference.clone(),
+            setup_notes: suite.setup_notes.clone(),
+            required_env: suite.required_env.clone(),
+            tags: suite.tags.clone(),
+            status: BenchmarkStatus::Skipped,
+            duration_ms: suite_started.elapsed().as_millis(),
+            reason: Some("suite defines no runnable steps".to_string()),
+            steps: Vec::new(),
+        });
+    }
+
+    let mut step_results = Vec::new();
+    let mut suite_status = BenchmarkStatus::Passed;
+    let mut suite_reason = None;
+
+    for step in &suite.steps {
+        let step_result = run_step(paths, suite, step).await?;
+        match step_result.status {
+            BenchmarkStatus::Passed => {}
+            BenchmarkStatus::Skipped => {
+                suite_status = BenchmarkStatus::Skipped;
+                suite_reason = step_result.reason.clone();
+                step_results.push(step_result);
+                break;
+            }
+            BenchmarkStatus::Failed => {
+                suite_status = BenchmarkStatus::Failed;
+                suite_reason = step_result.reason.clone();
+                step_results.push(step_result);
+                break;
+            }
+        }
+        step_results.push(step_result);
+    }
+
+    Ok(BenchmarkSuiteResult {
+        id: suite.id.clone(),
+        title: suite.title.clone(),
+        subsystem: suite.subsystem.clone(),
+        category: suite.category.clone(),
+        tier: suite.tier.clone(),
+        description: suite.description.clone(),
+        benchmark_url: suite.benchmark_url.clone(),
+        leaderboard_url: suite.leaderboard_url.clone(),
+        baseline_reference: suite.baseline_reference.clone(),
+        setup_notes: suite.setup_notes.clone(),
+        required_env: suite.required_env.clone(),
+        tags: suite.tags.clone(),
+        status: suite_status,
+        duration_ms: suite_started.elapsed().as_millis(),
+        reason: suite_reason,
+        steps: step_results,
+    })
+}
+
+async fn run_step(
+    paths: &Paths,
+    suite: &BenchmarkSuite,
+    step: &BenchmarkStep,
+) -> Result<BenchmarkStepResult> {
+    let cwd = resolve_cwd(paths, suite, step)?;
+    let label = step.label.clone().unwrap_or_else(|| step.id.clone());
+    let started = Instant::now();
+
+    if let Some(builtin) = &step.builtin {
+        return run_builtin_step(paths, step, builtin, &cwd, label, started).await;
+    }
+
+    if step.program.trim().is_empty() {
+        return Ok(BenchmarkStepResult {
+            id: step.id.clone(),
+            label,
+            status: BenchmarkStatus::Failed,
+            program: step.program.clone(),
+            args: step.args.clone(),
+            cwd: cwd.display().to_string(),
+            duration_ms: started.elapsed().as_millis(),
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            reason: Some(format!(
+                "benchmark step {} has no program or builtin runner",
+                step.id
+            )),
+        });
+    }
+
+    let mut command = Command::new(&step.program);
+    command.args(&step.args).current_dir(&cwd);
+    for (key, value) in &step.env {
+        command.env(key, value);
+    }
+
+    let output = command
+        .output()
+        .await
+        .with_context(|| format!("running benchmark step {}", step.id));
+
+    let duration_ms = started.elapsed().as_millis();
+    match output {
+        Ok(output) => {
+            let exit_code = output.status.code();
+            let stdout = truncate(&String::from_utf8_lossy(&output.stdout));
+            let stderr = truncate(&String::from_utf8_lossy(&output.stderr));
+            let (status, reason) = if output.status.success() {
+                (BenchmarkStatus::Passed, None)
+            } else if exit_code == Some(SKIP_EXIT_CODE) {
+                (
+                    BenchmarkStatus::Skipped,
+                    Some(
+                        first_non_empty(&stderr, &stdout)
+                            .unwrap_or_else(|| format!("step {} requested skip", step.id)),
+                    ),
+                )
+            } else {
+                (
+                    BenchmarkStatus::Failed,
+                    Some(
+                        first_non_empty(&stderr, &stdout)
+                            .unwrap_or_else(|| format!("step {} failed", step.id)),
+                    ),
+                )
+            };
+
+            Ok(BenchmarkStepResult {
+                id: step.id.clone(),
+                label,
+                status,
+                program: step.program.clone(),
+                args: step.args.clone(),
+                cwd: cwd.display().to_string(),
+                duration_ms,
+                exit_code,
+                stdout,
+                stderr,
+                reason,
+            })
+        }
+        Err(error) => Ok(BenchmarkStepResult {
+            id: step.id.clone(),
+            label,
+            status: BenchmarkStatus::Failed,
+            program: step.program.clone(),
+            args: step.args.clone(),
+            cwd: cwd.display().to_string(),
+            duration_ms,
+            exit_code: None,
+            stdout: String::new(),
+            stderr: String::new(),
+            reason: Some(error.to_string()),
+        }),
+    }
+}
+
+async fn run_builtin_step(
+    paths: &Paths,
+    step: &BenchmarkStep,
+    builtin: &str,
+    cwd: &Path,
+    label: String,
+    started: Instant,
+) -> Result<BenchmarkStepResult> {
+    let duration_ms;
+    let (status, stdout, stderr, reason) = match builtin {
+        "longmemeval" => match longmemeval::run_with_overrides(paths, &step.env).await? {
+            longmemeval::LongMemEvalSuiteOutcome::Completed(output) => {
+                let status = longmemeval::status_for_output(&output);
+                let reason = longmemeval::reason_for_output(&output);
+                (
+                    status,
+                    longmemeval::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            longmemeval::LongMemEvalSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        _ => (
+            BenchmarkStatus::Failed,
+            String::new(),
+            String::new(),
+            Some(format!("unknown benchmark builtin runner: {}", builtin)),
+        ),
+    };
+    duration_ms = started.elapsed().as_millis();
+
+    Ok(BenchmarkStepResult {
+        id: step.id.clone(),
+        label,
+        status,
+        program: if step.program.trim().is_empty() {
+            format!("builtin:{}", builtin)
+        } else {
+            step.program.clone()
+        },
+        args: step.args.clone(),
+        cwd: cwd.display().to_string(),
+        duration_ms,
+        exit_code: None,
+        stdout: truncate(&stdout),
+        stderr: truncate(&stderr),
+        reason,
+    })
+}
+
+fn resolve_cwd(paths: &Paths, suite: &BenchmarkSuite, step: &BenchmarkStep) -> Result<PathBuf> {
+    if let Some(name) = step.cwd_env.as_ref().or(suite.working_dir_env.as_ref()) {
+        let value = env::var(name)
+            .with_context(|| format!("benchmark working dir env not set: {}", name))?;
+        if value.trim().is_empty() {
+            bail!("benchmark working dir env is empty: {}", name);
+        }
+        return Ok(PathBuf::from(value));
+    }
+
+    if let Some(cwd) = step.cwd.as_ref().or(suite.working_dir.as_ref()) {
+        let path = PathBuf::from(cwd);
+        if path.is_absolute() {
+            return Ok(path);
+        }
+        return Ok(paths.root.join(path));
+    }
+
+    Ok(paths.root.clone())
+}
+
+fn summarize(results: &[BenchmarkSuiteResult]) -> BenchmarkRunSummary {
+    let mut summary = BenchmarkRunSummary {
+        total: results.len(),
+        passed: 0,
+        failed: 0,
+        skipped: 0,
+    };
+    for result in results {
+        match result.status {
+            BenchmarkStatus::Passed => summary.passed += 1,
+            BenchmarkStatus::Failed => summary.failed += 1,
+            BenchmarkStatus::Skipped => summary.skipped += 1,
+        }
+    }
+    summary
+}
+
+fn truncate(value: &str) -> String {
+    let trimmed = value.trim();
+    if trimmed.chars().count() <= OUTPUT_LIMIT {
+        return trimmed.to_string();
+    }
+    let kept = trimmed.chars().take(OUTPUT_LIMIT).collect::<String>();
+    format!("{}\n... [truncated]", kept)
+}
+
+fn first_non_empty(preferred: &str, fallback: &str) -> Option<String> {
+    let preferred = preferred.trim();
+    if !preferred.is_empty() {
+        return Some(preferred.to_string());
+    }
+    let fallback = fallback.trim();
+    if !fallback.is_empty() {
+        return Some(fallback.to_string());
+    }
+    None
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn render_report_contains_suite_summary() {
+        let report = BenchmarkRunReport {
+            version: 1,
+            generated_at: Utc::now(),
+            manifest_path: "factory/benchmarks/suites.yaml".to_string(),
+            repo_root: "/tmp/harkonnen".to_string(),
+            selected_suites: vec!["local_regression".to_string()],
+            summary: BenchmarkRunSummary {
+                total: 1,
+                passed: 1,
+                failed: 0,
+                skipped: 0,
+            },
+            suites: vec![BenchmarkSuiteResult {
+                id: "local_regression".to_string(),
+                title: "Local Regression Gate".to_string(),
+                subsystem: "factory".to_string(),
+                category: "regression".to_string(),
+                tier: "required".to_string(),
+                description: "Fast local gate".to_string(),
+                benchmark_url: None,
+                leaderboard_url: None,
+                baseline_reference: None,
+                setup_notes: Vec::new(),
+                required_env: Vec::new(),
+                tags: Vec::new(),
+                status: BenchmarkStatus::Passed,
+                duration_ms: 12,
+                reason: None,
+                steps: Vec::new(),
+            }],
+        };
+
+        let markdown = render_report_markdown(&report);
+        assert!(markdown.contains("# Benchmark Report"));
+        assert!(markdown.contains("local_regression"));
+        assert!(markdown.contains("Local Regression Gate"));
+    }
+}

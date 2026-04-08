@@ -21,3 +21,6 @@ products/
 
 # Hugging Face model cache — lives at ~/.cache/huggingface/hub/ outside the repo
 # Listed here as documentation; not tracked by git.
+
+# Local benchmark and evaluation datasets — large BYO files kept out of git
+development_datasets/

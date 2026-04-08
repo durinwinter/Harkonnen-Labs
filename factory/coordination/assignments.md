@@ -97,7 +97,7 @@ strategy / outcome / failure_constraint / surviving_structure / reformulation.
 | Claude | vite.config.js — /api proxy to localhost:3000 | dev server now proxies to axum |
 | Claude | App.css — cleared Vite boilerplate | global tokens stay in index.css |
 | Claude | scripts/ — port checks, Docker daemon liveness, npm error surfacing, .env injection fix, AnythingLLM readiness wait | factory-up-linux.sh + windows.ps1 + bootstrap-local-stack.sh |
-| Claude | Coobie architecture decision | SQLite episodic/causal layers, TypeDB deferred |
+| Claude | Coobie architecture decision | SQLite remains the hot-path episodic/causal store; TypeDB 3.x semantic layer is intentionally deferred by roadmap sequencing, not by old JVM assumptions |
 
 ---
 

@@ -172,7 +172,7 @@ Recommended local backing:
 Purpose:
 
 - store stable facts, abstractions, invariants, and learned procedures
-- support typed queries and rule-based inference
+- support typed queries and function-backed semantic reasoning
 - hold what should still matter next week
 
 This is the best place for TypeDB.
@@ -195,10 +195,12 @@ Role of TypeDB:
 - typed schema
 - subtyping and polymorphism
 - explicit typed relations
-- rule-based inference
+- function-backed semantic reasoning in TypeDB 3.x
 - query-time reasoning over a knowledge graph instead of brittle app-side joins
 
-TypeDB should not be the hot path buffer. It is the durable semantic layer.
+TypeDB 3.x is now a much better fit for a Rust-first stack than older JVM-era
+assumptions implied, but it is still an external database service with real ops
+cost. TypeDB should not be the hot path buffer. It is the durable semantic layer.
 
 ### Layer D: Causal Graph
 
@@ -342,8 +344,14 @@ Role:
 Role:
 
 - durable semantic graph
-- typed relations and rule engine
+- typed relations and TypeDB 3.x function-backed reasoning
 - inferred higher-order lessons
+
+Integration note:
+
+- prefer the official TypeDB 3.x Rust-facing driver surface behind a local adapter
+- keep SQLite as the fast local run/episode store
+- do not assume TypeDB is embedded into the Rust process just because the core is now Rust
 
 ### Qdrant
 
@@ -402,7 +410,7 @@ Suggested responsibilities:
 - `blackboard.rs`: role-scoped team memory surfaces
 - `retrieval.rs`: hybrid retrieval orchestration
 - `extraction.rs`: PDF/OCR/document text extraction
-- `td.rs`: TypeDB adapter and query helpers
+- `td.rs`: TypeDB 3.x adapter and query helpers
 - `qdrant.rs`: Qdrant indexing and semantic lookup
 - `redis.rs`: optional hot-state backend
 
@@ -492,9 +500,9 @@ pub enum CausalLinkKind {
 }
 ```
 
-## TypeDB Schema Sketch
+## TypeDB 3 Schema Sketch
 
-TypeDB should hold the durable semantic graph and rule layer.
+TypeDB should hold the durable semantic graph and function-backed reasoning layer.
 
 The following is an implementation sketch, not a final locked schema.
 
@@ -665,7 +673,7 @@ Recommended approach:
 3. add micro- and run-level consolidation
 4. add local extraction pipeline
 5. add Qdrant integration for semantic acceleration
-6. add TypeDB semantic graph layer
+6. add TypeDB 3.x semantic graph layer
 7. add Redis only if hot shared-state pressure justifies it
 
 ## Strongest Implementation Rule

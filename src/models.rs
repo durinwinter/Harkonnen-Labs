@@ -689,6 +689,10 @@ pub struct ScenarioResult {
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct ValidationSummary {
     pub passed: bool,
+    #[serde(default)]
+    pub scored_checks: usize,
+    #[serde(default)]
+    pub passed_scored_checks: usize,
     pub results: Vec<ScenarioResult>,
 }
 

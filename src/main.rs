@@ -1,14 +1,17 @@
 mod agents;
 mod api;
+mod benchmark;
 mod capacity;
-mod embeddings;
+mod chat;
 mod claude_pack;
 mod cli;
 mod config;
 mod coobie;
 mod coobie_palace;
 mod db;
+mod embeddings;
 mod llm;
+mod longmemeval;
 mod memory;
 mod models;
 mod orchestrator;
@@ -68,6 +71,10 @@ async fn main() -> Result<()> {
         Commands::Capacity { command } => {
             let paths = config::Paths::discover()?;
             cli::handle_capacity(command, &paths).await?
+        }
+        Commands::Benchmark { command } => {
+            let paths = config::Paths::discover()?;
+            cli::handle_benchmark(command, &paths).await?
         }
     }
 

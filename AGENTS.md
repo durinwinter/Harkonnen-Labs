@@ -27,6 +27,9 @@ surface rather than stalling silently.
 src/                    Rust CLI (cargo run -- <command>)
   main.rs               Entry point and command dispatch
   cli.rs                All subcommands and handlers
+  api.rs                Axum API routes and handlers
+  benchmark.rs          Benchmark manifests, execution, and report generation
+  chat.rs               PackChat thread/message persistence and agent dispatch
   config.rs             Path discovery + SetupConfig loading
   setup.rs              SetupConfig structs, provider resolution, routing
   orchestrator.rs       AppContext, run lifecycle
@@ -48,10 +51,12 @@ factory/
   scenarios/            Hidden behavioral scenarios (Sable + Keeper only)
   workspaces/           Per-run isolated workspaces
   artifacts/            Packaged run outputs
+  benchmarks/           Benchmark suite manifest for local and external evals
   logs/                 Run logs
   state.db              SQLite run metadata
 
 setups/                 Named environment TOML files
+BENCHMARKS.md           Benchmark strategy, benchmark map, reporting guidance
 harkonnen.toml          Active/default setup config
 .env.example            Environment variable template
 ```
@@ -72,8 +77,17 @@ cargo run -- memory ingest <file-or-url>       # Extract docs/web content into c
 cargo run -- evidence init --project-root <repo> # Bootstrap repo-local evidence/annotation storage
 cargo run -- evidence validate <file>          # Validate a causal evidence annotation bundle
 cargo run -- evidence promote <file>           # Promote reviewed evidence into project/core Coobie memory
+cargo run -- benchmark list                    # List configured benchmark suites
+cargo run -- benchmark run                     # Run default benchmark suites and write reports
+cargo run -- benchmark report <file>           # Render a saved benchmark report as Markdown
 cargo run -- setup check                       # Verify active setup (providers + MCP)
 ```
+
+## Benchmarking
+
+Benchmark strategy lives in `BENCHMARKS.md`, runnable suites live in `factory/benchmarks/suites.yaml`, and benchmark reports are written to `factory/artifacts/benchmarks/`.
+
+The default benchmark gate is `local_regression` and runs `cargo fmt --check`, `cargo check`, and `cargo test -q`. LongMemEval now runs through a native benchmark adapter, while LoCoMo, tau2-bench, and SWE-bench Verified/Pro remain adapter-ready so Harkonnen can publish comparable memory, PackChat, and coding-loop scores as the remaining integrations mature.
 
 ## Coordination
 
@@ -179,6 +193,15 @@ api_key_env  = "ANTHROPIC_API_KEY"
 enabled      = true
 usage_rights = "standard"    # standard | high | targeted
 surface      = "claude-code" # which surface/tool runs this provider
+
+# OpenAI-compatible BYO endpoint example:
+[providers.codex]
+type         = "openai"
+model        = "gpt-4o"
+api_key_env  = "OPENAI_API_KEY"
+enabled      = true
+surface      = "vscode"
+# base_url     = "http://localhost:11434"
 ```
 
 ### Setup Variants
@@ -368,6 +391,16 @@ security_expectations: [auth, secrets, isolation]
 
 ---
 
+## Active Build Roadmap
+
+**[ROADMAP.md](ROADMAP.md) is the canonical phase-by-phase build order.**
+All agents and contributors must check it before starting new work.
+Phase 1 PackChat backend is already shipped.
+The next phases in order are: Bramble Tests → Ash Twins → Episodic Layer →
+Consolidation Workbench → TypeDB Semantic Layer.
+
+---
+
 ## What Is and Is Not Implemented
 
 ### Implemented
@@ -384,6 +417,9 @@ security_expectations: [auth, secrets, isolation]
 - Provider-aware LLM routing for Claude, Gemini, and OpenAI/Codex
 - Scout, Mason, Piper, Bramble, and Ash LLM calls with rule-based or procedural fallback
 - Opt-in Mason LLM-authored file writes inside the staged workspace
+- PackChat backend in Rust: chat thread/message persistence, direct agent chat,
+  multi-turn agent replies, and thread history retrieval
+- Checkpoint reply and agent unblock routes wired into the conversational control plane
 - Hidden scenario evaluation through protected scenario files (Sable)
 - Digital twin manifests with dependency stubs and optional narrative (Ash)
 - Coobie causal reasoning phase 1 with causal report output
@@ -393,12 +429,12 @@ security_expectations: [auth, secrets, isolation]
 
 ### Planned (next build layer)
 
-- `/api/chat` and `/api/agents/{id}/chat` Rust endpoints to back PackChat live agent routing
-- `/api/agents/{id}/unblock` endpoint for in-chat run unblocking
+- Bramble real test execution from spec-driven test commands
+- Ash live twin provisioning against running stubs instead of manifests-only evaluation
 - Coobie reading phase attribution records during causal scoring and lesson promotion
 - Post-run consolidation surface in the Workbench — review phase attributions, promote or discard lessons, trigger consolidation pass
 - Richer black-box hidden scenarios beyond event/artifact evaluation
 - Richer digital twins for external-system simulation
 - Richer memory indexing (Qdrant semantic, not just keyword)
-- TypeDB semantic graph layer (COOBIE_SPEC.md Layer C)
+- TypeDB 3.x semantic graph layer (COOBIE_SPEC.md Layer C) as a later durable semantic store, not the hot-path run database
 - DeepCausality phase 2 integration

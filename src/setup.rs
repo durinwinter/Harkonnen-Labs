@@ -77,6 +77,8 @@ pub struct ProviderConfig {
     pub usage_rights: Option<String>,
     #[serde(default)]
     pub surface: Option<String>,
+    #[serde(default)]
+    pub base_url: Option<String>,
 }
 
 fn default_true() -> bool {
@@ -376,6 +378,7 @@ pub fn default_provider_config(name: &str) -> ProviderConfig {
             enabled: true,
             usage_rights: Some("standard".to_string()),
             surface: Some("claude-code".to_string()),
+            base_url: None,
         },
         "gemini" => ProviderConfig {
             provider_type: "google".to_string(),
@@ -384,6 +387,7 @@ pub fn default_provider_config(name: &str) -> ProviderConfig {
             enabled: true,
             usage_rights: Some("standard".to_string()),
             surface: Some("antigravity".to_string()),
+            base_url: None,
         },
         "codex" => ProviderConfig {
             provider_type: "openai".to_string(),
@@ -392,6 +396,7 @@ pub fn default_provider_config(name: &str) -> ProviderConfig {
             enabled: true,
             usage_rights: Some("targeted".to_string()),
             surface: Some("vscode".to_string()),
+            base_url: None,
         },
         _ => ProviderConfig {
             provider_type: "unknown".to_string(),
@@ -400,6 +405,7 @@ pub fn default_provider_config(name: &str) -> ProviderConfig {
             enabled: false,
             usage_rights: None,
             surface: None,
+            base_url: None,
         },
     }
 }

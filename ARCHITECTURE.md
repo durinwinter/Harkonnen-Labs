@@ -642,20 +642,21 @@ The current scaffold already establishes the factory spine:
 - run creation and persistence in SQLite
 - per-run workspace creation
 - artifact packaging
-- local memory placeholder
-- policy boundary placeholder
+- PackChat backend thread/message persistence plus directed agent replies
+- checkpoint reply and unblock control-plane routes
+- causal memory and project/core memory ingestion
+- policy boundary enforcement and Keeper coordination
 - agent profile definitions
 - CLI entry points
+- Pack Board web UI
 
 The next practical layers to build are:
 
-1. richer spec validation and intent normalization
-2. explicit phase state machine in the orchestrator
-3. agent execution adapters and logs
-4. hidden scenario isolation
-5. twin provisioning
-6. richer memory indexing and retrieval
-7. a Pack Board web UI
+1. Bramble real test execution
+2. Ash live twin provisioning
+3. episodic layer enrichment and causal-link persistence
+4. operator-reviewed consolidation workbench
+5. TypeDB 3.x semantic layer
 
 ## Final Definition
 

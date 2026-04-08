@@ -6,6 +6,7 @@ use std::collections::{HashMap, HashSet};
 use std::io::{self, IsTerminal, Write};
 use std::path::{Path, PathBuf};
 
+use crate::benchmark;
 use crate::capacity::CapacityState;
 use crate::claude_pack::{export_claude_pack, ClaudePackRequest};
 use crate::config::Paths;
@@ -57,6 +58,10 @@ pub enum Commands {
         #[command(subcommand)]
         command: CapacityCommands,
     },
+    Benchmark {
+        #[command(subcommand)]
+        command: BenchmarkCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -67,6 +72,40 @@ pub enum CapacityCommands {
     Set(CapacitySetArgs),
     /// Reassign all claims from unavailable providers to the best available alternative.
     Reassign,
+}
+
+#[derive(Subcommand, Debug)]
+pub enum BenchmarkCommands {
+    List(BenchmarkListArgs),
+    Run(BenchmarkRunArgs),
+    Report(BenchmarkReportArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct BenchmarkListArgs {
+    #[arg(long)]
+    pub manifest: Option<String>,
+}
+
+#[derive(Args, Debug)]
+pub struct BenchmarkRunArgs {
+    #[arg(long, value_delimiter = ',')]
+    pub suite: Vec<String>,
+    #[arg(long, default_value_t = false)]
+    pub all: bool,
+    #[arg(long)]
+    pub manifest: Option<String>,
+    #[arg(long)]
+    pub output: Option<String>,
+    #[arg(long, default_value_t = false)]
+    pub strict: bool,
+    #[arg(long, default_value_t = false)]
+    pub strict_availability: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct BenchmarkReportArgs {
+    pub file: String,
 }
 
 #[derive(Subcommand, Debug)]
@@ -314,6 +353,63 @@ impl McpInterviewTemplate {
     }
 }
 
+pub async fn handle_benchmark(command: BenchmarkCommands, paths: &Paths) -> Result<()> {
+    match command {
+        BenchmarkCommands::List(args) => {
+            let manifest_path = args
+                .manifest
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| benchmark::default_manifest_path(paths));
+            let manifest = benchmark::load_manifest(&manifest_path)?;
+            println!("{}", benchmark::render_manifest_overview(&manifest));
+        }
+        BenchmarkCommands::Run(args) => {
+            let manifest_path = args
+                .manifest
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| benchmark::default_manifest_path(paths));
+            let output_path = args.output.as_deref().map(PathBuf::from);
+            let output = benchmark::run_benchmarks(
+                paths,
+                &manifest_path,
+                &args.suite,
+                args.all,
+                output_path.as_deref(),
+            )
+            .await?;
+            println!("Benchmark JSON: {}", output.json_path.display());
+            println!("Benchmark Markdown: {}", output.markdown_path.display());
+            println!(
+                "Summary: total={} passed={} failed={} skipped={}",
+                output.report.summary.total,
+                output.report.summary.passed,
+                output.report.summary.failed,
+                output.report.summary.skipped,
+            );
+            if args.strict && output.report.summary.failed > 0 {
+                bail!(
+                    "benchmark run recorded {} failed suite(s)",
+                    output.report.summary.failed
+                );
+            }
+            if args.strict_availability && output.report.summary.skipped > 0 {
+                bail!(
+                    "benchmark run recorded {} skipped suite(s)",
+                    output.report.summary.skipped
+                );
+            }
+        }
+        BenchmarkCommands::Report(args) => {
+            let path = PathBuf::from(args.file);
+            let report = benchmark::load_run_report(&path)?;
+            println!("{}", benchmark::render_report_markdown(&report));
+        }
+    }
+    Ok(())
+}
+
 pub async fn handle_spec(command: SpecCommands) -> Result<()> {
     match command {
         SpecCommands::Validate(args) => {
@@ -434,7 +530,9 @@ pub async fn handle_memory(command: MemoryCommands, app: AppContext) -> Result<(
                     }
                 }
                 None => {
-                    println!("Semantic embedding unavailable — memory init complete without embeddings.");
+                    println!(
+                        "Semantic embedding unavailable — memory init complete without embeddings."
+                    );
                     println!("Embeddings will be generated automatically on the next `cargo run`.");
                 }
             }
@@ -1027,6 +1125,18 @@ fn configure_provider_prompt(name: &str, slot: &mut Option<ProviderConfig>) -> R
             &format!("Preferred surface for {name}"),
             &surface_default,
         )?);
+        if matches!(provider.provider_type.as_str(), "openai" | "codex") {
+            let base_url_default = provider.base_url.clone().unwrap_or_default();
+            let base_url = prompt_text(
+                &format!("OpenAI-compatible base URL for {name} (blank for default OpenAI API)"),
+                &base_url_default,
+            )?;
+            provider.base_url = if base_url.trim().is_empty() {
+                None
+            } else {
+                Some(base_url)
+            };
+        }
     }
     *slot = Some(provider);
     Ok(())
@@ -1582,6 +1692,9 @@ fn provider_notes(config: &ProviderConfig) -> String {
     let mut notes = Vec::new();
     if let Some(surface) = &config.surface {
         notes.push(format!("surface: {surface}"));
+    }
+    if let Some(base_url) = &config.base_url {
+        notes.push(format!("base_url: {base_url}"));
     }
     if let Some(usage_rights) = &config.usage_rights {
         notes.push(format!("usage: {usage_rights}"));

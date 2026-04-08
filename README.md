@@ -109,13 +109,31 @@ Causal knowledge is represented as:
 
 * **SQLite** → episodic memory and run state
 * **Filesystem** → specs, artifacts, evidence
-* **(Optional) TypeDB** → semantic + relational knowledge
+* **(Planned / Optional) TypeDB 3.x service** → durable semantic graph + typed relational queries, not the hot-path store
 * **(Optional) Vector store** → retrieval acceleration
 * **(Future) Causal graph / causaloids** → executable reasoning
 
 ---
 
-### 5. Execution Semantics
+### 5. Benchmarking And Improvement Loop
+
+Harkonnen now includes a first-class benchmark toolchain so changes can be measured, compared, and regressed automatically.
+
+Core entrypoints:
+
+```bash
+cargo run -- benchmark list
+cargo run -- benchmark run
+cargo run -- benchmark run --suite local_regression --strict
+cargo run -- benchmark run --all
+./scripts/run-benchmarks.sh
+```
+
+The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `BENCHMARKS.md`, and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, LongMemEval now runs in both native Harkonnen and raw-LLM baseline modes, and the remaining external adapters are prepared for LoCoMo, tau2-bench, and SWE-bench Verified/Pro. The execution roadmap in `ROADMAP.md` now treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
+
+The OpenAI/Codex provider path also supports optional OpenAI-compatible BYO endpoints through a setup `base_url`, so benchmark runs can target local or third-party compatible backends without changing Rust code.
+
+### 6. Execution Semantics
 
 Each run produces:
 

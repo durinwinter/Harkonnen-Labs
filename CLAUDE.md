@@ -3,6 +3,10 @@
 Read [AGENTS.md](AGENTS.md) first. It is the universal system context for all agents.
 This file adds Claude-specific conventions on top of that foundation.
 
+**Active build order: [ROADMAP.md](ROADMAP.md)**
+All new implementation work follows the phase sequence in that file.
+Check it before starting any new feature to confirm it belongs to the current phase.
+
 ---
 
 ## Claude's Role in This System

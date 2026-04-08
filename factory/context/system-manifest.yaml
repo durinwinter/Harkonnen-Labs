@@ -40,7 +40,8 @@ status:
     - Coobie causal reasoning engine (Phase 1, SQLite-backed)
     - causal report per run (causal_report.json + API endpoint)
     - Keeper coordination API with file-claim conflict detection and heartbeats
-    - Pack Board web UI (React/Vite) with agent grid, timeline, policy board
+    - PackChat backend with SQLite-backed chat threads/messages, multi-turn agent replies, and direct agent routing
+    - Pack Board web UI (React/Vite) with agent grid, timeline, policy board, and PackChat panel
     - project-scoped scenario blueprints with code-under-test/oracle/dataset components
     - repo-local project memory under `.harkonnen/project-memory/` plus core/project memory split
     - `memory ingest` command for PDFs, text docs, office docs, HTML, and websites into either core or project memory
@@ -58,12 +59,14 @@ status:
     - trail drift guard and trail drift check artifacts that fingerprint guarded code-under-test and repo-local context paths before forge execution
     - evidence promotion from reviewed annotation bundles into project/core Coobie memory with provenance back to the source evidence bundle
     - repo-local evidence bootstrap and causal evidence bundle validation under `.harkonnen/evidence/` for annotated time-series/video/log learning sets
+    - benchmark toolchain with suite manifest, report generation, local regression gate, and external benchmark adapters
   planned:
     - DeepCausality integration (Phase 2 causal engine)
     - safer hash-anchored or drift-resistant edit protocol for external repos
     - Ash LLM call for twin environment narrative
     - Semantic memory indexing via AnythingLLM or MCP memory
     - Pack Board: run-start trigger from UI
+    - TypeDB 3.x durable semantic layer as a later external service for typed cross-run memory
 
 cli:
   binary: harkonnen
@@ -81,6 +84,9 @@ cli:
     - evidence init --project-root <repo>
     - evidence validate <file>
     - evidence promote <file> [--scope follow-bundle|project|core --project-root <repo>]
+    - benchmark list
+    - benchmark run [--suite <id>...|--all]
+    - benchmark report <file>
     - setup check
 
 key_files:

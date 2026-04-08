@@ -1,0 +1,39 @@
+[
+  {
+    "question_id": "smoke_001",
+    "question_type": "single-session-user",
+    "question": "What sandwich did I say was my favorite?",
+    "answer": "grilled cheese",
+    "question_date": "2025-01-04",
+    "haystack_session_ids": [
+      "session-01",
+      "session-02"
+    ],
+    "haystack_dates": [
+      "2025-01-02",
+      "2025-01-03"
+    ],
+    "haystack_sessions": [
+      [
+        {
+          "role": "user",
+          "content": "I finally decided my favorite sandwich is grilled cheese."
+        },
+        {
+          "role": "assistant",
+          "content": "Got it, your favorite sandwich is grilled cheese."
+        }
+      ],
+      [
+        {
+          "role": "user",
+          "content": "Please remember that for later."
+        },
+        {
+          "role": "assistant",
+          "content": "I will remember it."
+        }
+      ]
+    ]
+  }
+]

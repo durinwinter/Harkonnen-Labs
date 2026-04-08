@@ -39,6 +39,8 @@ api_key_env  = "OPENAI_API_KEY"
 enabled      = true
 usage_rights = "targeted"
 surface      = "vscode"
+# Optional for BYO OpenAI-compatible endpoints: e.g. "http://localhost:11434" or "https://openrouter.ai/api/v1"
+# base_url     = "http://localhost:11434"
 
 [routing.agents]
 coobie = "claude"

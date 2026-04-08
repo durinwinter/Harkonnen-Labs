@@ -16,26 +16,36 @@ interaction_model:
 services:
   - name: conversation
     purpose: Persist PackChat threads, directed agent messages, blocked questions, and operator replies.
-    planned_modules:
+    existing_modules:
       - src/chat.rs
+    planned_modules:
       - src/interaction.rs
       - src/checkpoints.rs
-    planned_tables:
+    existing_tables:
       - chat_threads
       - chat_messages
+    planned_tables:
       - run_checkpoints
       - checkpoint_answers
-    planned_routes:
+    existing_routes:
       - method: GET
         path: /api/chat/threads
       - method: POST
         path: /api/chat/threads
+      - method: GET
+        path: /api/chat/threads/:id
+      - method: GET
+        path: /api/chat/threads/:id/messages
       - method: POST
         path: /api/chat/threads/:id/messages
       - method: POST
         path: /api/agents/:id/chat
       - method: POST
         path: /api/agents/:id/unblock
+      - method: GET
+        path: /api/runs/:id/checkpoints
+      - method: POST
+        path: /api/runs/:id/checkpoints/:checkpoint_id/reply
   - name: blackboard
     purpose: Expose the four Coobie board slices as backend-owned read models.
     planned_modules:
@@ -97,6 +107,20 @@ retrieval_order:
 first_milestone:
   goal: Make Memory Board and manual run consolidation real backend capabilities.
   implemented_routes:
+    - method: GET
+      path: /api/chat/threads
+    - method: POST
+      path: /api/chat/threads
+    - method: GET
+      path: /api/chat/threads/:id
+    - method: GET
+      path: /api/chat/threads/:id/messages
+    - method: POST
+      path: /api/chat/threads/:id/messages
+    - method: POST
+      path: /api/agents/:id/chat
+    - method: POST
+      path: /api/agents/:id/unblock
     - method: GET
       path: /api/runs/:id/board/memory
       backing_artifacts:

@@ -337,10 +337,80 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
         CREATE TABLE IF NOT EXISTS memory_embeddings (
             entry_id    TEXT NOT NULL,
             memory_root TEXT NOT NULL,
+            backend_id  TEXT NOT NULL DEFAULT '',
+            model_id    TEXT NOT NULL DEFAULT '',
             embedding   BLOB NOT NULL,
             embedded_at TEXT NOT NULL,
             PRIMARY KEY (entry_id, memory_root)
         )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_embeddings",
+        "backend_id",
+        "ALTER TABLE memory_embeddings ADD COLUMN backend_id TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_embeddings",
+        "model_id",
+        "ALTER TABLE memory_embeddings ADD COLUMN model_id TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+
+    // ── PackChat tables ───────────────────────────────────────────────────────
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS chat_threads (
+            thread_id   TEXT PRIMARY KEY,
+            run_id      TEXT,
+            spec_id     TEXT,
+            title       TEXT NOT NULL DEFAULT '',
+            status      TEXT NOT NULL DEFAULT 'open',
+            created_at  TEXT NOT NULL,
+            updated_at  TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_chat_threads_run_id
+        ON chat_threads (run_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS chat_messages (
+            message_id      TEXT PRIMARY KEY,
+            thread_id       TEXT NOT NULL REFERENCES chat_threads(thread_id),
+            role            TEXT NOT NULL,  -- 'operator' | 'agent' | 'system'
+            agent           TEXT,           -- which agent sent/received this
+            content         TEXT NOT NULL,
+            checkpoint_id   TEXT,           -- non-null when this msg resolves a checkpoint
+            created_at      TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_chat_messages_thread_id
+        ON chat_messages (thread_id, created_at)
         "#,
     )
     .execute(&pool)

@@ -59,14 +59,16 @@ pub const DENS: &[Den] = &[
         label: "Test Den",
         nickname: "da test room",
         residents: &["TEST_BLIND_SPOT"],
-        description: "Failures where visible tests passed but hidden scenarios exposed blind spots.",
+        description:
+            "Failures where visible tests passed but hidden scenarios exposed blind spots.",
     },
     Den {
         id: "twin_den",
         label: "Twin Den",
         nickname: "da twin yard",
         residents: &["TWIN_GAP"],
-        description: "Failures caused by the simulated environment not matching production conditions.",
+        description:
+            "Failures caused by the simulated environment not matching production conditions.",
     },
     Den {
         id: "pack_den",
@@ -80,7 +82,8 @@ pub const DENS: &[Den] = &[
         label: "Memory Den",
         nickname: "da memory spot",
         residents: &["NO_PRIOR_MEMORY"],
-        description: "Failures where the factory ran cold — no relevant prior context was recalled.",
+        description:
+            "Failures where the factory ran cold — no relevant prior context was recalled.",
     },
 ];
 
@@ -179,8 +182,13 @@ pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
         let any_escalated = residents.iter().any(|c| c.escalate);
         let den_escalated = any_escalated || active_residents >= 2;
 
-        let (compound_narrative, required_checks, guardrails, open_questions) =
-            build_den_scent(den, &residents, active_residents, peak_streak, den_escalated);
+        let (compound_narrative, required_checks, guardrails, open_questions) = build_den_scent(
+            den,
+            &residents,
+            active_residents,
+            peak_streak,
+            den_escalated,
+        );
 
         active_dens.push(DenScent {
             den_id: den.id,
@@ -207,7 +215,11 @@ pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
             .iter()
             .map(|d| {
                 let base = (d.peak_streak as f32 / 5.0_f32).min(1.0);
-                if d.den_escalated { (base + 0.2).min(1.0) } else { base }
+                if d.den_escalated {
+                    (base + 0.2).min(1.0)
+                } else {
+                    base
+                }
             })
             .sum();
         (sum / active_den_count as f32).min(1.0)
@@ -363,7 +375,9 @@ fn build_den_scent(
 /// Generate a compound narrative for dens with multiple active residents.
 fn build_compound_narrative(den: &Den, cause_ids: &[&str], peak_streak: usize) -> String {
     match den.id {
-        "spec_den" if cause_ids.contains(&"SPEC_AMBIGUITY") && cause_ids.contains(&"BROAD_SCOPE") => {
+        "spec_den"
+            if cause_ids.contains(&"SPEC_AMBIGUITY") && cause_ids.contains(&"BROAD_SCOPE") =>
+        {
             format!(
                 "Compound spec failure pattern: SPEC_AMBIGUITY and BROAD_SCOPE have both fired \
                  (peak streak: {} run(s)) — the spec is simultaneously unclear AND too wide. \
@@ -501,11 +515,18 @@ mod tests {
             snapshot("BROAD_SCOPE", 2, 2),
         ];
         let p = patrol(&causes);
-        let spec = p.active_dens.iter().find(|d| d.den_id == "spec_den").unwrap();
+        let spec = p
+            .active_dens
+            .iter()
+            .find(|d| d.den_id == "spec_den")
+            .unwrap();
         assert_eq!(spec.active_residents, 2);
         assert!(spec.den_escalated);
         // Compound check should be present.
-        assert!(spec.required_checks.iter().any(|c| c.contains("Compound spec")));
+        assert!(spec
+            .required_checks
+            .iter()
+            .any(|c| c.contains("Compound spec")));
     }
 
     #[test]

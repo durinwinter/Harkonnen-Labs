@@ -32,9 +32,9 @@ use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::models::{
-    CausalHypothesis, CausalStreak, CoobieBriefing, CoobieEvidenceCitation,
-    CounterfactualEstimate, CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord,
-    ProjectComponent, ProjectResumeRisk, ScenarioBlueprint,
+    CausalHypothesis, CausalStreak, CoobieBriefing, CoobieEvidenceCitation, CounterfactualEstimate,
+    CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord, ProjectComponent,
+    ProjectResumeRisk, ScenarioBlueprint,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -119,7 +119,7 @@ pub struct EpisodeScores {
     pub change_scope_score: f32,
     /// How faithfully the twin environment represented production conditions.
     pub twin_fidelity_score: f32,
-    /// Fraction of visible validation checks that passed.
+    /// Fraction of scored visible validation checks that passed.
     pub test_coverage_score: f32,
     /// Whether Coobie retrieved relevant prior memory before the run.
     pub memory_retrieval_score: f32,
@@ -1117,7 +1117,9 @@ impl SqliteCoobie {
         let test_coverage = match &ep.validation {
             None => 0.0,
             Some(v) => {
-                if v.results.is_empty() {
+                if v.scored_checks > 0 {
+                    v.passed_scored_checks as f32 / v.scored_checks as f32
+                } else if v.results.is_empty() {
                     0.0
                 } else {
                     let passed = v.results.iter().filter(|r| r.passed).count() as f32;
@@ -1321,7 +1323,12 @@ impl SqliteCoobie {
     /// "Consecutive" means looking at the last `window` runs for this spec
     /// (ordered newest-first) and counting from the front while the cause fires.
     /// The streak resets as soon as a run is found where the cause did NOT fire.
-    async fn detect_cause_streak(&self, spec_id: &str, cause_id: &str, window: i64) -> Result<usize> {
+    async fn detect_cause_streak(
+        &self,
+        spec_id: &str,
+        cause_id: &str,
+        window: i64,
+    ) -> Result<usize> {
         // Ordered list of recent run_ids for this spec, newest first.
         let run_rows = sqlx::query(
             r#"
@@ -1385,7 +1392,11 @@ impl SqliteCoobie {
                     "'{}' has fired on {} consecutive runs of this spec{}.",
                     h.cause_id,
                     streak_len,
-                    if escalate { " — standard interventions are not breaking the cycle" } else { "" },
+                    if escalate {
+                        " — standard interventions are not breaking the cycle"
+                    } else {
+                        ""
+                    },
                 ),
                 confidence_boost,
                 escalate,

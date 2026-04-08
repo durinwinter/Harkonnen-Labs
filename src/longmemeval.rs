@@ -1,6 +1,7 @@
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 use std::collections::{BTreeMap, HashMap};
 use std::env;
 use std::path::{Path, PathBuf};
@@ -14,6 +15,8 @@ use crate::{
 };
 
 const DEFAULT_AGENT: &str = "coobie";
+const DEFAULT_DIRECT_TRANSCRIPT_CHAR_LIMIT: usize = 12_000;
+const MIN_DIRECT_TRANSCRIPT_CHAR_LIMIT: usize = 1_200;
 const DEFAULT_ABSTENTION_PHRASES: &[&str] = &[
     "i don't know",
     "i do not know",
@@ -160,7 +163,7 @@ struct LongMemEvalQuestion {
     #[serde(default)]
     question_type: String,
     question: String,
-    answer: String,
+    answer: Value,
     #[serde(default)]
     question_date: String,
     #[serde(default)]
@@ -325,8 +328,19 @@ pub async fn run(paths: &Paths, config: &LongMemEvalRunConfig) -> Result<LongMem
     let mut results = Vec::with_capacity(questions.len());
     let mut accumulator = LongMemEvalAccumulator::default();
     let mut by_type: HashMap<String, LongMemEvalAccumulator> = HashMap::new();
+    let verbose_progress = benchmark_verbose_progress();
+    let show_raw_output = benchmark_show_raw_output();
 
-    for question in &questions {
+    for (index, question) in questions.iter().enumerate() {
+        if verbose_progress {
+            eprintln!(
+                "[LongMemEval][{}/{}][{}] starting ({})",
+                index + 1,
+                questions.len(),
+                config.mode.as_str(),
+                question.question_id
+            );
+        }
         let history = build_history(question, &config.agent);
         let hypothesis = match config.mode {
             LongMemEvalMode::Harkonnen => {
@@ -353,6 +367,30 @@ pub async fn run(paths: &Paths, config: &LongMemEvalRunConfig) -> Result<LongMem
         };
 
         let result = evaluate_question(question, hypothesis);
+        if verbose_progress {
+            eprintln!(
+                "[LongMemEval][{}/{}][{}] done {} exact_match={} contains_answer={} token_f1={:.4}",
+                index + 1,
+                questions.len(),
+                config.mode.as_str(),
+                result.question_id,
+                result.exact_match,
+                result.contains_answer,
+                result.token_f1
+            );
+            eprintln!(
+                "[LongMemEval][{}] answer: {}",
+                result.question_id, result.hypothesis
+            );
+            if show_raw_output {
+                eprintln!(
+                    "[LongMemEval][{}] raw output:
+{}
+---",
+                    result.question_id, result.raw_hypothesis
+                );
+            }
+        }
         accumulator.add(&result);
         by_type
             .entry(result.question_type.clone())
@@ -585,26 +623,59 @@ async fn complete_direct_reply(
             )
         })?;
 
-    let req = LlmRequest {
-        messages: vec![Message::user(build_direct_prompt(question, history))],
-        max_tokens: 512,
-        temperature: 0.0,
-    };
+    let mut transcript_budget = direct_transcript_char_limit();
+    loop {
+        let req = LlmRequest {
+            messages: vec![Message::user(build_direct_prompt(
+                question,
+                history,
+                transcript_budget,
+            ))],
+            max_tokens: 512,
+            temperature: 0.0,
+        };
 
-    provider
-        .complete(req)
-        .await
-        .map(|resp| resp.content)
-        .with_context(|| {
-            format!(
-                "LongMemEval direct provider failed via {}",
-                config.direct_provider
-            )
-        })
+        match provider.complete(req).await {
+            Ok(resp) => return Ok(resp.content),
+            Err(err)
+                if is_context_window_error(&err)
+                    && transcript_budget > MIN_DIRECT_TRANSCRIPT_CHAR_LIMIT =>
+            {
+                let next_budget = (transcript_budget / 2).max(MIN_DIRECT_TRANSCRIPT_CHAR_LIMIT);
+                if benchmark_verbose_progress() {
+                    eprintln!(
+                        "[LongMemEval][direct] context retry {} budget {} -> {} chars",
+                        question.question_id, transcript_budget, next_budget
+                    );
+                }
+                if next_budget == transcript_budget {
+                    return Err(err).with_context(|| {
+                        format!(
+                            "LongMemEval direct provider failed via {}",
+                            config.direct_provider
+                        )
+                    });
+                }
+                transcript_budget = next_budget;
+            }
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!(
+                        "LongMemEval direct provider failed via {}",
+                        config.direct_provider
+                    )
+                });
+            }
+        }
+    }
 }
 
-fn build_direct_prompt(question: &LongMemEvalQuestion, history: &[ChatMessage]) -> String {
-    let transcript = history
+fn build_direct_prompt(
+    question: &LongMemEvalQuestion,
+    history: &[ChatMessage],
+    transcript_budget: usize,
+) -> String {
+    let transcript_lines = history
         .iter()
         .map(|message| {
             let role = if message.role == "operator" {
@@ -614,13 +685,18 @@ fn build_direct_prompt(question: &LongMemEvalQuestion, history: &[ChatMessage]) 
             };
             format!("{}: {}", role, message.content.trim())
         })
-        .collect::<Vec<_>>()
-        .join("\n");
+        .collect::<Vec<_>>();
+    let (transcript, truncated) = truncate_transcript_lines(&transcript_lines, transcript_budget);
+    let transcript_label = if truncated {
+        "Transcript (truncated to fit local model context):"
+    } else {
+        "Transcript:"
+    };
 
     format!(
         "You are answering a memory question using only the transcript below.
 
-Transcript:
+{}
 {}
 
 LongMemEval question type: {}
@@ -628,6 +704,7 @@ Question date: {}
 Question: {}
 
 Return only the bare answer text with no reasoning, no XML tags, no <think> blocks, and no preamble. If the transcript does not contain enough information, reply exactly: I do not know.",
+        transcript_label,
         transcript,
         question.question_type,
         question.question_date,
@@ -650,7 +727,8 @@ fn evaluate_question(
 ) -> LongMemEvalQuestionResult {
     let hypothesis = extract_final_answer(&raw_hypothesis);
     let normalized_hypothesis = normalize_text(&hypothesis);
-    let normalized_answer = normalize_text(&question.answer);
+    let answer_text = answer_text(&question.answer);
+    let normalized_answer = normalize_text(&answer_text);
     let expected_abstention = is_abstention_question(question);
     let predicted_abstention = is_abstention_response(&normalized_hypothesis);
 
@@ -662,7 +740,7 @@ fn evaluate_question(
             question.question_type.clone()
         },
         question_date: question.question_date.clone(),
-        expected_answer: question.answer.clone(),
+        expected_answer: answer_text,
         raw_hypothesis,
         hypothesis,
         exact_match: !normalized_hypothesis.is_empty()
@@ -854,6 +932,71 @@ fn is_abstention_response(normalized_hypothesis: &str) -> bool {
         .any(|phrase| normalized_hypothesis.contains(&normalize_text(phrase)))
 }
 
+fn direct_transcript_char_limit() -> usize {
+    env::var("LONGMEMEVAL_DIRECT_MAX_CHARS")
+        .ok()
+        .and_then(|value| value.trim().parse::<usize>().ok())
+        .filter(|value| *value >= MIN_DIRECT_TRANSCRIPT_CHAR_LIMIT)
+        .unwrap_or(DEFAULT_DIRECT_TRANSCRIPT_CHAR_LIMIT)
+}
+
+fn is_context_window_error(err: &anyhow::Error) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("context length")
+        || text.contains("context window")
+        || text.contains("n_keep")
+        || text.contains("n_ctx")
+        || text.contains("too many tokens")
+}
+
+fn truncate_transcript_lines(lines: &[String], max_chars: usize) -> (String, bool) {
+    let joined = lines.join("\n");
+    if joined.chars().count() <= max_chars {
+        return (joined, false);
+    }
+
+    let mut kept = Vec::new();
+    let mut used_chars = 0usize;
+    for line in lines.iter().rev() {
+        let line_chars = line.chars().count();
+        let separator_chars = usize::from(!kept.is_empty());
+        if used_chars + line_chars + separator_chars > max_chars {
+            if kept.is_empty() {
+                kept.push(take_last_chars(line, max_chars));
+            }
+            break;
+        }
+        kept.push(line.clone());
+        used_chars += line_chars + separator_chars;
+    }
+    kept.reverse();
+    (kept.join("\n"), true)
+}
+
+fn take_last_chars(text: &str, max_chars: usize) -> String {
+    let total = text.chars().count();
+    if total <= max_chars {
+        return text.to_string();
+    }
+    text.chars().skip(total - max_chars).collect()
+}
+
+fn answer_text(answer: &Value) -> String {
+    match answer {
+        Value::Null => String::new(),
+        Value::String(value) => value.clone(),
+        Value::Number(value) => value.to_string(),
+        Value::Bool(value) => value.to_string(),
+        Value::Array(items) => items
+            .iter()
+            .map(answer_text)
+            .filter(|value| !value.trim().is_empty())
+            .collect::<Vec<_>>()
+            .join(", "),
+        Value::Object(_) => serde_json::to_string(answer).unwrap_or_default(),
+    }
+}
+
 fn extract_final_answer(raw_hypothesis: &str) -> String {
     let without_think = strip_think_blocks(raw_hypothesis);
     let trimmed = without_think.trim();
@@ -1010,6 +1153,28 @@ fn parse_env_f64_with_overrides(
             .with_context(|| format!("parsing {} as f64", name)),
         None => Ok(None),
     }
+}
+
+fn benchmark_verbose_progress() -> bool {
+    benchmark_flag_enabled("HARKONNEN_BENCH_VERBOSE")
+        || benchmark_flag_enabled("HARKONNEN_BENCH_PROGRESS")
+}
+
+fn benchmark_show_raw_output() -> bool {
+    benchmark_flag_enabled("HARKONNEN_BENCH_SHOW_RAW")
+        || benchmark_flag_enabled("HARKONNEN_BENCH_SHOW_THINK")
+}
+
+fn benchmark_flag_enabled(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 struct OrderedSession<'a> {

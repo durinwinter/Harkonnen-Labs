@@ -1,5 +1,11 @@
 target/
+target-host/
 .env
+
+# Python bytecode
+__pycache__/
+*.pyc
+*.pyo
 
 # SQLite state — regenerated at runtime
 *.db

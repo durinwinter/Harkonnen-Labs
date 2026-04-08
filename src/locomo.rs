@@ -245,6 +245,11 @@ pub async fn run(paths: &Paths, config: &LoCoMoRunConfig) -> Result<LoCoMoRunOut
     let mut accumulator = LoCoMoAccumulator::default();
     let mut by_category: HashMap<i64, LoCoMoAccumulator> = HashMap::new();
     let mut seen = 0usize;
+    let total_questions = config
+        .limit
+        .unwrap_or_else(|| samples.iter().map(|sample| sample.qa.len()).sum());
+    let verbose_progress = benchmark_verbose_progress();
+    let show_raw_output = benchmark_show_raw_output();
 
     'outer: for sample in &samples {
         let history = build_history(sample, &config.agent)?;
@@ -254,6 +259,18 @@ pub async fn run(paths: &Paths, config: &LoCoMoRunConfig) -> Result<LoCoMoRunOut
                     break 'outer;
                 }
             }
+            if verbose_progress {
+                eprintln!(
+                    "[LoCoMo][{}/{}][{}] starting sample={} qa_index={} category={}",
+                    seen + 1,
+                    total_questions,
+                    config.mode.as_str(),
+                    sample.sample_id,
+                    qa_index,
+                    qa.category
+                );
+            }
+
             let raw_hypothesis = match config.mode {
                 LoCoMoMode::Harkonnen => {
                     let prompt = build_question_prompt(qa);
@@ -290,6 +307,26 @@ pub async fn run(paths: &Paths, config: &LoCoMoRunConfig) -> Result<LoCoMoRunOut
             };
 
             let result = evaluate_question(sample, qa_index, qa, raw_hypothesis);
+            if verbose_progress {
+                eprintln!(
+                    "[LoCoMo][{}/{}][{}] done sample={} qa_index={} score={:.4} answer={}",
+                    seen + 1,
+                    total_questions,
+                    config.mode.as_str(),
+                    result.sample_id,
+                    result.qa_index,
+                    result.score,
+                    result.hypothesis
+                );
+                if show_raw_output {
+                    eprintln!(
+                        "[LoCoMo][{}:{}] raw output:
+{}
+---",
+                        result.sample_id, result.qa_index, result.raw_hypothesis
+                    );
+                }
+            }
             accumulator.add(&result);
             by_category.entry(qa.category).or_default().add(&result);
             prediction_lines.push(serde_json::to_string(&LoCoMoPrediction {
@@ -885,6 +922,28 @@ fn parse_env_f64_with_overrides(
             .with_context(|| format!("parsing {} as f64", name)),
         None => Ok(None),
     }
+}
+
+fn benchmark_verbose_progress() -> bool {
+    benchmark_flag_enabled("HARKONNEN_BENCH_VERBOSE")
+        || benchmark_flag_enabled("HARKONNEN_BENCH_PROGRESS")
+}
+
+fn benchmark_show_raw_output() -> bool {
+    benchmark_flag_enabled("HARKONNEN_BENCH_SHOW_RAW")
+        || benchmark_flag_enabled("HARKONNEN_BENCH_SHOW_THINK")
+}
+
+fn benchmark_flag_enabled(name: &str) -> bool {
+    env::var(name)
+        .ok()
+        .map(|value| {
+            matches!(
+                value.trim().to_ascii_lowercase().as_str(),
+                "1" | "true" | "yes" | "on"
+            )
+        })
+        .unwrap_or(false)
 }
 
 fn ratio(numerator: f64, denominator: usize) -> f64 {

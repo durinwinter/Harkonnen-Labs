@@ -1,0 +1,44 @@
+# LM Studio Qwen bridge setup
+# Uses the LM-Link exposed qwen/qwen3.5-9b model on the local OpenAI-compatible endpoint.
+# Example:
+#   export LM_STUDIO_API_KEY=lm-studio
+#   export HARKONNEN_SETUP=lm-studio-qwen-link
+#   cargo run -- setup check
+
+[setup]
+name        = "lm-studio-qwen-link"
+platform    = "linux"
+anythingllm = false
+openclaw    = false
+
+[providers]
+default = "codex"
+
+[providers.codex]
+type         = "openai"
+model        = "qwen/qwen3.5-9b"
+api_key_env  = "LM_STUDIO_API_KEY"
+enabled      = true
+usage_rights = "local"
+surface      = "lm-studio"
+base_url     = "http://127.0.0.1:1234"
+
+[providers.embedding]
+type         = "openai"
+model        = "text-embedding-nomic-embed-text-v1.5"
+api_key_env  = "LM_STUDIO_API_KEY"
+enabled      = true
+usage_rights = "local"
+surface      = "lm-studio"
+base_url     = "http://127.0.0.1:1234"
+
+[routing.agents]
+scout   = "codex"
+sable   = "codex"
+keeper  = "codex"
+coobie  = "codex"
+mason   = "codex"
+bramble = "codex"
+piper   = "codex"
+ash     = "codex"
+flint   = "codex"

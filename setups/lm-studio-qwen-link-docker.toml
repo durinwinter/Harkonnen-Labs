@@ -1,0 +1,45 @@
+# LM Studio Qwen bridge setup for Docker-based benchmark runs.
+# Uses host.docker.internal so a Linux Docker container can reach the LM Studio
+# OpenAI-compatible endpoint on the host.
+# Example:
+#   export LM_STUDIO_API_KEY=lm-studio
+#   export HARKONNEN_SETUP=lm-studio-qwen-link-docker
+#   cargo run --no-default-features -- setup check
+
+[setup]
+name        = "lm-studio-qwen-link-docker"
+platform    = "linux"
+anythingllm = false
+openclaw    = false
+
+[providers]
+default = "codex"
+
+[providers.codex]
+type         = "openai"
+model        = "qwen/qwen3.5-9b"
+api_key_env  = "LM_STUDIO_API_KEY"
+enabled      = true
+usage_rights = "local"
+surface      = "lm-studio-docker"
+base_url     = "http://host.docker.internal:1234"
+
+[providers.embedding]
+type         = "openai"
+model        = "text-embedding-nomic-embed-text-v1.5"
+api_key_env  = "LM_STUDIO_API_KEY"
+enabled      = true
+usage_rights = "local"
+surface      = "lm-studio-docker"
+base_url     = "http://host.docker.internal:1234"
+
+[routing.agents]
+scout   = "codex"
+sable   = "codex"
+keeper  = "codex"
+coobie  = "codex"
+mason   = "codex"
+bramble = "codex"
+piper   = "codex"
+ash     = "codex"
+flint   = "codex"

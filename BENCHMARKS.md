@@ -153,6 +153,15 @@ LOCOMO_LIMIT=25 \
 cargo run -- benchmark run --suite coobie_locomo --suite locomo_raw_llm
 ```
 
+For interactive local runs where you want visible progress and raw model output, including any `<think>` blocks the model emits, use:
+
+```bash
+scripts/run-visible-benchmark.sh longmemeval 10
+scripts/run-visible-benchmark.sh locomo 10
+```
+
+This launcher enables `HARKONNEN_BENCH_VERBOSE=1` and `HARKONNEN_BENCH_SHOW_RAW=1` by default, prints heartbeat lines while a question is still running, and writes a full terminal log to `factory/artifacts/benchmarks/live-logs/`.
+
 ## Recommended Reporting Order
 
 1. Local Regression Gate on every change.

@@ -1,19 +1,21 @@
 use anyhow::{bail, Context, Result};
 use chrono::Utc;
+#[cfg(feature = "local-embeddings")]
 use fastembed::{EmbeddingModel, TextEmbedding, TextInitOptions};
 use reqwest::Client;
 use serde::{Deserialize, Serialize};
 use sqlx::SqlitePool;
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
+#[cfg(feature = "local-embeddings")]
+use std::sync::Mutex;
 use std::time::Duration;
 
 use crate::{memory::MemoryEntry, setup::SetupConfig};
 
 #[derive(Clone)]
 enum EmbeddingBackend {
-    Fastembed {
-        model: Arc<Mutex<TextEmbedding>>,
-    },
+    #[cfg(feature = "local-embeddings")]
+    Fastembed { model: Arc<Mutex<TextEmbedding>> },
     OpenAiCompatible {
         api_key: String,
         model: String,
@@ -73,25 +75,35 @@ impl EmbeddingStore {
             });
         }
 
-        let model = tokio::task::spawn_blocking(|| {
-            TextEmbedding::try_new(
-                TextInitOptions::new(EmbeddingModel::BGESmallENV15)
-                    .with_show_download_progress(false),
-            )
-        })
-        .await
-        .context("embedding model init thread panicked")?
-        .context("loading fastembed BGESmallENV15 model")?;
+        #[cfg(feature = "local-embeddings")]
+        {
+            let model = tokio::task::spawn_blocking(|| {
+                TextEmbedding::try_new(
+                    TextInitOptions::new(EmbeddingModel::BGESmallENV15)
+                        .with_show_download_progress(false),
+                )
+            })
+            .await
+            .context("embedding model init thread panicked")?
+            .context("loading fastembed BGESmallENV15 model")?;
 
-        Ok(Self {
-            backend: Arc::new(EmbeddingBackend::Fastembed {
-                model: Arc::new(Mutex::new(model)),
-            }),
-            backend_id: "fastembed".to_string(),
-            model_id: "BGESmallENV15".to_string(),
-            description: "fastembed BGESmallENV15".to_string(),
-            pool,
-        })
+            return Ok(Self {
+                backend: Arc::new(EmbeddingBackend::Fastembed {
+                    model: Arc::new(Mutex::new(model)),
+                }),
+                backend_id: "fastembed".to_string(),
+                model_id: "BGESmallENV15".to_string(),
+                description: "fastembed BGESmallENV15".to_string(),
+                pool,
+            });
+        }
+
+        #[cfg(not(feature = "local-embeddings"))]
+        {
+            bail!(
+                "local embeddings are disabled in this build; configure an OpenAI-compatible embedding provider or rebuild with feature `local-embeddings`"
+            );
+        }
     }
 
     pub fn backend_label(&self) -> &str {
@@ -190,6 +202,7 @@ impl EmbeddingStore {
         }
 
         match self.backend.as_ref() {
+            #[cfg(feature = "local-embeddings")]
             EmbeddingBackend::Fastembed { model } => {
                 let model = Arc::clone(model);
                 tokio::task::spawn_blocking(move || model.lock().unwrap().embed(texts, None))

@@ -106,12 +106,10 @@ suites:
     baseline_reference: >-
       Compare against reproduced full-context and retrieval baselines; report the
       exact evaluation task split and metric used.
-    required_env:
-      - "LOCOMO_COMMAND"
     setup_notes:
-      - "Clone LoCoMo locally and point LOCOMO_ROOT at that checkout if desired."
-      - "Set LOCOMO_COMMAND to the exact command that runs the Harkonnen adapter on the benchmark."
-      - "Start with the QA task before adding event summarization or multimodal tasks."
+      - "Set LOCOMO_DATASET to a local LoCoMo JSON dataset file such as locomo10.json, or set LOCOMO_ROOT to a LoCoMo checkout with data/locomo10.json."
+      - "Optionally set LOCOMO_LIMIT for smoke runs and LOCOMO_OUTPUT_DIR for custom artifact paths."
+      - "Optionally set LOCOMO_MIN_PROXY_SCORE to fail the suite when the proxy QA score drops below a threshold."
     tags:
       - "external"
       - "memory"
@@ -120,7 +118,37 @@ suites:
     steps:
       - id: "locomo_adapter"
         label: "LoCoMo adapter"
-        program: "./scripts/benchmark-locomo.sh"
+        builtin: "locomo"
+
+  - id: "locomo_raw_llm"
+    title: "Raw LLM Baseline on LoCoMo"
+    subsystem: "baseline"
+    category: "long_horizon_dialogue"
+    tier: "target"
+    description: >-
+      Direct model-only LoCoMo QA baseline using the active provider without
+      PackChat system prompts or Harkonnen conversation orchestration.
+    benchmark_url: "https://github.com/snap-research/locomo"
+    leaderboard_url: "https://aclanthology.org/2024.acl-long.747/"
+    baseline_reference: >-
+      Use this as the local raw-model baseline so GitHub reporting can show what
+      Harkonnen adds over the same underlying LLM on long-horizon dialogue memory.
+    setup_notes:
+      - "Set LOCOMO_DATASET to a local LoCoMo JSON dataset file such as locomo10.json, or set LOCOMO_ROOT to a LoCoMo checkout with data/locomo10.json."
+      - "This suite sets LOCOMO_MODE=direct and uses the active setup provider directly."
+      - "Optionally set LOCOMO_DIRECT_PROVIDER to target a named setup provider such as codex."
+    tags:
+      - "external"
+      - "baseline"
+      - "memory"
+      - "llm"
+      - "dialogue"
+    steps:
+      - id: "locomo_direct_adapter"
+        label: "LoCoMo raw-model adapter"
+        builtin: "locomo"
+        env:
+          LOCOMO_MODE: "direct"
 
   - id: "packchat_tau2"
     title: "PackChat on tau2-bench"

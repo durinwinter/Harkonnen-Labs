@@ -87,7 +87,7 @@ cargo run -- setup check                       # Verify active setup (providers 
 
 Benchmark strategy lives in `BENCHMARKS.md`, runnable suites live in `factory/benchmarks/suites.yaml`, and benchmark reports are written to `factory/artifacts/benchmarks/`.
 
-The default benchmark gate is `local_regression` and runs `cargo fmt --check`, `cargo check`, and `cargo test -q`. LongMemEval now runs through a native benchmark adapter, while LoCoMo, tau2-bench, and SWE-bench Verified/Pro remain adapter-ready so Harkonnen can publish comparable memory, PackChat, and coding-loop scores as the remaining integrations mature.
+The default benchmark gate is `local_regression` and runs `cargo fmt --check`, `cargo check`, and `cargo test -q`. LongMemEval and LoCoMo now run through native benchmark adapters, while tau2-bench and SWE-bench Verified/Pro remain adapter-ready so Harkonnen can publish comparable memory, PackChat, and coding-loop scores as the remaining integrations mature.
 
 ## Coordination
 

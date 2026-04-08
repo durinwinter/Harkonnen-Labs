@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::process::Command;
 
-use crate::{config::Paths, longmemeval};
+use crate::{config::Paths, locomo, longmemeval};
 
 const SKIP_EXIT_CODE: i32 = 10;
 const OUTPUT_LIMIT: usize = 8_000;
@@ -625,6 +625,24 @@ async fn run_builtin_step(
                 )
             }
             longmemeval::LongMemEvalSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "locomo" => match locomo::run_with_overrides(paths, &step.env).await? {
+            locomo::LoCoMoSuiteOutcome::Completed(output) => {
+                let status = locomo::status_for_output(&output);
+                let reason = locomo::reason_for_output(&output);
+                (
+                    status,
+                    locomo::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            locomo::LoCoMoSuiteOutcome::Skipped(reason) => (
                 BenchmarkStatus::Skipped,
                 String::new(),
                 String::new(),

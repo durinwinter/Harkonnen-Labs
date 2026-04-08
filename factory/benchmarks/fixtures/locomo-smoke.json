@@ -1,0 +1,39 @@
+[
+  {
+    "sample_id": "locomo-smoke-001",
+    "conversation": {
+      "speaker_a": "Jamie",
+      "speaker_b": "Riley",
+      "session_1_date_time": "2026-04-01 09:00",
+      "session_1": [
+        {
+          "speaker": "Jamie",
+          "dia_id": "s1-1",
+          "text": "I finally booked the train to Santa Fe for Saturday.",
+          "blip_caption": null,
+          "img_url": []
+        },
+        {
+          "speaker": "Riley",
+          "dia_id": "s1-2",
+          "text": "Nice. Don't forget the blue backpack you used last time.",
+          "blip_caption": null,
+          "img_url": []
+        }
+      ]
+    },
+    "event_summary": [],
+    "observation": [],
+    "session_summary": [],
+    "qa": [
+      {
+        "question": "Where did Jamie book the train to?",
+        "answer": "Santa Fe",
+        "category": 2,
+        "evidence": [
+          "s1-1"
+        ]
+      }
+    ]
+  }
+]

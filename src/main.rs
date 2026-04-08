@@ -11,6 +11,7 @@ mod coobie_palace;
 mod db;
 mod embeddings;
 mod llm;
+mod locomo;
 mod longmemeval;
 mod memory;
 mod models;

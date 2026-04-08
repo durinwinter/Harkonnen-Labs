@@ -129,7 +129,7 @@ cargo run -- benchmark run --all
 ./scripts/run-benchmarks.sh
 ```
 
-The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `BENCHMARKS.md`, and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, LongMemEval now runs in both native Harkonnen and raw-LLM baseline modes, and the remaining external adapters are prepared for LoCoMo, tau2-bench, and SWE-bench Verified/Pro. The execution roadmap in `ROADMAP.md` now treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
+The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `BENCHMARKS.md`, and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, LongMemEval and LoCoMo now both run in native Harkonnen and raw-LLM baseline modes, and the remaining external adapters are prepared for tau2-bench and SWE-bench Verified/Pro. The execution roadmap in `ROADMAP.md` now treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
 
 The OpenAI/Codex provider path also supports optional OpenAI-compatible BYO endpoints through a setup `base_url`, so benchmark runs can target local or third-party compatible backends without changing Rust code.
 

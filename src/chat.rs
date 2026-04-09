@@ -98,8 +98,11 @@ const PACKCHAT_RECENT_MESSAGE_COUNT: usize = 6;
 const PACKCHAT_RELEVANT_MESSAGE_LIMIT: usize = 10;
 const PACKCHAT_CONTEXT_NEIGHBOR_WINDOW: usize = 1;
 const PACKCHAT_HISTORY_CHAR_BUDGET: usize = 18_000;
+const PACKCHAT_MIN_HISTORY_CHAR_BUDGET: usize = 3_000;
 const PACKCHAT_MESSAGE_EXCERPT_CHARS: usize = 1_200;
+const PACKCHAT_MIN_MESSAGE_EXCERPT_CHARS: usize = 300;
 const PACKCHAT_ASSISTANT_CONTEXT_CHARS: usize = 2_400;
+const PACKCHAT_MIN_ASSISTANT_CONTEXT_CHARS: usize = 600;
 
 // ── Chat store ────────────────────────────────────────────────────────────────
 
@@ -531,71 +534,7 @@ pub async fn complete_agent_reply(
         .take(history.len().saturating_sub(1))
         .cloned()
         .collect::<Vec<_>>();
-    let selected_history = select_relevant_history(&prior_history, user_content);
     let query_terms = retrieval_terms(user_content);
-
-    let mut system = agent_system_prompt(agent, run_id);
-    system.push_str(
-        "\n\nPrefer explicit user-stated facts, previously confirmed preferences, and concrete operator details over generic assistant prose.",
-    );
-    if !prior_history.is_empty() && selected_history.len() < prior_history.len() {
-        system.push_str(
-            "\n\nThe conversation thread is longer than the context shown below. The supplied history has been trimmed to the most relevant and most recent slices for the current question.",
-        );
-    }
-
-    let mut prior_messages: Vec<Message> = Vec::new();
-    let mut leading_assistant_context = Vec::new();
-
-    for msg in selected_history {
-        let role = if msg.role == "operator" {
-            "user"
-        } else {
-            "assistant"
-        };
-        let content = compact_history_message(
-            &msg.content,
-            &query_terms,
-            PACKCHAT_MESSAGE_EXCERPT_CHARS,
-        );
-
-        // Some benchmark datasets begin with assistant turns. Local prompt templates
-        // are often stricter than hosted APIs, so keep that leading context out of the
-        // message list and fold it into the system prompt instead.
-        if prior_messages.is_empty() && role == "assistant" {
-            leading_assistant_context.push(content);
-            continue;
-        }
-
-        if let Some(last) = prior_messages.last_mut() {
-            if last.role == role {
-                if !last.content.is_empty() {
-                    last.content.push_str("\n\n");
-                }
-                last.content.push_str(&content);
-                continue;
-            }
-        }
-
-        prior_messages.push(Message {
-            role: role.to_string(),
-            content,
-        });
-    }
-
-    if !leading_assistant_context.is_empty() {
-        let assistant_context = compact_history_message(
-            &leading_assistant_context.join("\n\n"),
-            &query_terms,
-            PACKCHAT_ASSISTANT_CONTEXT_CHARS,
-        );
-        system.push_str("\n\nConversation context from earlier assistant turns:\n");
-        system.push_str(&assistant_context);
-    }
-
-    let mut messages = vec![Message::system(system)];
-    messages.extend(prior_messages);
-
     let trimmed_user_content = user_content.trim();
     let user_message = if trimmed_user_content.is_empty() {
         "Please respond to the latest operator message using the available conversation context."
@@ -603,30 +542,127 @@ pub async fn complete_agent_reply(
         trimmed_user_content
     };
 
-    if let Some(last) = messages.last_mut() {
-        if last.role == "user" {
-            if !last.content.is_empty() {
-                last.content.push_str("\n\n");
+    let mut history_budget = PACKCHAT_HISTORY_CHAR_BUDGET;
+    let mut excerpt_budget = PACKCHAT_MESSAGE_EXCERPT_CHARS;
+    let mut assistant_budget = PACKCHAT_ASSISTANT_CONTEXT_CHARS;
+
+    loop {
+        let selected_history = select_relevant_history(
+            &prior_history,
+            user_content,
+            history_budget,
+            excerpt_budget,
+        );
+
+        let mut system = agent_system_prompt(agent, run_id);
+        system.push_str(
+            "\n\nPrefer explicit user-stated facts, previously confirmed preferences, and concrete operator details over generic assistant prose.",
+        );
+        if !prior_history.is_empty() && selected_history.len() < prior_history.len() {
+            system.push_str(
+                "\n\nThe conversation thread is longer than the context shown below. The supplied history has been trimmed to the most relevant and most recent slices for the current question.",
+            );
+        }
+
+        let mut prior_messages: Vec<Message> = Vec::new();
+        let mut leading_assistant_context = Vec::new();
+
+        for msg in selected_history {
+            let role = if msg.role == "operator" {
+                "user"
+            } else {
+                "assistant"
+            };
+            let content = compact_history_message(&msg.content, &query_terms, excerpt_budget);
+
+            if prior_messages.is_empty() && role == "assistant" {
+                leading_assistant_context.push(content);
+                continue;
             }
-            last.content.push_str(user_message);
+
+            if let Some(last) = prior_messages.last_mut() {
+                if last.role == role {
+                    if !last.content.is_empty() {
+                        last.content.push_str("\n\n");
+                    }
+                    last.content.push_str(&content);
+                    continue;
+                }
+            }
+
+            prior_messages.push(Message {
+                role: role.to_string(),
+                content,
+            });
+        }
+
+        if !leading_assistant_context.is_empty() {
+            let assistant_context = compact_history_message(
+                &leading_assistant_context.join("\n\n"),
+                &query_terms,
+                assistant_budget,
+            );
+            system.push_str("\n\nConversation context from earlier assistant turns:\n");
+            system.push_str(&assistant_context);
+        }
+
+        let mut messages = vec![Message::system(system)];
+        messages.extend(prior_messages);
+
+        if let Some(last) = messages.last_mut() {
+            if last.role == "user" {
+                if !last.content.is_empty() {
+                    last.content.push_str("\n\n");
+                }
+                last.content.push_str(user_message);
+            } else {
+                messages.push(Message::user(user_message));
+            }
         } else {
             messages.push(Message::user(user_message));
         }
-    } else {
-        messages.push(Message::user(user_message));
+
+        let req = LlmRequest {
+            messages,
+            max_tokens: 1024,
+            temperature: 0.3,
+        };
+
+        match provider.complete(req).await {
+            Ok(resp) => return Ok(resp.content),
+            Err(err) if is_context_window_error(&err) => {
+                let next_history_budget = (history_budget / 2).max(PACKCHAT_MIN_HISTORY_CHAR_BUDGET);
+                let next_excerpt_budget =
+                    (excerpt_budget / 2).max(PACKCHAT_MIN_MESSAGE_EXCERPT_CHARS);
+                let next_assistant_budget =
+                    (assistant_budget / 2).max(PACKCHAT_MIN_ASSISTANT_CONTEXT_CHARS);
+                if next_history_budget == history_budget
+                    && next_excerpt_budget == excerpt_budget
+                    && next_assistant_budget == assistant_budget
+                {
+                    return Err(err)
+                        .with_context(|| format!("PackChat agent reply failed for {}", agent));
+                }
+                tracing::warn!(
+                    "PackChat context overflow for {} - retrying with history budget {} -> {}, excerpt {} -> {}, assistant {} -> {}",
+                    agent,
+                    history_budget,
+                    next_history_budget,
+                    excerpt_budget,
+                    next_excerpt_budget,
+                    assistant_budget,
+                    next_assistant_budget
+                );
+                history_budget = next_history_budget;
+                excerpt_budget = next_excerpt_budget;
+                assistant_budget = next_assistant_budget;
+            }
+            Err(err) => {
+                return Err(err)
+                    .with_context(|| format!("PackChat agent reply failed for {}", agent));
+            }
+        }
     }
-
-    let req = LlmRequest {
-        messages,
-        max_tokens: 1024,
-        temperature: 0.3,
-    };
-
-    provider
-        .complete(req)
-        .await
-        .map(|resp| resp.content)
-        .with_context(|| format!("PackChat agent reply failed for {}", agent))
 }
 
 async fn generate_agent_reply(
@@ -645,7 +681,12 @@ async fn generate_agent_reply(
     }
 }
 
-fn select_relevant_history(history: &[ChatMessage], user_content: &str) -> Vec<ChatMessage> {
+fn select_relevant_history(
+    history: &[ChatMessage],
+    user_content: &str,
+    history_budget: usize,
+    excerpt_budget: usize,
+) -> Vec<ChatMessage> {
     if history.len() <= PACKCHAT_RECENT_MESSAGE_COUNT + 2 {
         return history.to_vec();
     }
@@ -684,6 +725,8 @@ fn select_relevant_history(history: &[ChatMessage], user_content: &str) -> Vec<C
         &selected.into_iter().collect::<Vec<_>>(),
         user_content,
         &query_terms,
+        history_budget,
+        excerpt_budget,
     )
 }
 
@@ -692,6 +735,8 @@ fn trim_selected_history_to_budget(
     selected_indices: &[usize],
     user_content: &str,
     query_terms: &[String],
+    history_budget: usize,
+    excerpt_budget: usize,
 ) -> Vec<ChatMessage> {
     let recent_start = history.len().saturating_sub(PACKCHAT_RECENT_MESSAGE_COUNT);
     let mut candidates = selected_indices
@@ -701,7 +746,7 @@ fn trim_selected_history_to_budget(
             let excerpt = compact_history_message(
                 &history[idx].content,
                 query_terms,
-                PACKCHAT_MESSAGE_EXCERPT_CHARS,
+                excerpt_budget,
             );
             let excerpt_chars = excerpt.chars().count();
             let mut priority = score_history_message(&history[idx], user_content, query_terms);
@@ -724,7 +769,7 @@ fn trim_selected_history_to_budget(
     let mut used_chars = 0usize;
     for (_, idx, excerpt_chars) in candidates {
         let message_cost = excerpt_chars + 24;
-        if kept.is_empty() || used_chars + message_cost <= PACKCHAT_HISTORY_CHAR_BUDGET {
+        if kept.is_empty() || used_chars + message_cost <= history_budget {
             kept.insert(idx);
             used_chars += message_cost;
         }
@@ -902,6 +947,18 @@ fn slice_chars(text: &str, start: usize, end: usize) -> String {
         .collect()
 }
 
+
+fn is_context_window_error(err: &anyhow::Error) -> bool {
+    let text = err.to_string().to_ascii_lowercase();
+    text.contains("context length")
+        || text.contains("context window")
+        || text.contains("context size")
+        || text.contains("has been exceeded")
+        || text.contains("n_keep")
+        || text.contains("n_ctx")
+        || text.contains("too many tokens")
+}
+
 // ── Helpers ───────────────────────────────────────────────────────────────────
 
 fn parse_dt(s: String) -> chrono::DateTime<Utc> {
@@ -942,7 +999,12 @@ mod tests {
             msg("11", "agent", "Nice, have a safe trip."),
         ];
 
-        let selected = select_relevant_history(&history, "What degree did I graduate with?");
+        let selected = select_relevant_history(
+            &history,
+            "What degree did I graduate with?",
+            PACKCHAT_HISTORY_CHAR_BUDGET,
+            PACKCHAT_MESSAGE_EXCERPT_CHARS,
+        );
         assert!(selected
             .iter()
             .any(|message| message.content.contains("Business Administration")));

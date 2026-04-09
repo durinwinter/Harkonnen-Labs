@@ -364,8 +364,85 @@ pub fn render_report_markdown(report: &BenchmarkRunReport) -> String {
         }
     }
 
+    let correct_sections = render_correct_answer_sections(report);
+    if !correct_sections.is_empty() {
+        lines.push(String::new());
+        lines.push("## Correct Answers".to_string());
+        for section in correct_sections {
+            lines.push(String::new());
+            lines.extend(section);
+        }
+    }
+
     lines.push(String::new());
     lines.join("\n")
+}
+
+fn render_correct_answer_sections(report: &BenchmarkRunReport) -> Vec<Vec<String>> {
+    report
+        .suites
+        .iter()
+        .filter_map(render_correct_answer_section)
+        .collect()
+}
+
+fn render_correct_answer_section(suite: &BenchmarkSuiteResult) -> Option<Vec<String>> {
+    let summary_path = suite
+        .steps
+        .iter()
+        .find_map(|step| extract_summary_json_path(&step.stdout))?;
+    let raw = std::fs::read_to_string(&summary_path).ok()?;
+    let json: serde_json::Value = serde_json::from_str(&raw).ok()?;
+    let questions = json.get("questions")?.as_array()?;
+
+    let mut lines = vec![format!("### {} ({})", suite.title, suite.id)];
+    let mut correct = Vec::new();
+
+    for question in questions {
+        if let Some(entry) = correct_answer_entry(question) {
+            correct.push(entry);
+        }
+    }
+
+    lines.push(format!("- Correct answers: {}/{}", correct.len(), questions.len()));
+    if correct.is_empty() {
+        lines.push("- None recorded in this run.".to_string());
+    } else {
+        for entry in correct {
+            lines.push(format!("- {}", entry));
+        }
+    }
+
+    Some(lines)
+}
+
+fn correct_answer_entry(question: &serde_json::Value) -> Option<String> {
+    if question
+        .get("exact_match")
+        .and_then(|value| value.as_bool())
+        .unwrap_or(false)
+    {
+        let id = question.get("question_id")?.as_str()?;
+        let answer = question.get("hypothesis")?.as_str()?.trim();
+        return Some(format!("`{}`: `{}`", id, answer));
+    }
+
+    let score = question.get("score").and_then(|value| value.as_f64())?;
+    if score >= 1.0 {
+        let sample_id = question.get("sample_id")?.as_str()?;
+        let qa_index = question.get("qa_index")?.as_u64()?;
+        let answer = question.get("hypothesis")?.as_str()?.trim();
+        return Some(format!("`{}#{}`: `{}`", sample_id, qa_index, answer));
+    }
+
+    None
+}
+
+fn extract_summary_json_path(stdout: &str) -> Option<String> {
+    stdout.lines().find_map(|line| {
+        line.strip_prefix("Summary JSON: ")
+            .map(|value| value.trim().to_string())
+    })
 }
 
 fn select_suites(

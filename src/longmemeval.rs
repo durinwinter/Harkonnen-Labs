@@ -944,6 +944,8 @@ fn is_context_window_error(err: &anyhow::Error) -> bool {
     let text = err.to_string().to_ascii_lowercase();
     text.contains("context length")
         || text.contains("context window")
+        || text.contains("context size")
+        || text.contains("has been exceeded")
         || text.contains("n_keep")
         || text.contains("n_ctx")
         || text.contains("too many tokens")

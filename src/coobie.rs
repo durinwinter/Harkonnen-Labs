@@ -21,20 +21,18 @@
 use anyhow::{Context, Result};
 use async_trait::async_trait;
 use chrono::Utc;
-use deep_causality::prelude::{
-    BaseCausaloid, Causable, CausalityError, Causaloid, Inferable, Inference, Observable,
-    Observation,
-};
+use deep_causality::prelude::{CausalityError, Inferable, Inference, Observable, Observation};
 use serde::{Deserialize, Serialize};
-use sqlx::SqlitePool;
+use sqlx::{Row, SqlitePool};
 use std::cmp::Ordering;
 use std::collections::{HashMap, HashSet};
 use uuid::Uuid;
 
 use crate::models::{
-    CausalHypothesis, CausalStreak, CoobieBriefing, CoobieEvidenceCitation, CounterfactualEstimate,
-    CounterfactualOutcome, FactoryEpisode, InterventionPlan, LessonRecord, ProjectComponent,
-    ProjectResumeRisk, ScenarioBlueprint,
+    CausalEventEdge, CausalHypothesis, CausalHypothesisEvidence, CausalStreak, CoobieBriefing,
+    CoobieEvidenceCitation, CounterfactualEstimate, CounterfactualOutcome, FactoryEpisode,
+    InterventionPlan, LessonRecord, PearlHierarchyLevel, ProjectComponent, ProjectResumeRisk,
+    ScenarioBlueprint,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -81,6 +79,8 @@ pub struct CausalReport {
     /// Populated when spec_id is available at report time.
     #[serde(default)]
     pub streaks: Vec<CausalStreak>,
+    #[serde(default)]
+    pub hypotheses: Vec<CausalHypothesis>,
     pub generated_at: String,
 }
 
@@ -254,10 +254,13 @@ const CAUSAL_RULES: &[CausalRule] = &[
 struct DeepSignalSpec {
     cause_id: &'static str,
     question: &'static str,
+    /// Human-readable description, retained for Phase 3 causal graph registration.
+    #[allow(dead_code)]
     description: &'static str,
+    /// Activation threshold — the single source of truth for this signal.
+    /// `build_deep_signal` uses this directly; no separate verify fn needed.
     threshold: f64,
     observe: fn(&EpisodeScores) -> f64,
-    verify: fn(f64) -> Result<bool, CausalityError>,
 }
 
 const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
@@ -267,7 +270,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for spec ambiguity.",
         threshold: 0.45,
         observe: spec_ambiguity_observation,
-        verify: spec_ambiguity_causality,
     },
     DeepSignalSpec {
         cause_id: "TWIN_GAP",
@@ -275,7 +277,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for twin fidelity gaps.",
         threshold: 0.40,
         observe: twin_gap_observation,
-        verify: twin_gap_causality,
     },
     DeepSignalSpec {
         cause_id: "TEST_BLIND_SPOT",
@@ -283,7 +284,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for visible-test blind spots.",
         threshold: 0.75,
         observe: test_blind_spot_observation,
-        verify: test_blind_spot_causality,
     },
     DeepSignalSpec {
         cause_id: "NO_PRIOR_MEMORY",
@@ -291,7 +291,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for missing prior memory.",
         threshold: 0.90,
         observe: no_prior_memory_observation,
-        verify: no_prior_memory_causality,
     },
     DeepSignalSpec {
         cause_id: "BROAD_SCOPE",
@@ -299,7 +298,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for overly broad scope.",
         threshold: 0.75,
         observe: broad_scope_observation,
-        verify: broad_scope_causality,
     },
     DeepSignalSpec {
         cause_id: "PACK_BREAKDOWN",
@@ -308,7 +306,6 @@ const DEEP_SIGNAL_SPECS: &[DeepSignalSpec] = &[
         description: "Deep Causality signal for Labrador phase breakdown.",
         threshold: 0.35,
         observe: phase_breakdown_observation,
-        verify: phase_breakdown_causality,
     },
 ];
 
@@ -317,30 +314,6 @@ fn threshold_causality(obs: f64, threshold: f64) -> Result<bool, CausalityError>
         return Err(CausalityError("Observation is NULL/NAN".into()));
     }
     Ok(obs >= threshold)
-}
-
-fn spec_ambiguity_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.45)
-}
-
-fn twin_gap_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.40)
-}
-
-fn test_blind_spot_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.75)
-}
-
-fn no_prior_memory_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.90)
-}
-
-fn broad_scope_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.75)
-}
-
-fn phase_breakdown_causality(obs: f64) -> Result<bool, CausalityError> {
-    threshold_causality(obs, 0.35)
 }
 
 fn spec_ambiguity_observation(scores: &EpisodeScores) -> f64 {
@@ -424,10 +397,9 @@ fn build_deep_signal(spec: &DeepSignalSpec, scores: &EpisodeScores) -> DeepCausa
         observation.observed_effect(),
         1.0,
     );
-    let causaloid: BaseCausaloid<'static> = Causaloid::new(cause_id, spec.verify, spec.description);
-    let activated = causaloid
-        .verify_single_cause(&inference.observation())
-        .unwrap_or(false);
+
+    // Activation uses spec.threshold as the single source of truth.
+    let activated = threshold_causality(observation_value, spec.threshold).unwrap_or(false);
     let activation_strength = if activated {
         ((inference.observation() - inference.threshold())
             / (inference.target() - inference.threshold()).max(0.0001))
@@ -435,14 +407,22 @@ fn build_deep_signal(spec: &DeepSignalSpec, scores: &EpisodeScores) -> DeepCausa
     } else {
         0.0
     };
-    let explanation = causaloid.explain().unwrap_or_else(|_| {
+    let explanation = if activated {
         format!(
-            "Causaloid {} remained inactive at observation {:.2} against threshold {:.2}",
+            "{} activated: observation {:.3} exceeded threshold {:.3} (strength {:.2})",
             spec.cause_id,
-            inference.observation(),
-            inference.threshold()
+            observation_value,
+            spec.threshold,
+            activation_strength,
         )
-    });
+    } else {
+        format!(
+            "{} inactive: observation {:.3} below threshold {:.3}",
+            spec.cause_id,
+            observation_value,
+            spec.threshold,
+        )
+    };
 
     DeepCausalitySignal {
         cause_id: spec.cause_id.to_string(),
@@ -488,6 +468,53 @@ fn build_deep_causality_analysis(scores: &EpisodeScores) -> DeepCausalityAnalysi
         active_signals,
         inactive_signals,
     }
+}
+
+fn hierarchy_level_key(level: &PearlHierarchyLevel) -> &'static str {
+    match level {
+        PearlHierarchyLevel::Associational => "associational",
+        PearlHierarchyLevel::Interventional => "interventional",
+        PearlHierarchyLevel::Counterfactual => "counterfactual",
+    }
+}
+
+fn pearl_hierarchy_for_relation(relation: &str) -> PearlHierarchyLevel {
+    match relation.trim().to_ascii_lowercase().as_str() {
+        "caused" | "contributed_to" | "failure_triggered" => {
+            PearlHierarchyLevel::Interventional
+        }
+        "prevented" | "invalidated" => PearlHierarchyLevel::Counterfactual,
+        _ => PearlHierarchyLevel::Associational,
+    }
+}
+
+fn pearl_hierarchy_rank(level: &PearlHierarchyLevel) -> u8 {
+    match level {
+        PearlHierarchyLevel::Associational => 0,
+        PearlHierarchyLevel::Interventional => 1,
+        PearlHierarchyLevel::Counterfactual => 2,
+    }
+}
+
+fn strongest_pearl_hierarchy(evidence: &[CausalHypothesisEvidence]) -> PearlHierarchyLevel {
+    evidence
+        .iter()
+        .max_by_key(|item| pearl_hierarchy_rank(&item.hierarchy_level))
+        .map(|item| item.hierarchy_level.clone())
+        .unwrap_or_default()
+}
+
+fn compact_causal_message(message: &str) -> String {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return "no message".to_string();
+    }
+    let mut chars = trimmed.chars();
+    let mut summary = chars.by_ref().take(96).collect::<String>();
+    if chars.next().is_some() {
+        summary.push_str("...");
+    }
+    summary
 }
 
 fn render_bullet_lines(items: &[String], empty_line: &str) -> String {
@@ -949,6 +976,30 @@ pub fn render_coobie_report_response(report: &CausalReport) -> String {
             )
         })
         .unwrap_or_else(|| "No counterfactual prediction was available.".to_string());
+    let hypotheses_section = if report.hypotheses.is_empty() {
+        "- No ranked hypotheses were serialized for this run.".to_string()
+    } else {
+        report
+            .hypotheses
+            .iter()
+            .take(5)
+            .map(|hypothesis| {
+                let evidence = hypothesis
+                    .evidence
+                    .first()
+                    .map(|item| format!(" evidence: {}", item.summary))
+                    .unwrap_or_default();
+                format!(
+                    "- [{}] {} ({:.0}% confidence){}",
+                    hierarchy_level_key(&hypothesis.hierarchy_level),
+                    hypothesis.cause_id,
+                    hypothesis.confidence * 100.0,
+                    evidence,
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     let streaks_section = if report.streaks.is_empty() {
         "- No recurring cause streaks detected.".to_string()
@@ -991,6 +1042,9 @@ I completed a causal review for run `{}`.
 ## Contributing Causes
 {}
 
+## Ranked Hypotheses
+{}
+
 ## Recurring Streaks
 {}
 
@@ -1008,6 +1062,7 @@ I completed a causal review for run `{}`.
         primary,
         report.primary_confidence * 100.0,
         contributing,
+        hypotheses_section,
         streaks_section,
         interventions,
         deep_signals,
@@ -1240,13 +1295,14 @@ impl SqliteCoobie {
     ) -> Result<()> {
         for h in hypotheses {
             let supporting = serde_json::to_string(&h.supporting_runs)?;
+            let evidence = serde_json::to_string(&h.evidence)?;
             let counterfactuals = serde_json::to_string(&h.counterfactuals)?;
             sqlx::query(
                 r#"
                 INSERT OR REPLACE INTO causal_hypotheses
                     (hypothesis_id, run_id, cause_id, description, confidence,
-                     supporting_runs, counterfactuals, created_at)
-                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8)
+                     hierarchy_level, supporting_runs, evidence, counterfactuals, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
                 "#,
             )
             .bind(Uuid::new_v4().to_string())
@@ -1254,7 +1310,9 @@ impl SqliteCoobie {
             .bind(&h.cause_id)
             .bind(&h.description)
             .bind(h.confidence as f64)
+            .bind(hierarchy_level_key(&h.hierarchy_level))
             .bind(&supporting)
+            .bind(&evidence)
             .bind(&counterfactuals)
             .bind(Utc::now().to_rfc3339())
             .execute(&self.pool)
@@ -1296,6 +1354,146 @@ impl SqliteCoobie {
 
     /// Find prior episodes where the same rule fired AND the scenario later passed.
     /// Used for counterfactual confidence estimation.
+    async fn load_causal_edges_for_run(&self, run_id: &str) -> Result<Vec<CausalEventEdge>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT cl.link_id, cl.from_event, cl.to_event, cl.link_type, cl.confidence, cl.created_at,
+                   src.episode_id AS from_episode_id, dst.episode_id AS to_episode_id,
+                   src.phase AS from_phase, dst.phase AS to_phase,
+                   src.agent AS from_agent, dst.agent AS to_agent,
+                   src.status AS from_status, dst.status AS to_status,
+                   src.message AS from_message, dst.message AS to_message
+            FROM causal_links cl
+            JOIN run_events src ON src.event_id = cl.from_event
+            JOIN run_events dst ON dst.event_id = cl.to_event
+            WHERE src.run_id = ?1 AND dst.run_id = ?1
+            ORDER BY cl.created_at ASC, cl.link_id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await
+        .context("loading causal edges for run")?;
+
+        let mut edges = Vec::new();
+        for row in rows {
+            let link_type = row.get::<String, _>("link_type");
+            let from_phase = row.get::<String, _>("from_phase");
+            let to_phase = row.get::<String, _>("to_phase");
+            let from_status = row.get::<String, _>("from_status");
+            let to_status = row.get::<String, _>("to_status");
+            let from_message = row.get::<String, _>("from_message");
+            let to_message = row.get::<String, _>("to_message");
+            edges.push(CausalEventEdge {
+                link_id: row.get::<String, _>("link_id"),
+                from_event: row.get::<i64, _>("from_event"),
+                to_event: row.get::<i64, _>("to_event"),
+                link_type: link_type.clone(),
+                confidence: row.get::<f64, _>("confidence"),
+                hierarchy_level: pearl_hierarchy_for_relation(&link_type),
+                from_episode_id: row.get::<Option<String>, _>("from_episode_id"),
+                to_episode_id: row.get::<Option<String>, _>("to_episode_id"),
+                from_phase: from_phase.clone(),
+                to_phase: to_phase.clone(),
+                from_agent: row.get::<String, _>("from_agent"),
+                to_agent: row.get::<String, _>("to_agent"),
+                from_status: from_status.clone(),
+                to_status: to_status.clone(),
+                summary: format!(
+                    "{}:{} -> {}:{} via {} [{} => {}]",
+                    from_phase,
+                    from_status,
+                    to_phase,
+                    to_status,
+                    link_type,
+                    compact_causal_message(&from_message),
+                    compact_causal_message(&to_message),
+                ),
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+
+        Ok(edges)
+    }
+
+    fn hypothesis_phase_focus(cause_id: &str) -> &'static [&'static str] {
+        match cause_id {
+            "SPEC_AMBIGUITY" => &["scout", "implementation", "validation"],
+            "TWIN_GAP" => &["twin", "hidden_scenarios"],
+            "TEST_BLIND_SPOT" => &["validation", "hidden_scenarios"],
+            "NO_PRIOR_MEMORY" => &["memory", "implementation", "validation"],
+            "BROAD_SCOPE" => &["implementation", "build", "validation"],
+            "PACK_BREAKDOWN" => &["implementation", "build", "validation", "hidden_scenarios"],
+            _ => &[],
+        }
+    }
+
+    fn evidence_matches_cause(cause_id: &str, edge: &CausalEventEdge) -> bool {
+        let focus = Self::hypothesis_phase_focus(cause_id);
+        let phase_match = focus.is_empty()
+            || focus.contains(&edge.from_phase.as_str())
+            || focus.contains(&edge.to_phase.as_str());
+
+        match cause_id {
+            "PACK_BREAKDOWN" => {
+                edge.link_type == "failure_triggered"
+                    || matches!(edge.from_status.as_str(), "failure" | "blocked")
+                    || matches!(edge.to_status.as_str(), "failure" | "blocked")
+            }
+            "TEST_BLIND_SPOT" => {
+                phase_match
+                    && (edge.from_phase == "validation"
+                        || edge.to_phase == "validation"
+                        || edge.to_phase == "hidden_scenarios")
+            }
+            "TWIN_GAP" => {
+                phase_match
+                    && (edge.from_phase == "twin"
+                        || edge.to_phase == "twin"
+                        || edge.to_phase == "hidden_scenarios")
+            }
+            "NO_PRIOR_MEMORY" => {
+                phase_match && (edge.from_phase == "memory" || edge.to_phase == "memory")
+            }
+            _ => phase_match,
+        }
+    }
+
+    fn build_hypothesis_evidence(
+        cause_id: &str,
+        causal_edges: &[CausalEventEdge],
+    ) -> Vec<CausalHypothesisEvidence> {
+        let mut matches = causal_edges
+            .iter()
+            .filter(|edge| Self::evidence_matches_cause(cause_id, edge))
+            .collect::<Vec<_>>();
+        matches.sort_by(|left, right| {
+            pearl_hierarchy_rank(&right.hierarchy_level)
+                .cmp(&pearl_hierarchy_rank(&left.hierarchy_level))
+                .then_with(|| {
+                    right
+                        .confidence
+                        .partial_cmp(&left.confidence)
+                        .unwrap_or(Ordering::Equal)
+                })
+        });
+
+        matches
+            .into_iter()
+            .take(3)
+            .map(|edge| CausalHypothesisEvidence {
+                kind: "causal_link".to_string(),
+                ref_id: edge.link_id.clone(),
+                relation: edge.link_type.clone(),
+                hierarchy_level: edge.hierarchy_level.clone(),
+                summary: edge.summary.clone(),
+            })
+            .collect()
+    }
+
     async fn find_supporting_runs(&self, cause_id: &str, limit: i64) -> Result<Vec<String>> {
         let rows = sqlx::query(
             r#"
@@ -1488,6 +1686,7 @@ impl CoobieReasoner for SqliteCoobie {
             .chain(deep_analysis.inactive_signals.iter())
             .map(|signal| (signal.cause_id.as_str(), signal))
             .collect();
+        let causal_edges = self.load_causal_edges_for_run(run_id).await.unwrap_or_default();
 
         let mut hypotheses: Vec<CausalHypothesis> = Vec::new();
 
@@ -1504,6 +1703,7 @@ impl CoobieReasoner for SqliteCoobie {
                 .find_supporting_runs(rule.id, 10)
                 .await
                 .unwrap_or_default();
+            let evidence = Self::build_hypothesis_evidence(rule.id, &causal_edges);
             let support_boost = (supporting.len() as f32 * 0.03).min(0.15);
             let final_confidence = (base_confidence + support_boost).min(0.95);
             let description = if heuristic_confidence <= 0.0 {
@@ -1527,7 +1727,9 @@ impl CoobieReasoner for SqliteCoobie {
                 cause_id: rule.id.to_string(),
                 description,
                 confidence: final_confidence,
+                hierarchy_level: strongest_pearl_hierarchy(&evidence),
                 supporting_runs: supporting,
+                evidence,
                 counterfactuals: Vec::new(),
             });
         }
@@ -1701,6 +1903,7 @@ impl CoobieReasoner for SqliteCoobie {
             episode_scores: scores,
             deep_causality: Some(deep_causality),
             streaks,
+            hypotheses,
             generated_at: Utc::now().to_rfc3339(),
         })
     }

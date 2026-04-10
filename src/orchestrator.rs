@@ -20,14 +20,15 @@ use crate::{
     llm::{self, LlmRequest, Message},
     memory::{MemoryEntry, MemoryIngestOptions, MemoryIngestResult, MemoryProvenance, MemoryStore},
     models::{
-        AgentExecution, BlackboardState, CheckpointAnswerRecord, CoobieBriefing,
-        CoobieEvidenceCitation, EpisodeRecord, EvidenceAnnotation, EvidenceAnnotationBundle,
+        AgentExecution, BlackboardState, CausalEventEdge, CausalEventNode,
+        CheckpointAnswerRecord, CoobieBriefing, CoobieEvidenceCitation, EpisodeCausalState,
+        EpisodeRecord, EpisodeStateDiff, EvidenceAnnotation, EvidenceAnnotationBundle,
         EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
         EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
         HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord, LiveEvent,
-        PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk, RunCheckpointRecord, RunEvent,
-        RunRecord, ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
-        WorkerHarnessConfig,
+        PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk,
+        RunCausalGraph, RunCheckpointRecord, RunEvent, RunRecord, ScenarioResult, Spec,
+        TwinEnvironment, TwinService, ValidationSummary, WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -337,6 +338,30 @@ struct PlanReviewStage {
     owner: String,
     summary: String,
     evidence: Vec<String>,
+}
+
+/// Result of Coobie's pre-execution plan critique.
+///
+/// Written to `coobie_critique.json` in the run directory.
+/// Blocking concerns cause a `coobie_plan_critique_failed` blocker on the
+/// blackboard; advisory concerns are recorded but do not stop the run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct CoobieCritiqueResult {
+    run_id: String,
+    spec_id: String,
+    generated_at: String,
+    /// True when no blocking concerns were identified.
+    passed: bool,
+    /// Informational notes — plan could be improved but these don't block.
+    advisory_concerns: Vec<String>,
+    /// High-severity concerns — plan ignores escalated guardrails or known dead ends.
+    blocking_concerns: Vec<String>,
+    /// Dead-end registry entries whose failure constraint the plan appears to repeat.
+    dead_end_matches: Vec<String>,
+    /// Briefing guardrails explicitly acknowledged in the plan text.
+    addressed_guardrails: Vec<String>,
+    /// `"llm"` when an LLM enriched the critique; `"rule_based"` otherwise.
+    critique_source: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -2075,6 +2100,51 @@ impl AppContext {
             .await;
         tokio::fs::write(run_dir.join("implementation_plan.md"), &implementation_plan).await?;
         push_unique(&mut blackboard.artifact_refs, "implementation_plan.md");
+
+        // ── Coobie plan critique ──────────────────────────────────────────────
+        // Runs for every spec — not just worker_harness specs.
+        // Checks the plan against dead-end registry + escalated guardrails before
+        // Mason writes a single line of code.  Non-blocking if Coobie LLM fails;
+        // blocking concerns create a blackboard blocker for operator review.
+        match self
+            .coobie_critique_plan(
+                run_id,
+                spec_obj,
+                target_source,
+                &briefing,
+                &implementation_plan,
+                log_path,
+                &implementation_episode,
+            )
+            .await
+        {
+            Ok(critique) => {
+                self.write_json_file(&run_dir.join("coobie_critique.json"), &critique)
+                    .await?;
+                push_unique(&mut blackboard.artifact_refs, "coobie_critique.json");
+                if !critique.passed {
+                    push_unique(
+                        &mut blackboard.open_blockers,
+                        "coobie_plan_critique_failed",
+                    );
+                    tracing::warn!(
+                        blocking = critique.blocking_concerns.len(),
+                        dead_ends = critique.dead_end_matches.len(),
+                        "Coobie plan critique found blocking concerns — proceeding but flagged"
+                    );
+                } else {
+                    push_unique(
+                        &mut blackboard.resolved_items,
+                        "coobie_plan_critique_passed",
+                    );
+                }
+                self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+            }
+            Err(e) => {
+                tracing::warn!("Coobie plan critique failed ({}), continuing without it", e);
+            }
+        }
+
         if let Some(worker_harness) = &spec_obj.worker_harness {
             let plan_review_chain = build_plan_review_chain(
                 run_id,
@@ -2142,6 +2212,11 @@ next_actions={}",
             .await?;
 
             if worker_harness.llm_edits {
+                // Snapshot workspace before Mason edits so Coobie can diff state later.
+                let pre_impl_snap = snapshot_workspace_state(&staged_product);
+                let _ = self
+                    .set_episode_state_before(&implementation_episode, &pre_impl_snap)
+                    .await;
                 let mason_edit_application = self
                     .mason_generate_and_apply_edits(
                         run_id,
@@ -2225,6 +2300,11 @@ next_actions={}",
                 log_path,
             )
             .await?;
+        // Snapshot workspace after Mason edits are complete.
+        let post_impl_snap = snapshot_workspace_state(&staged_product);
+        let _ = self
+            .set_episode_state_after(&implementation_episode, &post_impl_snap)
+            .await;
         self.finish_episode(&implementation_episode, "success", Some(1.0))
             .await?;
         self.record_phase_attribution(
@@ -2282,6 +2362,10 @@ next_actions={}",
                 )
                 .await?;
 
+                let pre_build_snap = snapshot_workspace_state(&staged_product);
+                let _ = self
+                    .set_episode_state_before(&build_episode, &pre_build_snap)
+                    .await;
                 let mut build_result = self
                     .piper_execute_build(
                         run_id,
@@ -2389,6 +2473,10 @@ next_actions={}",
                 .await?;
                 push_unique(&mut blackboard.artifact_refs, "build_output.txt");
 
+                let post_build_snap = snapshot_workspace_state(&staged_product);
+                let _ = self
+                    .set_episode_state_after(&build_episode, &post_build_snap)
+                    .await;
                 self.finish_episode(
                     &build_episode,
                     build_outcome,
@@ -2710,6 +2798,78 @@ next_actions={}",
         let mut validation = self
             .run_visible_validation(run_id, &workspace_root, &staged_product, spec_obj)
             .await?;
+
+        // Mason validation fix loop — up to 3 iterations on real test failures.
+        // Mirrors the build fix loop but targets test output (WrongAnswer style).
+        // Only fires for actual test failures, not missing runtimes or workspace issues.
+        if !validation.passed && has_real_test_failure(&validation) {
+            release_agent(&mut blackboard, "bramble");
+            claim_agent(&mut blackboard, "mason", "fix test failures");
+            self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
+            for iteration in 1u32..=3 {
+                let test_output = format_validation_failure_output(&validation);
+                match self
+                    .mason_fix_from_validation_failure(
+                        run_id,
+                        spec_obj,
+                        &briefing,
+                        target_source,
+                        &staged_product,
+                        &test_output,
+                        iteration,
+                        log_path,
+                        &validation_episode,
+                    )
+                    .await?
+                {
+                    Some(proposal) if !proposal.edits.is_empty() => {
+                        let changed =
+                            apply_mason_proposal_edits(&proposal, &staged_product).await?;
+                        let _ = self
+                            .record_event(
+                                run_id,
+                                Some(&validation_episode),
+                                "validation",
+                                "mason",
+                                "running",
+                                &format!(
+                                    "Validation fix iteration {iteration}: applied {} edit(s) — re-running tests",
+                                    changed.len()
+                                ),
+                                log_path,
+                            )
+                            .await;
+                        release_agent(&mut blackboard, "mason");
+                        claim_agent(&mut blackboard, "bramble", "re-run validation after fix");
+                        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+
+                        validation = self
+                            .run_visible_validation(
+                                run_id,
+                                &workspace_root,
+                                &staged_product,
+                                spec_obj,
+                            )
+                            .await?;
+
+                        if validation.passed {
+                            break;
+                        }
+                        release_agent(&mut blackboard, "bramble");
+                        claim_agent(&mut blackboard, "mason", "fix test failures");
+                        self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+                    }
+                    _ => break,
+                }
+            }
+            // Restore bramble as the active agent for the rest of the validation phase.
+            release_agent(&mut blackboard, "mason");
+            release_agent(&mut blackboard, "bramble");
+            claim_agent(&mut blackboard, "bramble", "run visible validation");
+            self.sync_blackboard(&blackboard, Some(&run_dir)).await?;
+        }
+
         if let Some(message) = req.harness_message("validation") {
             validation.passed = false;
             validation.results.push(ScenarioResult {
@@ -5470,7 +5630,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
                     escalate: c.escalate,
                 })
                 .collect();
-            let patch_patrol = crate::coobie_palace::patrol(&palace_causes);
+            let patch_patrol = crate::coobie_palace::patrol(&palace_causes, &relevant_lessons);
             if !patch_patrol.is_clear() {
                 tracing::debug!(
                     patch_weight = patch_patrol.patch_weight,
@@ -6697,6 +6857,119 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         }
     }
 
+    /// Mason fix loop entry point for test failures (WrongAnswer style).
+    ///
+    /// Called when Bramble's visible validation fails on real test scenario IDs
+    /// (e.g. `cargo_test`, `go_test`, `python_tests`).  The prompt frames the
+    /// failures as "tests produced wrong output — fix the implementation, not the
+    /// tests" so Mason focuses on the production code rather than removing assertions.
+    async fn mason_fix_from_validation_failure(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        briefing: &CoobieBriefing,
+        target_source: &TargetSourceMetadata,
+        staged_product: &Path,
+        test_output: &str,
+        iteration: u32,
+        log_path: &Path,
+        episode_id: &str,
+    ) -> Result<Option<MasonEditProposal>> {
+        let Some(provider) = llm::build_provider("mason", "default", &self.paths.setup) else {
+            return Ok(None);
+        };
+
+        self.record_event(
+            run_id,
+            Some(episode_id),
+            "validation",
+            "mason",
+            "running",
+            &format!("Validation fix iteration {iteration}: analysing test failures"),
+            log_path,
+        )
+        .await?;
+
+        let editable_paths =
+            collect_staged_code_under_test_paths(spec_obj, target_source, &self.paths.root);
+        let context_files = build_mason_context_files(staged_product, &editable_paths)?;
+        if context_files.is_empty() {
+            return Ok(None);
+        }
+
+        let context_block = context_files
+            .iter()
+            .map(|f| {
+                format!(
+                    "FILE: {}{}\n```text\n{}\n```",
+                    f.path,
+                    if f.truncated { " [truncated]" } else { "" },
+                    f.content
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n\n");
+
+        let editable_list = editable_paths.join(", ");
+        let spec_yaml =
+            serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+        let constraints = mason_slim_briefing(briefing);
+
+        let req = LlmRequest::simple(
+            "You are Mason, an implementation specialist for a software factory. \
+             Visible tests have run and produced failures. \
+             Produce valid JSON only — a single raw object with keys: \
+             \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). \
+             Each edit: \"path\" (relative path in staged workspace), \
+             \"action\" (must be \"write\"), \"summary\" (string), \
+             \"content\" (full file contents after edit). \
+             Only edit files in EDITABLE PATHS. \
+             Fix the implementation so the tests pass — do not modify test files \
+             unless they contain a clear error unrelated to the implementation. \
+             If you cannot fix the problem, return edits as an empty array.",
+            format!(
+                "SPEC:\n```yaml\n{spec_yaml}\n```\n\n\
+                 CONSTRAINTS:\n{constraints}\n\n\
+                 EDITABLE PATHS: {editable_list}\n\n\
+                 FILE CONTEXT:\n{context_block}\n\n\
+                 TEST FAILURES (iteration {iteration}):\n```\n{test_output}\n```\n\n\
+                 Fix the implementation so these tests pass and return the corrected \
+                 file contents as a JSON edit proposal.",
+            ),
+        );
+
+        let response = match provider.complete(req).await {
+            Ok(r) => r,
+            Err(e) => {
+                tracing::warn!("Mason validation fix LLM call failed ({})", e);
+                return Ok(None);
+            }
+        };
+
+        match parse_mason_edit_proposal(&response.content) {
+            Ok(proposal) => {
+                self.record_event(
+                    run_id,
+                    Some(episode_id),
+                    "validation",
+                    "mason",
+                    "complete",
+                    &format!(
+                        "Validation fix iteration {iteration}: {} edit(s) proposed",
+                        proposal.edits.len()
+                    ),
+                    log_path,
+                )
+                .await?;
+                Ok(Some(proposal))
+            }
+            Err(e) => {
+                tracing::warn!("Mason validation fix proposal parse failed ({})", e);
+                Ok(None)
+            }
+        }
+    }
+
     async fn execute_retriever_forge(
         &self,
         run_id: &str,
@@ -7207,7 +7480,8 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         let go_mod = staged_product.join("go.mod");
 
         if cargo_manifest.exists() {
-            let outcome = self
+            // Fast compile gate — surfaces type/borrow errors before running tests.
+            let check_outcome = self
                 .run_command_capture_streaming(
                     run_id,
                     "validation",
@@ -7217,12 +7491,33 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
                     staged_product,
                 )
                 .await?;
-            output_chunks.push(format_command_output("cargo check --quiet", &outcome));
+            output_chunks.push(format_command_output("cargo check --quiet", &check_outcome));
             results.push(ScenarioResult {
                 scenario_id: "cargo_check".to_string(),
-                passed: outcome.success,
-                details: command_detail("cargo check --quiet", &outcome),
+                passed: check_outcome.success,
+                details: command_detail("cargo check --quiet", &check_outcome),
             });
+            // Only run tests when compilation is clean — no point running tests
+            // against code that doesn't compile, and cargo test would give a
+            // confusing error rather than the real signal.
+            if check_outcome.success {
+                let test_outcome = self
+                    .run_command_capture_streaming(
+                        run_id,
+                        "validation",
+                        "bramble",
+                        "cargo",
+                        &["test", "--quiet"],
+                        staged_product,
+                    )
+                    .await?;
+                output_chunks.push(format_command_output("cargo test --quiet", &test_outcome));
+                results.push(ScenarioResult {
+                    scenario_id: "cargo_test".to_string(),
+                    passed: test_outcome.success,
+                    details: command_detail("cargo test --quiet", &test_outcome),
+                });
+            }
         } else if package_json.exists() {
             if let Some((program, args, label)) = detect_node_bootstrap(staged_product) {
                 let arg_refs: Vec<&str> = args.iter().map(|arg| arg.as_str()).collect();
@@ -7945,6 +8240,219 @@ Produce the validation analysis and note any checks Coobie asked for that are st
         }
     }
 
+    /// Coobie: critique the implementation plan before Mason writes code.
+    ///
+    /// Two-pass approach:
+    /// 1. Rule-based: check plan text against dead-end registry entries for this
+    ///    spec and against escalated guardrails from the patrol.
+    /// 2. LLM (non-blocking): Coobie reads the plan and known hazards and
+    ///    identifies blocking vs advisory concerns.
+    ///
+    /// Returns a `CoobieCritiqueResult`.  The caller decides whether to create
+    /// a checkpoint or add a blackboard blocker based on `passed`.
+    async fn coobie_critique_plan(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        _target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+        implementation_plan: &str,
+        log_path: &Path,
+        episode_id: &str,
+    ) -> Result<CoobieCritiqueResult> {
+        let plan_lower = implementation_plan.to_lowercase();
+
+        // ── Pass 1: rule-based ────────────────────────────────────────────────
+
+        let mut dead_end_matches: Vec<String> = Vec::new();
+        let mut advisory_concerns: Vec<String> = Vec::new();
+        let mut addressed_guardrails: Vec<String> = Vec::new();
+
+        // Load dead-end entries for this spec and check whether the plan's text
+        // overlaps significantly with a known failure constraint.
+        let registry_path = self.paths.factory.join("state").join("dead_ends.json");
+        if registry_path.exists() {
+            if let Ok(raw) = tokio::fs::read_to_string(&registry_path).await {
+                let registry =
+                    serde_json::from_str::<DeadEndRegistry>(&raw).unwrap_or_default();
+                for entry in &registry.entries {
+                    if entry.spec_id != spec_obj.id {
+                        continue;
+                    }
+                    if plan_overlaps_dead_end(&plan_lower, entry) {
+                        dead_end_matches.push(format!(
+                            "Plan may repeat a known dead end: strategy '{}' hit constraint '{}' in run {}",
+                            entry.strategy.chars().take(80).collect::<String>(),
+                            entry.failure_constraint.chars().take(120).collect::<String>(),
+                            entry.run_id,
+                        ));
+                    }
+                }
+            }
+        }
+
+        // Check escalated guardrails (streak >= 3, injected by patrol with a
+        // "[N-run streak]" prefix).  Advisory if the plan doesn't seem to address them.
+        for guardrail in &briefing.recommended_guardrails {
+            let is_escalated = guardrail.contains("-run streak]");
+            let guardrail_lower = guardrail.to_lowercase();
+            // Extract the core noun phrases from the guardrail for a lightweight
+            // keyword match — good enough for a rule-based pass.
+            let key_terms: Vec<&str> = guardrail_lower
+                .split_whitespace()
+                .filter(|w| w.len() >= 5 && !STOP_WORDS.contains(w))
+                .take(4)
+                .collect();
+            let addressed = key_terms
+                .iter()
+                .filter(|term| plan_lower.contains(*term))
+                .count()
+                >= key_terms.len().saturating_sub(1).max(1);
+
+            if addressed {
+                addressed_guardrails.push(guardrail.clone());
+            } else if is_escalated {
+                advisory_concerns.push(format!(
+                    "Escalated guardrail not visibly addressed in plan: {}",
+                    guardrail.chars().take(160).collect::<String>()
+                ));
+            }
+        }
+
+        let mut blocking_concerns: Vec<String> = dead_end_matches.clone();
+        let mut critique_source = "rule_based".to_string();
+
+        // ── Pass 2: LLM critique (non-blocking if unavailable) ────────────────
+
+        if let Some(provider) = llm::build_provider("coobie", "default", &self.paths.setup) {
+            let guardrails_block = if briefing.recommended_guardrails.is_empty() {
+                "none".to_string()
+            } else {
+                briefing
+                    .recommended_guardrails
+                    .iter()
+                    .take(8)
+                    .map(|g| format!("- {g}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let checks_block = if briefing.required_checks.is_empty() {
+                "none".to_string()
+            } else {
+                briefing
+                    .required_checks
+                    .iter()
+                    .take(8)
+                    .map(|c| format!("- {c}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let dead_ends_block = if dead_end_matches.is_empty() {
+                "none identified by rule-based pass".to_string()
+            } else {
+                dead_end_matches
+                    .iter()
+                    .map(|m| format!("- {m}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+
+            let req = LlmRequest::simple(
+                "You are Coobie, a causal memory specialist for a software factory. \
+                 Review an implementation plan against known hazards and prior failures. \
+                 Respond with valid JSON only — a single object with keys: \
+                 \"blocking_concerns\" (array of strings — plan ignores known hazards that \
+                 have caused repeated failures), \
+                 \"advisory_concerns\" (array of strings — plan could be improved), \
+                 \"addressed_guardrails\" (array of strings — guardrails the plan explicitly handles). \
+                 Be specific and concise. If the plan looks sound, return empty arrays.",
+                format!(
+                    "SPEC: {spec_id} — {spec_title}\n\n\
+                     KNOWN GUARDRAILS (from prior failures):\n{guardrails_block}\n\n\
+                     REQUIRED CHECKS:\n{checks_block}\n\n\
+                     KNOWN DEAD ENDS (rule-based):\n{dead_ends_block}\n\n\
+                     IMPLEMENTATION PLAN:\n```\n{plan}\n```\n\n\
+                     Does this plan adequately address the known hazards? \
+                     Identify any blind spots and return your critique as JSON.",
+                    spec_id = spec_obj.id,
+                    spec_title = spec_obj.title,
+                    plan = implementation_plan.chars().take(3000).collect::<String>(),
+                ),
+            );
+
+            match provider.complete(req).await {
+                Ok(resp) => {
+                    #[derive(Deserialize, Default)]
+                    struct LlmCritique {
+                        #[serde(default)]
+                        blocking_concerns: Vec<String>,
+                        #[serde(default)]
+                        advisory_concerns: Vec<String>,
+                        #[serde(default)]
+                        addressed_guardrails: Vec<String>,
+                    }
+                    let stripped = strip_json_fences(&resp.content);
+                    if let Ok(llm) =
+                        serde_json::from_str::<LlmCritique>(stripped.trim())
+                    {
+                        // Merge LLM findings with rule-based — deduplicate.
+                        for c in llm.blocking_concerns {
+                            if !blocking_concerns.contains(&c) {
+                                blocking_concerns.push(c);
+                            }
+                        }
+                        for c in llm.advisory_concerns {
+                            if !advisory_concerns.contains(&c) {
+                                advisory_concerns.push(c);
+                            }
+                        }
+                        for g in llm.addressed_guardrails {
+                            if !addressed_guardrails.contains(&g) {
+                                addressed_guardrails.push(g);
+                            }
+                        }
+                        critique_source = "llm".to_string();
+                    }
+                }
+                Err(e) => {
+                    tracing::warn!("Coobie plan critique LLM call failed ({}), using rule-based only", e);
+                }
+            }
+        }
+
+        let passed = blocking_concerns.is_empty();
+
+        let _ = self
+            .record_event(
+                run_id,
+                Some(episode_id),
+                "implementation",
+                "coobie",
+                if passed { "complete" } else { "warning" },
+                &format!(
+                    "Plan critique ({}): {} blocking, {} advisory, {} dead-end match(es)",
+                    critique_source,
+                    blocking_concerns.len(),
+                    advisory_concerns.len(),
+                    dead_end_matches.len(),
+                ),
+                log_path,
+            )
+            .await;
+
+        Ok(CoobieCritiqueResult {
+            run_id: run_id.to_string(),
+            spec_id: spec_obj.id.clone(),
+            generated_at: Utc::now().to_rfc3339(),
+            passed,
+            advisory_concerns,
+            blocking_concerns,
+            dead_end_matches,
+            addressed_guardrails,
+            critique_source,
+        })
+    }
+
     /// Ash: write a narrative describing the provisioned twin environment.
     /// Returns `None` when no LLM is available — caller continues without it.
     async fn ash_twin_narrative(
@@ -8453,6 +8961,38 @@ Write the twin environment narrative and identify any simulation gaps against Co
         .bind(outcome)
         .bind(confidence)
         .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn set_episode_state_before(
+        &self,
+        episode_id: &str,
+        snapshot: &WorkspaceStateSnapshot,
+    ) -> Result<()> {
+        let json = serde_json::to_string(snapshot)?;
+        sqlx::query(
+            "UPDATE episodes SET state_before = ?2 WHERE episode_id = ?1",
+        )
+        .bind(episode_id)
+        .bind(json)
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn set_episode_state_after(
+        &self,
+        episode_id: &str,
+        snapshot: &WorkspaceStateSnapshot,
+    ) -> Result<()> {
+        let json = serde_json::to_string(snapshot)?;
+        sqlx::query(
+            "UPDATE episodes SET state_after = ?2 WHERE episode_id = ?1",
+        )
+        .bind(episode_id)
+        .bind(json)
         .execute(&self.pool)
         .await?;
         Ok(())
@@ -9669,7 +10209,7 @@ Write the twin environment narrative and identify any simulation gaps against Co
 
     pub async fn list_run_episodes(&self, run_id: &str) -> Result<Vec<EpisodeRecord>> {
         let rows = sqlx::query(
-            "SELECT episode_id, run_id, phase, goal, outcome, confidence, started_at, ended_at FROM episodes WHERE run_id = ? ORDER BY started_at ASC",
+            "SELECT episode_id, run_id, phase, goal, outcome, confidence, started_at, ended_at, state_before, state_after FROM episodes WHERE run_id = ? ORDER BY started_at ASC",
         )
         .bind(run_id)
         .fetch_all(&self.pool)
@@ -9693,6 +10233,8 @@ Write the twin environment narrative and identify any simulation gaps against Co
                     .map(|value| chrono::DateTime::parse_from_rfc3339(&value))
                     .transpose()?
                     .map(|value| value.with_timezone(&Utc)),
+                state_before: row.get::<Option<String>, _>("state_before"),
+                state_after: row.get::<Option<String>, _>("state_after"),
             });
         }
         Ok(episodes)
@@ -9723,6 +10265,111 @@ Write the twin environment narrative and identify any simulation gaps against Co
             });
         }
         Ok(events)
+    }
+
+    pub async fn list_causal_event_edges(&self, run_id: &str) -> Result<Vec<CausalEventEdge>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT cl.link_id, cl.from_event, cl.to_event, cl.link_type, cl.confidence, cl.created_at,
+                   src.episode_id AS from_episode_id, dst.episode_id AS to_episode_id,
+                   src.phase AS from_phase, dst.phase AS to_phase,
+                   src.agent AS from_agent, dst.agent AS to_agent,
+                   src.status AS from_status, dst.status AS to_status,
+                   src.message AS from_message, dst.message AS to_message
+            FROM causal_links cl
+            JOIN run_events src ON src.event_id = cl.from_event
+            JOIN run_events dst ON dst.event_id = cl.to_event
+            WHERE src.run_id = ?1 AND dst.run_id = ?1
+            ORDER BY cl.created_at ASC, cl.link_id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut links = Vec::new();
+        for row in rows {
+            let link_type = row.get::<String, _>("link_type");
+            let from_phase = row.get::<String, _>("from_phase");
+            let to_phase = row.get::<String, _>("to_phase");
+            let from_status = row.get::<String, _>("from_status");
+            let to_status = row.get::<String, _>("to_status");
+            let from_message = row.get::<String, _>("from_message");
+            let to_message = row.get::<String, _>("to_message");
+            links.push(CausalEventEdge {
+                link_id: row.get::<String, _>("link_id"),
+                from_event: row.get::<i64, _>("from_event"),
+                to_event: row.get::<i64, _>("to_event"),
+                link_type: link_type.clone(),
+                confidence: row.get::<f64, _>("confidence"),
+                hierarchy_level: pearl_hierarchy_for_causal_link(&link_type),
+                from_episode_id: row.get::<Option<String>, _>("from_episode_id"),
+                to_episode_id: row.get::<Option<String>, _>("to_episode_id"),
+                from_phase: from_phase.clone(),
+                to_phase: to_phase.clone(),
+                from_agent: row.get::<String, _>("from_agent"),
+                to_agent: row.get::<String, _>("to_agent"),
+                from_status: from_status.clone(),
+                to_status: to_status.clone(),
+                summary: format!(
+                    "{}:{} -> {}:{} via {} [{} => {}]",
+                    from_phase,
+                    from_status,
+                    to_phase,
+                    to_status,
+                    link_type,
+                    compact_causal_event_message(&from_message),
+                    compact_causal_event_message(&to_message),
+                ),
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+
+        Ok(links)
+    }
+
+    pub async fn get_run_causal_graph(&self, run_id: &str) -> Result<RunCausalGraph> {
+        let episodes = self
+            .list_run_episodes(run_id)
+            .await?
+            .into_iter()
+            .map(|episode| EpisodeCausalState {
+                state_diff: summarize_episode_state_diff(
+                    episode.state_before.as_deref(),
+                    episode.state_after.as_deref(),
+                ),
+                episode,
+            })
+            .collect::<Vec<_>>();
+        let events = self
+            .list_run_events(run_id)
+            .await?
+            .into_iter()
+            .map(|event| CausalEventNode {
+                event_id: event.event_id,
+                run_id: event.run_id,
+                episode_id: event.episode_id,
+                phase: event.phase,
+                agent: event.agent,
+                status: event.status,
+                message: event.message,
+                created_at: event.created_at,
+            })
+            .collect::<Vec<_>>();
+        let links = self.list_causal_event_edges(run_id).await?;
+        let hypotheses = self.coobie.diagnose(run_id).await.unwrap_or_default();
+
+        Ok(RunCausalGraph {
+            run_id: run_id.to_string(),
+            generated_at: Utc::now(),
+            episodes,
+            events,
+            links,
+            hypotheses,
+        })
     }
 
     pub async fn list_phase_attributions_for_run(
@@ -10362,7 +11009,74 @@ Observed pattern: {}",
         )
         .await?;
 
+        // Populate cross-phase causal links so Coobie can trace failure chains
+        // across the full episode sequence.
+        let _ = self.populate_cross_phase_causal_links(run_id).await;
+
         Ok(new_lessons)
+    }
+
+    /// Populate `causal_links` rows that connect the last event of one phase
+    /// episode to the first event of the next phase episode.
+    ///
+    /// Two link types are emitted:
+    /// - `"phase_sequence"` — always emitted; represents temporal ordering.
+    /// - `"failure_triggered"` — emitted when the predecessor episode ended with
+    ///   outcome `"failure"` or `"blocked"`.  The successor episode was likely
+    ///   opened because the predecessor failed, so the causal weight is higher.
+    async fn populate_cross_phase_causal_links(&self, run_id: &str) -> Result<()> {
+        let episodes = self.list_run_episodes(run_id).await?;
+        if episodes.len() < 2 {
+            return Ok(());
+        }
+
+        for window in episodes.windows(2) {
+            let pred = &window[0];
+            let succ = &window[1];
+
+            // Fetch last event of the predecessor episode.
+            let pred_events = self.list_events_for_episode(&pred.episode_id).await?;
+            let succ_events = self.list_events_for_episode(&succ.episode_id).await?;
+
+            let Some(pred_last) = pred_events.last() else {
+                continue;
+            };
+            let Some(succ_first) = succ_events.first() else {
+                continue;
+            };
+
+            let pred_outcome = pred.outcome.as_deref().unwrap_or("unknown");
+            let is_failure = matches!(pred_outcome, "failure" | "blocked");
+
+            let (link_type, confidence) = if is_failure {
+                ("failure_triggered", 0.85)
+            } else {
+                ("phase_sequence", 0.6)
+            };
+
+            // Insert — ignore if the link already exists (same from/to/type).
+            let link_id = format!(
+                "cross-{}-{}",
+                pred_last.event_id, succ_first.event_id
+            );
+            sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO causal_links
+                    (link_id, from_event, to_event, link_type, confidence, created_at)
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+                "#,
+            )
+            .bind(&link_id)
+            .bind(pred_last.event_id)
+            .bind(succ_first.event_id)
+            .bind(link_type)
+            .bind(confidence)
+            .bind(Utc::now().to_rfc3339())
+            .execute(&self.pool)
+            .await?;
+        }
+
+        Ok(())
     }
 
     async fn consolidate_phase_attribution_lessons(
@@ -15897,10 +16611,69 @@ fn detect_package_scripts(package_json: &Path) -> Result<Vec<String>> {
     Ok(scripts)
 }
 
+/// Words excluded from the guardrail keyword match in `coobie_critique_plan`.
+const STOP_WORDS: &[&str] = &[
+    "the", "this", "that", "with", "from", "have", "been", "before", "after",
+    "should", "would", "could", "which", "their", "there", "where", "when",
+    "every", "other", "about", "these", "those", "will", "must", "into",
+];
+
+/// Returns true when the (lowercased) plan text has significant word overlap
+/// with a dead-end entry's `failure_constraint` field.
+///
+/// Threshold: ≥ 40% of the constraint's content words appear in the plan, with
+/// a minimum of 3 matching words to avoid false positives on short constraints.
+fn plan_overlaps_dead_end(plan_lower: &str, entry: &DeadEndRegistryEntry) -> bool {
+    let constraint = entry.failure_constraint.to_lowercase();
+    if constraint == "none" || constraint.is_empty() {
+        return false;
+    }
+    let words: Vec<&str> = constraint
+        .split_whitespace()
+        .filter(|w| w.len() >= 4 && !STOP_WORDS.contains(w))
+        .collect();
+    if words.len() < 3 {
+        return false;
+    }
+    let matches = words.iter().filter(|w| plan_lower.contains(*w)).count();
+    matches >= 3 && matches * 10 >= words.len() * 4 // ≥ 40% overlap
+}
+
+/// Returns true when `validation` contains at least one failure on a real
+/// test scenario (not infrastructure checks like `workspace_layout`).
+/// Used to gate the Mason validation fix loop — we only retry for test
+/// failures that Mason can plausibly fix, not for missing runtimes.
+fn has_real_test_failure(validation: &ValidationSummary) -> bool {
+    validation.results.iter().any(|r| {
+        !r.passed
+            && (matches!(
+                r.scenario_id.as_str(),
+                "cargo_test"
+                    | "npm_test"
+                    | "pnpm_test"
+                    | "yarn_test"
+                    | "go_test"
+                    | "python_tests"
+            ) || r.scenario_id.starts_with("test_command_"))
+    })
+}
+
+/// Format the failing validation results as a compact block for Mason's prompt.
+fn format_validation_failure_output(validation: &ValidationSummary) -> String {
+    validation
+        .results
+        .iter()
+        .filter(|r| !r.passed)
+        .map(|r| format!("[FAILED] {}: {}", r.scenario_id, r.details))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn validation_result_counts_for_coverage(scenario_id: &str) -> bool {
     matches!(
         scenario_id,
         "cargo_check"
+            | "cargo_test"
             | "node_bootstrap"
             | "node_runtime"
             | "npm_build"
@@ -16330,13 +17103,18 @@ async fn mason_commit_branch(
     Ok(())
 }
 
-fn parse_mason_edit_proposal(raw: &str) -> Result<MasonEditProposal> {
-    let stripped = raw
-        .trim()
+/// Strip ` ```json ` / ` ``` ` fences from an LLM response so it can be
+/// parsed as plain JSON.
+fn strip_json_fences(raw: &str) -> &str {
+    raw.trim()
         .trim_start_matches("```json")
         .trim_start_matches("```")
         .trim_end_matches("```")
-        .trim();
+        .trim()
+}
+
+fn parse_mason_edit_proposal(raw: &str) -> Result<MasonEditProposal> {
+    let stripped = strip_json_fences(raw);
     let proposal = serde_json::from_str::<MasonEditProposal>(stripped)
         .with_context(|| "parsing Mason edit proposal JSON")?;
     Ok(proposal)
@@ -16534,6 +17312,178 @@ fn normalize_message_pattern(message: &str) -> String {
         tokens.push(current);
     }
     tokens.into_iter().take(10).collect::<Vec<_>>().join(" ")
+}
+
+// ── Workspace state snapshot ─────────────────────────────────────────────────
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceFileEntry {
+    path: String,
+    size: u64,
+    hash: String, // hex-encoded Blake3 digest (first 8 bytes = 16 hex chars)
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct WorkspaceStateSnapshot {
+    file_count: usize,
+    total_bytes: u64,
+    files: Vec<WorkspaceFileEntry>,
+    captured_at: String,
+}
+
+fn snapshot_workspace_state(root: &Path) -> WorkspaceStateSnapshot {
+    use std::collections::BTreeMap;
+    let mut files: BTreeMap<String, WorkspaceFileEntry> = BTreeMap::new();
+    let mut total_bytes: u64 = 0;
+
+    fn visit(
+        dir: &Path,
+        root: &Path,
+        files: &mut BTreeMap<String, WorkspaceFileEntry>,
+        total: &mut u64,
+    ) {
+        let Ok(entries) = std::fs::read_dir(dir) else {
+            return;
+        };
+        for entry in entries.flatten() {
+            let path = entry.path();
+            if path.is_dir() {
+                // skip hidden dirs and common noise dirs
+                let name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+                if name.starts_with('.') || name == "target" || name == "node_modules" {
+                    continue;
+                }
+                visit(&path, root, files, total);
+            } else if path.is_file() {
+                let Ok(meta) = std::fs::metadata(&path) else {
+                    continue;
+                };
+                let size = meta.len();
+                let content = std::fs::read(&path).unwrap_or_default();
+                // Use a simple 64-bit FNV hash for speed — not cryptographic, just
+                // enough to detect file changes between snapshots.
+                let mut hash: u64 = 14695981039346656037u64;
+                for byte in &content {
+                    hash ^= *byte as u64;
+                    hash = hash.wrapping_mul(1099511628211u64);
+                }
+                let rel = path
+                    .strip_prefix(root)
+                    .map(|p| p.to_string_lossy().to_string())
+                    .unwrap_or_else(|_| path.to_string_lossy().to_string());
+                *total += size;
+                files.insert(
+                    rel.clone(),
+                    WorkspaceFileEntry {
+                        path: rel,
+                        size,
+                        hash: format!("{hash:016x}"),
+                    },
+                );
+            }
+        }
+    }
+
+    visit(root, root, &mut files, &mut total_bytes);
+    let file_list: Vec<WorkspaceFileEntry> = files.into_values().collect();
+    WorkspaceStateSnapshot {
+        file_count: file_list.len(),
+        total_bytes,
+        files: file_list,
+        captured_at: Utc::now().to_rfc3339(),
+    }
+}
+
+fn parse_workspace_state_snapshot(raw: Option<&str>) -> Option<WorkspaceStateSnapshot> {
+    raw.and_then(|value| serde_json::from_str::<WorkspaceStateSnapshot>(value).ok())
+}
+
+fn summarize_episode_state_diff(
+    state_before: Option<&str>,
+    state_after: Option<&str>,
+) -> Option<EpisodeStateDiff> {
+    let before = parse_workspace_state_snapshot(state_before)?;
+    let after = parse_workspace_state_snapshot(state_after)?;
+
+    let before_files = before
+        .files
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+    let after_files = after
+        .files
+        .iter()
+        .map(|entry| (entry.path.as_str(), entry))
+        .collect::<HashMap<_, _>>();
+
+    let mut added_files = after_files
+        .keys()
+        .filter(|path| !before_files.contains_key(**path))
+        .map(|path| (*path).to_string())
+        .collect::<Vec<_>>();
+    let mut removed_files = before_files
+        .keys()
+        .filter(|path| !after_files.contains_key(**path))
+        .map(|path| (*path).to_string())
+        .collect::<Vec<_>>();
+    let mut modified_files = before_files
+        .iter()
+        .filter_map(|(path, before_entry)| {
+            let after_entry = after_files.get(path)?;
+            if before_entry.hash != after_entry.hash || before_entry.size != after_entry.size {
+                Some((*path).to_string())
+            } else {
+                None
+            }
+        })
+        .collect::<Vec<_>>();
+
+    added_files.sort();
+    removed_files.sort();
+    modified_files.sort();
+
+    let shared_files = before_files.keys().filter(|path| after_files.contains_key(**path)).count();
+    let unchanged_files = shared_files.saturating_sub(modified_files.len());
+    let summary = format!(
+        "{} added, {} modified, {} removed, {} unchanged",
+        added_files.len(),
+        modified_files.len(),
+        removed_files.len(),
+        unchanged_files,
+    );
+
+    Some(EpisodeStateDiff {
+        summary,
+        added_files,
+        modified_files,
+        removed_files,
+        unchanged_files,
+        bytes_before: before.total_bytes,
+        bytes_after: after.total_bytes,
+    })
+}
+
+fn pearl_hierarchy_for_causal_link(link_type: &str) -> PearlHierarchyLevel {
+    match link_type.trim().to_ascii_lowercase().as_str() {
+        "caused" | "contributed_to" | "failure_triggered" => {
+            PearlHierarchyLevel::Interventional
+        }
+        "prevented" | "invalidated" => PearlHierarchyLevel::Counterfactual,
+        _ => PearlHierarchyLevel::Associational,
+    }
+}
+
+fn compact_causal_event_message(message: &str) -> String {
+    let trimmed = message.trim();
+    if trimmed.is_empty() {
+        return "no message".to_string();
+    }
+    let mut chars = trimmed.chars();
+    let mut summary = chars.by_ref().take(96).collect::<String>();
+    if chars.next().is_some() {
+        summary.push_str("...");
+    }
+    summary
 }
 
 fn build_episode_pattern(phase: &str, events: &[RunEvent]) -> String {

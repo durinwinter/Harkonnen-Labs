@@ -65,11 +65,29 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
             outcome TEXT,
             confidence REAL,
             started_at TEXT NOT NULL,
-            ended_at TEXT
+            ended_at TEXT,
+            state_before TEXT,
+            state_after TEXT
         )
         "#,
     )
     .execute(&pool)
+    .await?;
+
+    ensure_column(
+        &pool,
+        "episodes",
+        "state_before",
+        "ALTER TABLE episodes ADD COLUMN state_before TEXT",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "episodes",
+        "state_after",
+        "ALTER TABLE episodes ADD COLUMN state_after TEXT",
+    )
     .await?;
 
     sqlx::query(
@@ -270,13 +288,31 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
             cause_id        TEXT NOT NULL,
             description     TEXT NOT NULL,
             confidence      REAL NOT NULL DEFAULT 0.5,
+            hierarchy_level TEXT NOT NULL DEFAULT 'associational',
             supporting_runs TEXT NOT NULL DEFAULT '[]',
+            evidence        TEXT NOT NULL DEFAULT '[]',
             counterfactuals TEXT NOT NULL DEFAULT '[]',
             created_at      TEXT NOT NULL
         )
         "#,
     )
     .execute(&pool)
+    .await?;
+
+    ensure_column(
+        &pool,
+        "causal_hypotheses",
+        "hierarchy_level",
+        "ALTER TABLE causal_hypotheses ADD COLUMN hierarchy_level TEXT NOT NULL DEFAULT 'associational'",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "causal_hypotheses",
+        "evidence",
+        "ALTER TABLE causal_hypotheses ADD COLUMN evidence TEXT NOT NULL DEFAULT '[]'",
+    )
     .await?;
 
     sqlx::query(

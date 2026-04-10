@@ -38,7 +38,8 @@
       "mcp__filesystem__list_directory",
       "Bash(grep -v \"cannot find value \\\\`briefing\\\\`|cannot find value \\\\`memory_hits\\\\`|cannot find function \\\\`build_application\\\\|cannot find function \\\\`build_environment\\\\|cannot find function \\\\`build_regulatory\\\\|cannot find function \\\\`build_recommended\\\\|cannot find function \\\\`build_required\\\\|cannot find function \\\\`build_coobie\\\\|mismatched types\")",
       "Bash(grep -v \"cannot find value \\\\`briefing\\\\`|cannot find value \\\\`memory_hits\\\\`|cannot find function \\\\`build_application\\\\|cannot find function \\\\`build_environment\\\\|cannot find function \\\\`build_regulatory\\\\|cannot find function \\\\`build_recommended\\\\|cannot find function \\\\`build_required\\\\|cannot find function \\\\`build_coobie\\\\|mismatched types.*CoobieBriefing\")",
-      "WebFetch(domain:api.github.com)"
+      "WebFetch(domain:api.github.com)",
+      "WebFetch(domain:openspec.dev)"
     ],
     "additionalDirectories": [
       "/media/earthling/Caleb''''s Files/Harkonnen-Labs/factory",

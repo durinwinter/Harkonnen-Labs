@@ -405,6 +405,10 @@ pub struct EpisodeRecord {
     pub confidence: Option<f64>,
     pub started_at: DateTime<Utc>,
     pub ended_at: Option<DateTime<Utc>>,
+    #[serde(default)]
+    pub state_before: Option<String>,
+    #[serde(default)]
+    pub state_after: Option<String>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -733,6 +737,26 @@ pub struct HiddenScenarioSummary {
     pub passed: bool,
     pub results: Vec<HiddenScenarioEvaluation>,
 }
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Default)]
+#[serde(rename_all = "snake_case")]
+pub enum PearlHierarchyLevel {
+    #[default]
+    Associational,
+    Interventional,
+    Counterfactual,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalHypothesisEvidence {
+    pub kind: String,
+    pub ref_id: String,
+    pub relation: String,
+    #[serde(default)]
+    pub hierarchy_level: PearlHierarchyLevel,
+    pub summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct FactoryEpisode {
     pub run_id: String,
@@ -762,7 +786,11 @@ pub struct CausalHypothesis {
     pub cause_id: String,
     pub description: String,
     pub confidence: f32,
+    #[serde(default)]
+    pub hierarchy_level: PearlHierarchyLevel,
     pub supporting_runs: Vec<String>,
+    #[serde(default)]
+    pub evidence: Vec<CausalHypothesisEvidence>,
     pub counterfactuals: Vec<CounterfactualEstimate>,
 }
 
@@ -791,4 +819,69 @@ pub struct CausalStreak {
     pub confidence_boost: f32,
     /// True when streak_len >= 3 — escalation intervention is recommended.
     pub escalate: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeStateDiff {
+    pub summary: String,
+    pub added_files: Vec<String>,
+    pub modified_files: Vec<String>,
+    pub removed_files: Vec<String>,
+    pub unchanged_files: usize,
+    pub bytes_before: u64,
+    pub bytes_after: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct EpisodeCausalState {
+    pub episode: EpisodeRecord,
+    #[serde(default)]
+    pub state_diff: Option<EpisodeStateDiff>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalEventNode {
+    pub event_id: i64,
+    pub run_id: String,
+    #[serde(default)]
+    pub episode_id: Option<String>,
+    pub phase: String,
+    pub agent: String,
+    pub status: String,
+    pub message: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CausalEventEdge {
+    pub link_id: String,
+    pub from_event: i64,
+    pub to_event: i64,
+    pub link_type: String,
+    pub confidence: f64,
+    #[serde(default)]
+    pub hierarchy_level: PearlHierarchyLevel,
+    #[serde(default)]
+    pub from_episode_id: Option<String>,
+    #[serde(default)]
+    pub to_episode_id: Option<String>,
+    pub from_phase: String,
+    pub to_phase: String,
+    pub from_agent: String,
+    pub to_agent: String,
+    pub from_status: String,
+    pub to_status: String,
+    pub summary: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunCausalGraph {
+    pub run_id: String,
+    pub generated_at: DateTime<Utc>,
+    pub episodes: Vec<EpisodeCausalState>,
+    pub events: Vec<CausalEventNode>,
+    pub links: Vec<CausalEventEdge>,
+    #[serde(default)]
+    pub hypotheses: Vec<CausalHypothesis>,
 }

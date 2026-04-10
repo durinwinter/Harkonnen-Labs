@@ -26,8 +26,8 @@ use crate::{
         AgentExecution, BlackboardState, CoobieBriefing, EvidenceAnnotation,
         EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent, EvidenceMatchReport,
         EvidenceSource, HiddenScenarioSummary, InterventionPlan, LessonRecord,
-        PhaseAttributionRecord, PriorCauseSignal, RunCheckpointRecord, RunEvent, RunRecord, Spec,
-        ValidationSummary,
+        PhaseAttributionRecord, PriorCauseSignal, RunCheckpointRecord, RunEvent,
+        RunRecord, Spec, ValidationSummary,
     },
     orchestrator::{AppContext, RunRequest},
     pidgin::{self, PidginTranslation},
@@ -579,6 +579,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id/coobie-response", get(get_coobie_response))
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
+        .route("/api/runs/:id/causal-events", get(get_run_causal_events))
         .route(
             "/api/runs/:id/evidence-match-report",
             get(get_run_evidence_match_report),
@@ -1323,6 +1324,20 @@ async fn get_causal_report(
                 }
             }
         }
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_causal_events(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app.get_run_causal_graph(&id).await {
+            Ok(graph) => (StatusCode::OK, Json(graph)).into_response(),
+            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+        },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }

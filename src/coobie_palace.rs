@@ -28,6 +28,8 @@
 
 use serde::Serialize;
 
+use crate::models::LessonRecord;
+
 // ── Den definitions ───────────────────────────────────────────────────────────
 
 /// A named cluster of related causal failure patterns.
@@ -87,6 +89,19 @@ pub const DENS: &[Den] = &[
     },
 ];
 
+// ── Den lesson — thin projection of a LessonRecord matched to a den ──────────
+
+/// A lesson from Coobie's SQLite `lessons` table that matched this den's
+/// resident cause IDs.  Carried as a thin struct so `DenScent` stays
+/// serializable without pulling in `DateTime` from the full `LessonRecord`.
+#[derive(Debug, Clone, Serialize)]
+pub struct DenLesson {
+    pub lesson_id: String,
+    pub pattern: String,
+    pub intervention: Option<String>,
+    pub strength: f64,
+}
+
 // ── Cause signal input (mirrors SpecCauseSignal without owning it) ────────────
 
 /// A minimal projection of a SpecCauseSignal that the palace consumes.
@@ -126,6 +141,9 @@ pub struct DenScent {
     pub guardrails: Vec<String>,
     /// Open questions when the den is escalated.
     pub open_questions: Vec<String>,
+    /// Lessons from Coobie's SQLite store whose tags matched a resident cause ID.
+    /// Up to 3 per den, ordered by strength descending.
+    pub matched_lessons: Vec<DenLesson>,
 }
 
 // ── PatchPatrol — result of a full patrol ────────────────────────────────────
@@ -153,7 +171,12 @@ impl PatchPatrol {
 // ── Patrol logic ──────────────────────────────────────────────────────────────
 
 /// Walk the patch: project `causes` into dens, compute scents, return patrol.
-pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
+///
+/// `lessons` is the slice of `LessonRecord`s already fetched for this run
+/// (e.g. from `find_relevant_lessons`).  Lessons whose tags match a den's
+/// resident cause IDs are attached to that den's scent and surfaced in the
+/// briefing as guardrails.  Pass `&[]` when no lessons are available.
+pub fn patrol(causes: &[CauseSnapshot], lessons: &[LessonRecord]) -> PatchPatrol {
     if causes.is_empty() {
         return PatchPatrol {
             active_dens: vec![],
@@ -182,6 +205,8 @@ pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
         let any_escalated = residents.iter().any(|c| c.escalate);
         let den_escalated = any_escalated || active_residents >= 2;
 
+        let matched_lessons = match_lessons_to_den(den, lessons);
+
         let (compound_narrative, required_checks, guardrails, open_questions) = build_den_scent(
             den,
             &residents,
@@ -201,6 +226,7 @@ pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
             required_checks,
             guardrails,
             open_questions,
+            matched_lessons,
         });
     }
 
@@ -233,6 +259,36 @@ pub fn patrol(causes: &[CauseSnapshot]) -> PatchPatrol {
         patch_weight,
         summary,
     }
+}
+
+// ── Lesson matching ───────────────────────────────────────────────────────────
+
+/// Return the top-3 lessons (by strength) whose tags match any resident
+/// cause ID of this den, or the den's own ID.
+///
+/// Matching is case-insensitive and exact on the tag value.  A lesson tagged
+/// `"SPEC_AMBIGUITY"` matches the Spec Den; one tagged `"spec_den"` does too.
+fn match_lessons_to_den(den: &Den, lessons: &[LessonRecord]) -> Vec<DenLesson> {
+    let mut matched: Vec<DenLesson> = lessons
+        .iter()
+        .filter(|l| {
+            l.tags.iter().any(|tag| {
+                let t = tag.to_lowercase();
+                den.residents.iter().any(|r| t == r.to_lowercase()) || t == den.id
+            })
+        })
+        .map(|l| DenLesson {
+            lesson_id: l.lesson_id.clone(),
+            pattern: l.pattern.clone(),
+            intervention: l.intervention.clone(),
+            strength: l.strength,
+        })
+        .collect();
+
+    // Strongest lessons first so the most reliable signal surfaces in the briefing.
+    matched.sort_by(|a, b| b.strength.partial_cmp(&a.strength).unwrap_or(std::cmp::Ordering::Equal));
+    matched.truncate(3);
+    matched
 }
 
 // ── Den scent builder ─────────────────────────────────────────────────────────
@@ -471,6 +527,19 @@ pub fn apply_patrol_to_briefing(
                 open_questions.push(question.clone());
             }
         }
+        // Surface lesson interventions as guardrails so prior pack learning
+        // reaches the briefing alongside the den's structural signals.
+        for lesson in &den.matched_lessons {
+            if let Some(ref intervention) = lesson.intervention {
+                let guardrail = format!(
+                    "[{} lesson] {} → {}",
+                    den.den_label, lesson.pattern, intervention
+                );
+                if !recommended_guardrails.contains(&guardrail) {
+                    recommended_guardrails.push(guardrail);
+                }
+            }
+        }
     }
 }
 
@@ -493,7 +562,7 @@ mod tests {
 
     #[test]
     fn clear_patch_when_no_causes() {
-        let patrol = patrol(&[]);
+        let patrol = patrol(&[], &[]);
         assert!(patrol.is_clear());
         assert_eq!(patrol.active_den_count, 0);
         assert_eq!(patrol.patch_weight, 0.0);
@@ -502,7 +571,7 @@ mod tests {
     #[test]
     fn single_resident_activates_den() {
         let causes = vec![snapshot("TEST_BLIND_SPOT", 2, 2)];
-        let p = patrol(&causes);
+        let p = patrol(&causes, &[]);
         assert_eq!(p.active_den_count, 1);
         assert_eq!(p.active_dens[0].den_id, "test_den");
         assert_eq!(p.active_dens[0].active_residents, 1);
@@ -514,7 +583,7 @@ mod tests {
             snapshot("SPEC_AMBIGUITY", 3, 3),
             snapshot("BROAD_SCOPE", 2, 2),
         ];
-        let p = patrol(&causes);
+        let p = patrol(&causes, &[]);
         let spec = p
             .active_dens
             .iter()
@@ -531,15 +600,15 @@ mod tests {
 
     #[test]
     fn patch_weight_scales_with_streak() {
-        let low = patrol(&[snapshot("TEST_BLIND_SPOT", 1, 1)]);
-        let high = patrol(&[snapshot("TEST_BLIND_SPOT", 5, 5)]);
+        let low = patrol(&[snapshot("TEST_BLIND_SPOT", 1, 1)], &[]);
+        let high = patrol(&[snapshot("TEST_BLIND_SPOT", 5, 5)], &[]);
         assert!(high.patch_weight > low.patch_weight);
     }
 
     #[test]
     fn apply_patrol_deduplicates_checks() {
         let causes = vec![snapshot("TEST_BLIND_SPOT", 2, 2)];
-        let p = patrol(&causes);
+        let p = patrol(&causes, &[]);
 
         let mut checks = vec![];
         let mut guardrails = vec![];

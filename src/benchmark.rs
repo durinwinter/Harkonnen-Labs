@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::process::Command;
 
-use crate::{config::Paths, frames, locomo, longmemeval, streamingqa};
+use crate::{cladder, config::Paths, frames, helmet, locomo, longmemeval, streamingqa};
 
 const SKIP_EXIT_CODE: i32 = 10;
 const OUTPUT_LIMIT: usize = 8_000;
@@ -760,6 +760,42 @@ async fn run_builtin_step(
                 )
             }
             streamingqa::StreamingQaSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "cladder" => match cladder::run_with_overrides(paths, &step.env).await? {
+            cladder::CladderSuiteOutcome::Completed(output) => {
+                let status = cladder::status_for_output(&output);
+                let reason = cladder::reason_for_output(&output);
+                (
+                    status,
+                    cladder::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            cladder::CladderSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "helmet" => match helmet::run_with_overrides(paths, &step.env).await? {
+            helmet::HelmetSuiteOutcome::Completed(output) => {
+                let status = helmet::status_for_output(&output);
+                let reason = helmet::reason_for_output(&output);
+                (
+                    status,
+                    helmet::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            helmet::HelmetSuiteOutcome::Skipped(reason) => (
                 BenchmarkStatus::Skipped,
                 String::new(),
                 String::new(),

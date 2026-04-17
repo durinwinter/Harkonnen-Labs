@@ -243,6 +243,85 @@ impl MemoryStore {
         Ok(render_memory_hits(query, &hits))
     }
 
+    /// Multi-hop retrieval: performs a first-pass retrieval, then extracts
+    /// secondary query terms from the top results to chain a second retrieval
+    /// pass. The two result sets are merged and re-ranked by score.
+    ///
+    /// `retrieval_depth`:
+    ///  - 1 = single-pass (same as `retrieve_context_hybrid`)
+    ///  - 2 = one chaining step (default for FRAMES-style multi-hop queries)
+    ///
+    /// Falls back gracefully — a failing hop is ignored rather than propagated.
+    pub async fn retrieve_context_multihop(
+        &self,
+        query: &str,
+        embedding_store: &crate::embeddings::EmbeddingStore,
+        retrieval_depth: u8,
+    ) -> Result<Vec<String>> {
+        let depth = retrieval_depth.clamp(1, 3);
+
+        // First pass.
+        let mut first_hits = self
+            .retrieve_ranked_entries(query, Some(embedding_store), 20)
+            .await?;
+
+        if depth == 1 || first_hits.is_empty() {
+            return Ok(render_memory_hits(query, &first_hits));
+        }
+
+        // Build secondary query from the top-3 first-pass hits: extract words
+        // that appear in tags or the first 120 chars of each snippet.
+        let secondary_terms: Vec<String> = first_hits
+            .iter()
+            .take(3)
+            .flat_map(|hit| {
+                let tag_words = hit.tags.iter().flat_map(|t| {
+                    t.split_whitespace()
+                        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+                        .filter(|w| w.len() > 3)
+                        .collect::<Vec<_>>()
+                });
+                let snippet_words = hit
+                    .snippet
+                    .chars()
+                    .take(120)
+                    .collect::<String>()
+                    .split_whitespace()
+                    .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+                    .filter(|w| w.len() > 4)
+                    .collect::<Vec<_>>();
+                tag_words.chain(snippet_words)
+            })
+            .collect::<std::collections::HashSet<_>>()
+            .into_iter()
+            .collect::<Vec<_>>();
+
+        if secondary_terms.is_empty() {
+            return Ok(render_memory_hits(query, &first_hits));
+        }
+
+        let secondary_query = secondary_terms.join(" ");
+        let mut second_hits = self
+            .retrieve_ranked_entries(&secondary_query, Some(embedding_store), 20)
+            .await
+            .unwrap_or_default();
+
+        // Merge: keep all first_hits, add second_hits not already present.
+        let seen_ids: std::collections::HashSet<String> =
+            first_hits.iter().map(|h| h.id.clone()).collect();
+        for hit in second_hits.drain(..) {
+            if !seen_ids.contains(&hit.id) {
+                first_hits.push(hit);
+            }
+        }
+
+        // Re-rank merged set by score descending, keep top 20.
+        first_hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        first_hits.truncate(20);
+
+        Ok(render_memory_hits(query, &first_hits))
+    }
+
     /// Structured retrieval for query-time chaining and source tracing.
     pub async fn retrieve_ranked_entries(
         &self,

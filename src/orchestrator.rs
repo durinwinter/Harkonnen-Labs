@@ -3592,8 +3592,11 @@ Top memory hits:
         let raw_hits: Vec<String> = if semantic_query.is_empty() {
             vec![]
         } else if let Some(es) = self.embedding_store.as_ref() {
-            // Semantic path: one cosine search over the full memory index.
-            store.retrieve_context_hybrid(&semantic_query, es).await?
+            // Multi-hop semantic path: primary pass + one chaining step so
+            // FRAMES-style multi-hop queries can follow related facts.
+            store
+                .retrieve_context_multihop(&semantic_query, es, 2)
+                .await?
         } else {
             // Keyword fallback: iterate terms as before.
             let mut kw = Vec::new();

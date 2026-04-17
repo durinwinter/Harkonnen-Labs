@@ -452,6 +452,174 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
+    // ── Operator Model Activation tables ──────────────────────────────────────
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_profiles (
+            profile_id       TEXT PRIMARY KEY,
+            scope            TEXT NOT NULL,
+            project_root     TEXT,
+            display_name     TEXT NOT NULL DEFAULT '',
+            status           TEXT NOT NULL DEFAULT 'active',
+            current_version  INTEGER NOT NULL DEFAULT 0,
+            created_at       TEXT NOT NULL,
+            updated_at       TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_profiles_scope_project
+        ON operator_model_profiles (scope, project_root)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_sessions (
+            session_id      TEXT PRIMARY KEY,
+            profile_id      TEXT NOT NULL REFERENCES operator_model_profiles(profile_id),
+            thread_id       TEXT,
+            status          TEXT NOT NULL,
+            pending_layer   TEXT,
+            started_by      TEXT,
+            created_at      TEXT NOT NULL,
+            updated_at      TEXT NOT NULL,
+            completed_at    TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_sessions_profile_status
+        ON operator_model_sessions (profile_id, status, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_layer_checkpoints (
+            checkpoint_id    TEXT PRIMARY KEY,
+            session_id       TEXT NOT NULL REFERENCES operator_model_sessions(session_id),
+            profile_id       TEXT NOT NULL REFERENCES operator_model_profiles(profile_id),
+            version          INTEGER NOT NULL,
+            layer            TEXT NOT NULL,
+            status           TEXT NOT NULL,
+            summary_md       TEXT NOT NULL,
+            raw_notes_json   TEXT NOT NULL DEFAULT '{}',
+            approved_by      TEXT,
+            created_at       TEXT NOT NULL,
+            approved_at      TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_checkpoints_profile_layer
+        ON operator_model_layer_checkpoints (profile_id, version, layer, status)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_entries (
+            entry_id              TEXT PRIMARY KEY,
+            profile_id            TEXT NOT NULL REFERENCES operator_model_profiles(profile_id),
+            version               INTEGER NOT NULL,
+            layer                 TEXT NOT NULL,
+            entry_type            TEXT NOT NULL,
+            title                 TEXT NOT NULL,
+            content               TEXT NOT NULL,
+            details_json          TEXT NOT NULL DEFAULT '{}',
+            source_checkpoint_id  TEXT NOT NULL REFERENCES operator_model_layer_checkpoints(checkpoint_id),
+            status                TEXT NOT NULL DEFAULT 'current',
+            superseded_by         TEXT,
+            created_at            TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_entries_profile_layer
+        ON operator_model_entries (profile_id, version, layer, status)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_exports (
+            export_id       TEXT PRIMARY KEY,
+            profile_id      TEXT NOT NULL REFERENCES operator_model_profiles(profile_id),
+            version         INTEGER NOT NULL,
+            artifact_name   TEXT NOT NULL,
+            content         TEXT NOT NULL,
+            content_type    TEXT NOT NULL,
+            created_at      TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_exports_profile_version
+        ON operator_model_exports (profile_id, version, artifact_name)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS operator_model_update_candidates (
+            candidate_id    TEXT PRIMARY KEY,
+            profile_id      TEXT NOT NULL REFERENCES operator_model_profiles(profile_id),
+            run_id          TEXT,
+            entry_id        TEXT,
+            proposal_kind   TEXT NOT NULL,
+            summary         TEXT NOT NULL,
+            proposal_json   TEXT NOT NULL DEFAULT '{}',
+            status          TEXT NOT NULL DEFAULT 'open',
+            confidence      REAL NOT NULL DEFAULT 0.0,
+            created_at      TEXT NOT NULL,
+            reviewed_at     TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_operator_model_update_candidates_profile_status
+        ON operator_model_update_candidates (profile_id, status, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // ── Phase 5 — Consolidation Workbench ─────────────────────────────────────
     // Candidates are generated by Coobie at the end of a run and surface what
     // it *proposes* to promote.  The operator reviews and keeps/discards/edits

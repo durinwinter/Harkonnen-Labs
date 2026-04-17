@@ -72,7 +72,7 @@ Right now Sable judges against a twin that is a JSON manifest, not running infra
 
 ## Phase 4b — Memory Invalidation and Fact-Update Tracking (Shipped)
 
-**Unlocks:** StreamingQA, and the structural claim that Coobie correctly *updates* beliefs rather than just *recalls* them. This work was spec'd in the Phase 4 episodic enrichment design but was not implemented during that phase. It needs its own slot.
+**Unlocks:** StreamingQA, and the structural claim that Coobie correctly *updates* beliefs rather than just *recalls* them. This work was scoped during the Phase 4 episodic enrichment design and landed as the dedicated 4b follow-on slice. Keep it here as the benchmark and maintenance reference point.
 
 **What to build:**
 

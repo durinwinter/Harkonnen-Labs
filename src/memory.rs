@@ -277,7 +277,10 @@ impl MemoryStore {
             .flat_map(|hit| {
                 let tag_words = hit.tags.iter().flat_map(|t| {
                     t.split_whitespace()
-                        .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+                        .map(|w| {
+                            w.trim_matches(|c: char| !c.is_alphanumeric())
+                                .to_lowercase()
+                        })
                         .filter(|w| w.len() > 3)
                         .collect::<Vec<_>>()
                 });
@@ -287,7 +290,10 @@ impl MemoryStore {
                     .take(120)
                     .collect::<String>()
                     .split_whitespace()
-                    .map(|w| w.trim_matches(|c: char| !c.is_alphanumeric()).to_lowercase())
+                    .map(|w| {
+                        w.trim_matches(|c: char| !c.is_alphanumeric())
+                            .to_lowercase()
+                    })
                     .filter(|w| w.len() > 4)
                     .collect::<Vec<_>>();
                 tag_words.chain(snippet_words)
@@ -316,7 +322,11 @@ impl MemoryStore {
         }
 
         // Re-rank merged set by score descending, keep top 20.
-        first_hits.sort_by(|a, b| b.score.partial_cmp(&a.score).unwrap_or(std::cmp::Ordering::Equal));
+        first_hits.sort_by(|a, b| {
+            b.score
+                .partial_cmp(&a.score)
+                .unwrap_or(std::cmp::Ordering::Equal)
+        });
         first_hits.truncate(20);
 
         Ok(render_memory_hits(query, &first_hits))

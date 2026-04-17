@@ -40,11 +40,7 @@ use std::collections::{BTreeMap, HashSet};
 use std::env;
 use std::path::{Path, PathBuf};
 
-use crate::{
-    benchmark::BenchmarkStatus,
-    config::Paths,
-    memory::MemoryStore,
-};
+use crate::{benchmark::BenchmarkStatus, config::Paths, memory::MemoryStore};
 
 // ── Constants ────────────────────────────────────────────────────────────────
 
@@ -169,7 +165,8 @@ pub async fn run_with_overrides(
         None => {
             return Ok(HelmetSuiteOutcome::Skipped(
                 "HELMET dataset not found. Set HELMET_DATASET or place a fixture under \
-                factory/benchmarks/fixtures/ or development_datasets/.".to_string(),
+                factory/benchmarks/fixtures/ or development_datasets/."
+                    .to_string(),
             ))
         }
     };
@@ -178,10 +175,8 @@ pub async fn run_with_overrides(
     let k: usize = get_override(overrides, "HELMET_K")
         .and_then(|v| v.parse().ok())
         .unwrap_or(DEFAULT_K);
-    let limit: Option<usize> = get_override(overrides, "HELMET_LIMIT")
-        .and_then(|v| v.parse().ok());
-    let min_f1: Option<f64> = get_override(overrides, "HELMET_MIN_F1")
-        .and_then(|v| v.parse().ok());
+    let limit: Option<usize> = get_override(overrides, "HELMET_LIMIT").and_then(|v| v.parse().ok());
+    let min_f1: Option<f64> = get_override(overrides, "HELMET_MIN_F1").and_then(|v| v.parse().ok());
     let output_dir = get_override(overrides, "HELMET_OUTPUT")
         .map(PathBuf::from)
         .unwrap_or_else(|| paths.artifacts.join("benchmarks").join("helmet"));
@@ -218,7 +213,13 @@ pub async fn run(_paths: &Paths, config: &HelmetRunConfig) -> Result<HelmetRunOu
 
     for query in &queries {
         let retrieved = retrieve_for_query(config, query).await;
-        let result = score_retrieval(&query.query_id, &query.query, &query.relevant_doc_ids, &retrieved, config.k);
+        let result = score_retrieval(
+            &query.query_id,
+            &query.query,
+            &query.relevant_doc_ids,
+            &retrieved,
+            config.k,
+        );
         precision_sum += result.precision;
         recall_sum += result.recall;
         f1_sum += result.f1;
@@ -246,7 +247,9 @@ pub async fn run(_paths: &Paths, config: &HelmetRunConfig) -> Result<HelmetRunOu
         if f1_at_k < min {
             Some(format!(
                 "HELMET F1@{k} {:.3} below threshold {:.3}",
-                f1_at_k, min, k = config.k
+                f1_at_k,
+                min,
+                k = config.k
             ))
         } else {
             None
@@ -291,16 +294,18 @@ pub async fn run(_paths: &Paths, config: &HelmetRunConfig) -> Result<HelmetRunOu
 
 /// Build a per-query `MemoryStore` from the query's document set, run
 /// Coobie's multi-hop retrieval, and return the ranked doc IDs.
-async fn retrieve_for_query(
-    config: &HelmetRunConfig,
-    query: &HelmetQuery,
-) -> Vec<String> {
+async fn retrieve_for_query(config: &HelmetRunConfig, query: &HelmetQuery) -> Vec<String> {
     match config.mode {
         HelmetMode::Harkonnen => retrieve_harkonnen(config.k, query).await,
         HelmetMode::Direct => {
             // Direct mode: return relevant docs in their listed order — used
             // as an oracle / upper-bound baseline, not a retrieval test.
-            query.relevant_doc_ids.iter().take(config.k).cloned().collect()
+            query
+                .relevant_doc_ids
+                .iter()
+                .take(config.k)
+                .cloned()
+                .collect()
         }
     }
 }
@@ -343,15 +348,18 @@ async fn retrieve_harkonnen(k: usize, query: &HelmetQuery) -> Vec<String> {
 
     // The MemoryStore entry IDs are set from the frontmatter `id:` field,
     // which we wrote as the doc_id. Return those directly.
-    hits.into_iter()
-        .take(k)
-        .map(|h| h.id)
-        .collect()
+    hits.into_iter().take(k).map(|h| h.id).collect()
 }
 
 fn sanitise_id(id: &str) -> String {
     id.chars()
-        .map(|c| if c.is_alphanumeric() || c == '-' || c == '_' { c } else { '_' })
+        .map(|c| {
+            if c.is_alphanumeric() || c == '-' || c == '_' {
+                c
+            } else {
+                '_'
+            }
+        })
         .collect()
 }
 
@@ -454,9 +462,18 @@ fn resolve_dataset_path(paths: &Paths, overrides: &BTreeMap<String, String>) -> 
         }
     }
     let candidates = [
-        paths.artifacts.join("benchmarks").join("fixtures").join("helmet.jsonl"),
+        paths
+            .artifacts
+            .join("benchmarks")
+            .join("fixtures")
+            .join("helmet.jsonl"),
         paths.root.join("development_datasets").join("helmet.jsonl"),
-        paths.root.join("factory").join("benchmarks").join("fixtures").join("helmet.jsonl"),
+        paths
+            .root
+            .join("factory")
+            .join("benchmarks")
+            .join("fixtures")
+            .join("helmet.jsonl"),
     ];
     for p in &candidates {
         if p.exists() {

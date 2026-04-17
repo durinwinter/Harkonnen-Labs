@@ -173,20 +173,21 @@ pub async fn run_with_overrides(
         None => {
             return Ok(CladderSuiteOutcome::Skipped(
                 "CLADDER dataset not found. Set CLADDER_DATASET or place a fixture under \
-                factory/benchmarks/fixtures/ or development_datasets/.".to_string(),
+                factory/benchmarks/fixtures/ or development_datasets/."
+                    .to_string(),
             ))
         }
     };
 
     let mode = CladderMode::parse(get_override(overrides, "CLADDER_MODE"))?;
-    let agent = get_override(overrides, "CLADDER_AGENT")
-        .unwrap_or_else(|| DEFAULT_AGENT.to_string());
-    let direct_provider = get_override(overrides, "CLADDER_PROVIDER")
-        .unwrap_or_else(|| "anthropic".to_string());
-    let limit: Option<usize> = get_override(overrides, "CLADDER_LIMIT")
-        .and_then(|v| v.parse().ok());
-    let min_accuracy: Option<f64> = get_override(overrides, "CLADDER_MIN_ACC")
-        .and_then(|v| v.parse().ok());
+    let agent =
+        get_override(overrides, "CLADDER_AGENT").unwrap_or_else(|| DEFAULT_AGENT.to_string());
+    let direct_provider =
+        get_override(overrides, "CLADDER_PROVIDER").unwrap_or_else(|| "anthropic".to_string());
+    let limit: Option<usize> =
+        get_override(overrides, "CLADDER_LIMIT").and_then(|v| v.parse().ok());
+    let min_accuracy: Option<f64> =
+        get_override(overrides, "CLADDER_MIN_ACC").and_then(|v| v.parse().ok());
     let output_dir = get_override(overrides, "CLADDER_OUTPUT")
         .map(PathBuf::from)
         .unwrap_or_else(|| paths.artifacts.join("benchmarks").join("cladder"));
@@ -201,7 +202,9 @@ pub async fn run_with_overrides(
         min_accuracy,
     };
 
-    run(paths, &config).await.map(CladderSuiteOutcome::Completed)
+    run(paths, &config)
+        .await
+        .map(CladderSuiteOutcome::Completed)
 }
 
 pub async fn run(paths: &Paths, config: &CladderRunConfig) -> Result<CladderRunOutput> {
@@ -320,18 +323,12 @@ async fn answer_question(
     question: &CladderQuestion,
 ) -> String {
     match config.mode {
-        CladderMode::Harkonnen => {
-            answer_via_packchat(paths, &config.agent, question).await
-        }
+        CladderMode::Harkonnen => answer_via_packchat(paths, &config.agent, question).await,
         CladderMode::Direct => answer_direct(paths, &config.direct_provider, question).await,
     }
 }
 
-async fn answer_via_packchat(
-    paths: &Paths,
-    agent: &str,
-    question: &CladderQuestion,
-) -> String {
+async fn answer_via_packchat(paths: &Paths, agent: &str, question: &CladderQuestion) -> String {
     let rung_label = rung_to_hierarchy_label(&question.rung);
     let prompt = if let Some(ctx) = &question.context {
         format!(
@@ -418,7 +415,9 @@ fn rung_to_hierarchy_label(rung: &str) -> String {
     let rung = rung.trim().to_ascii_lowercase();
     let level = match rung.as_str() {
         "associational" | "rung1" | "1" | "correlation" => PearlHierarchyLevel::Associational,
-        "interventional" | "rung2" | "2" | "intervention" | "do" => PearlHierarchyLevel::Interventional,
+        "interventional" | "rung2" | "2" | "intervention" | "do" => {
+            PearlHierarchyLevel::Interventional
+        }
         "counterfactual" | "rung3" | "3" | "cf" => PearlHierarchyLevel::Counterfactual,
         _ => PearlHierarchyLevel::Associational,
     };
@@ -453,10 +452,7 @@ async fn load_questions(path: &Path) -> Result<Vec<CladderQuestion>> {
     Ok(questions)
 }
 
-fn resolve_dataset_path(
-    paths: &Paths,
-    overrides: &BTreeMap<String, String>,
-) -> Option<PathBuf> {
+fn resolve_dataset_path(paths: &Paths, overrides: &BTreeMap<String, String>) -> Option<PathBuf> {
     // 1. Explicit override.
     if let Some(p) = get_override(overrides, "CLADDER_DATASET") {
         let path = PathBuf::from(p);
@@ -475,11 +471,30 @@ fn resolve_dataset_path(
 
     // 3. Well-known fixture locations.
     let candidates = [
-        paths.artifacts.join("benchmarks").join("fixtures").join("cladder.jsonl"),
-        paths.artifacts.join("benchmarks").join("fixtures").join("cladder_eval.jsonl"),
-        paths.root.join("development_datasets").join("cladder.jsonl"),
-        paths.root.join("development_datasets").join("cladder_eval.jsonl"),
-        paths.root.join("factory").join("benchmarks").join("fixtures").join("cladder.jsonl"),
+        paths
+            .artifacts
+            .join("benchmarks")
+            .join("fixtures")
+            .join("cladder.jsonl"),
+        paths
+            .artifacts
+            .join("benchmarks")
+            .join("fixtures")
+            .join("cladder_eval.jsonl"),
+        paths
+            .root
+            .join("development_datasets")
+            .join("cladder.jsonl"),
+        paths
+            .root
+            .join("development_datasets")
+            .join("cladder_eval.jsonl"),
+        paths
+            .root
+            .join("factory")
+            .join("benchmarks")
+            .join("fixtures")
+            .join("cladder.jsonl"),
     ];
 
     for p in &candidates {
@@ -518,7 +533,10 @@ fn render_markdown(summary: &CladderSummary) -> String {
     for (rung, m) in &summary.metrics.by_rung {
         out.push_str(&format!(
             "| {} | {} | {} | {:.1}% |\n",
-            rung, m.total, m.correct, m.accuracy * 100.0
+            rung,
+            m.total,
+            m.correct,
+            m.accuracy * 100.0
         ));
     }
 

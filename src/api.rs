@@ -24,11 +24,11 @@ use crate::{
     coobie::CausalReport,
     memory::{MemoryRetrievalHit, MemoryStore},
     models::{
-        AgentExecution, BlackboardState, CoobieBriefing, ConsolidationCandidate,
+        AgentExecution, BlackboardState, ConsolidationCandidate, CoobieBriefing,
         EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent,
-        EvidenceMatchReport, EvidenceSource, HiddenScenarioSummary, InterventionPlan,
-        LessonRecord, PhaseAttributionRecord, PriorCauseSignal, RunCheckpointRecord, RunEvent,
-        RunRecord, Spec, ValidationSummary,
+        EvidenceMatchReport, EvidenceSource, HiddenScenarioSummary, InterventionPlan, LessonRecord,
+        PhaseAttributionRecord, PriorCauseSignal, RunCheckpointRecord, RunEvent, RunRecord, Spec,
+        ValidationSummary,
     },
     orchestrator::{AppContext, RunRequest},
     pidgin::{self, PidginTranslation},
@@ -1183,7 +1183,10 @@ async fn get_consolidation_candidates(
                 let total = candidates.len();
                 let pending = candidates.iter().filter(|c| c.status == "pending").count();
                 let kept = candidates.iter().filter(|c| c.status == "kept").count();
-                let discarded = candidates.iter().filter(|c| c.status == "discarded").count();
+                let discarded = candidates
+                    .iter()
+                    .filter(|c| c.status == "discarded")
+                    .count();
                 (
                     StatusCode::OK,
                     Json(CandidatesResponse {
@@ -1214,10 +1217,15 @@ async fn post_generate_candidates(
             Ok(new_candidates) => match app.list_consolidation_candidates(&id).await {
                 Ok(all_candidates) => {
                     let total = all_candidates.len();
-                    let pending = all_candidates.iter().filter(|c| c.status == "pending").count();
+                    let pending = all_candidates
+                        .iter()
+                        .filter(|c| c.status == "pending")
+                        .count();
                     let kept = all_candidates.iter().filter(|c| c.status == "kept").count();
-                    let discarded =
-                        all_candidates.iter().filter(|c| c.status == "discarded").count();
+                    let discarded = all_candidates
+                        .iter()
+                        .filter(|c| c.status == "discarded")
+                        .count();
                     (
                         StatusCode::OK,
                         Json(serde_json::json!({
@@ -1248,7 +1256,11 @@ async fn post_candidate_keep(
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => match app.review_consolidation_candidate(&cid, "kept").await {
-            Ok(_) => (StatusCode::OK, Json(serde_json::json!({"status": "kept", "candidate_id": cid}))).into_response(),
+            Ok(_) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"status": "kept", "candidate_id": cid})),
+            )
+                .into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -1263,7 +1275,11 @@ async fn post_candidate_discard(
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => match app.review_consolidation_candidate(&cid, "discarded").await {
-            Ok(_) => (StatusCode::OK, Json(serde_json::json!({"status": "discarded", "candidate_id": cid}))).into_response(),
+            Ok(_) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"status": "discarded", "candidate_id": cid})),
+            )
+                .into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -1279,7 +1295,11 @@ async fn post_candidate_edit(
 ) -> impl IntoResponse {
     match app.get_run(&id).await {
         Ok(Some(_)) => match app.edit_consolidation_candidate(&cid, body.content).await {
-            Ok(_) => (StatusCode::OK, Json(serde_json::json!({"status": "kept", "candidate_id": cid}))).into_response(),
+            Ok(_) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"status": "kept", "candidate_id": cid})),
+            )
+                .into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),

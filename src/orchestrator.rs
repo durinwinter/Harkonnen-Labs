@@ -21,7 +21,7 @@ use crate::{
     memory::{MemoryEntry, MemoryIngestOptions, MemoryIngestResult, MemoryProvenance, MemoryStore},
     models::{
         AgentExecution, BlackboardState, CausalEventEdge, CausalEventNode, CheckpointAnswerRecord,
-        CoobieBriefing, CoobieEvidenceCitation, ConsolidationCandidate, EpisodeCausalState,
+        ConsolidationCandidate, CoobieBriefing, CoobieEvidenceCitation, EpisodeCausalState,
         EpisodeRecord, EpisodeStateDiff, EvidenceAnnotation, EvidenceAnnotationBundle,
         EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
         EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
@@ -51,6 +51,8 @@ pub struct AppContext {
     pub event_tx: tokio::sync::broadcast::Sender<crate::models::LiveEvent>,
     /// PackChat persistence — thread and message store.
     pub chat: crate::chat::ChatStore,
+    #[allow(dead_code)]
+    pub operator_models: crate::operator_model::OperatorModelStore,
 }
 
 #[derive(Debug, Clone)]
@@ -673,6 +675,7 @@ impl AppContext {
             };
         let (event_tx, _) = tokio::sync::broadcast::channel(512);
         let chat = crate::chat::ChatStore::new(pool.clone());
+        let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
         Ok(Self {
             paths,
             pool,
@@ -682,6 +685,7 @@ impl AppContext {
             embedding_store,
             event_tx,
             chat,
+            operator_models,
         })
     }
 
@@ -10798,18 +10802,18 @@ Write the twin environment narrative and identify any simulation gaps against Co
 
         // Cross-phase links + blackboard update.
         let _ = self.populate_cross_phase_causal_links(run_id).await;
-        self.attach_lessons_to_blackboard(&run_dir, &promoted).await?;
+        self.attach_lessons_to_blackboard(&run_dir, &promoted)
+            .await?;
 
         Ok(promoted)
     }
 
     async fn candidate_exists(&self, candidate_id: &str) -> Result<bool> {
-        let row = sqlx::query(
-            "SELECT 1 FROM consolidation_candidates WHERE candidate_id = ?1 LIMIT 1",
-        )
-        .bind(candidate_id)
-        .fetch_optional(&self.pool)
-        .await?;
+        let row =
+            sqlx::query("SELECT 1 FROM consolidation_candidates WHERE candidate_id = ?1 LIMIT 1")
+                .bind(candidate_id)
+                .fetch_optional(&self.pool)
+                .await?;
         Ok(row.is_some())
     }
 

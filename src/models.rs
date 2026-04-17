@@ -908,3 +908,102 @@ pub struct RunCausalGraph {
     #[serde(default)]
     pub hypotheses: Vec<CausalHypothesis>,
 }
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelProfile {
+    pub profile_id: String,
+    pub scope: String,
+    #[serde(default)]
+    pub project_root: Option<String>,
+    pub display_name: String,
+    pub status: String,
+    pub current_version: i64,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelSession {
+    pub session_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub thread_id: Option<String>,
+    pub status: String,
+    #[serde(default)]
+    pub pending_layer: Option<String>,
+    #[serde(default)]
+    pub started_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+    pub updated_at: DateTime<Utc>,
+    #[serde(default)]
+    pub completed_at: Option<DateTime<Utc>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelLayerCheckpoint {
+    pub checkpoint_id: String,
+    pub session_id: String,
+    pub profile_id: String,
+    pub version: i64,
+    pub layer: String,
+    pub status: String,
+    pub summary_md: String,
+    pub raw_notes_json: serde_json::Value,
+    #[serde(default)]
+    pub approved_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub approved_at: Option<DateTime<Utc>>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelEntry {
+    pub entry_id: String,
+    pub profile_id: String,
+    pub version: i64,
+    pub layer: String,
+    pub entry_type: String,
+    pub title: String,
+    pub content: String,
+    pub details_json: serde_json::Value,
+    pub source_checkpoint_id: String,
+    pub status: String,
+    #[serde(default)]
+    pub superseded_by: Option<String>,
+    pub created_at: DateTime<Utc>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelExport {
+    pub export_id: String,
+    pub profile_id: String,
+    pub version: i64,
+    pub artifact_name: String,
+    pub content: String,
+    pub content_type: String,
+    pub created_at: DateTime<Utc>,
+}
+
+#[allow(dead_code)]
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct OperatorModelUpdateCandidate {
+    pub candidate_id: String,
+    pub profile_id: String,
+    #[serde(default)]
+    pub run_id: Option<String>,
+    #[serde(default)]
+    pub entry_id: Option<String>,
+    pub proposal_kind: String,
+    pub summary: String,
+    pub proposal_json: serde_json::Value,
+    pub status: String,
+    pub confidence: f64,
+    pub created_at: DateTime<Utc>,
+    #[serde(default)]
+    pub reviewed_at: Option<DateTime<Utc>>,
+}

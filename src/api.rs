@@ -8,7 +8,7 @@ use axum::{
     routing::{get, post},
     Json, Router,
 };
-use chrono::{DateTime, Utc};
+use chrono::{DateTime, Duration as ChronoDuration, Utc};
 use serde::{de::DeserializeOwned, Deserialize, Serialize};
 use std::collections::{HashMap, HashSet};
 use std::fs;
@@ -22,13 +22,15 @@ use tracing::info;
 use crate::{
     chat::{dispatch_message, ChatThread, ChatThreadKind, OpenThreadRequest, PostMessageRequest},
     coobie::CausalReport,
+    llm::{self, LlmRequest},
     memory::{MemoryRetrievalHit, MemoryStore},
     models::{
         AgentExecution, BlackboardState, ConsolidationCandidate, CoobieBriefing,
         EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent,
         EvidenceMatchReport, EvidenceSource, HiddenScenarioSummary, InterventionPlan, LessonRecord,
-        OperatorModelProfile, OperatorModelScope, OperatorModelSession, PhaseAttributionRecord,
-        PriorCauseSignal, RunCheckpointRecord, RunEvent, RunRecord, Spec, ValidationSummary,
+        MetricAttack, OperatorModelContext, OperatorModelProfile, OperatorModelScope,
+        OperatorModelSession, OptimizationProgram, PhaseAttributionRecord, PriorCauseSignal,
+        RunCheckpointRecord, RunEvent, RunRecord, Spec, ValidationSummary,
     },
     orchestrator::{AppContext, RunRequest},
     pidgin::{self, PidginTranslation},
@@ -267,6 +269,24 @@ pub struct Assignment {
     pub last_heartbeat_at: String,
     #[serde(default = "default_assignment_status")]
     pub status: String,
+    // ── ActionLease fields (Phase A3) ─────────────────────────────────────────
+    /// What kind of resource is claimed: "file", "workspace", "external", "agent"
+    #[serde(default = "default_resource_kind")]
+    pub resource_kind: String,
+    /// Seconds until Keeper auto-reaps this lease (0 = use global stale_after_seconds)
+    #[serde(default)]
+    pub ttl_secs: i64,
+    /// Constraints that must hold for any action against this resource.
+    /// Agents should call POST /api/coordination/check-lease before acting.
+    #[serde(default)]
+    pub guardrails: Vec<String>,
+    /// When this lease expires (computed from claimed_at + ttl_secs, empty if no TTL)
+    #[serde(default)]
+    pub expires_at: String,
+}
+
+fn default_resource_kind() -> String {
+    "file".to_string()
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
@@ -330,6 +350,32 @@ struct ClaimRequest {
     task: String,
     #[serde(default)]
     files: Vec<String>,
+    // ActionLease fields (Phase A3)
+    #[serde(default = "default_resource_kind")]
+    resource_kind: String,
+    /// 0 = use server-side stale_after_seconds
+    #[serde(default)]
+    ttl_secs: i64,
+    #[serde(default)]
+    guardrails: Vec<String>,
+}
+
+#[derive(Debug, Deserialize)]
+struct CheckLeaseRequest {
+    /// The agent that wants to act
+    agent: String,
+    /// The file or resource being acted upon
+    resource: String,
+    /// Short description of the action (for audit trail)
+    action: String,
+}
+
+#[derive(Debug, Serialize)]
+struct CheckLeaseResponse {
+    allowed: bool,
+    owner: Option<String>,
+    guardrail_violations: Vec<String>,
+    message: String,
 }
 
 #[derive(Debug, Deserialize)]
@@ -711,6 +757,11 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
         .route("/api/runs/:id/causal-report", get(get_causal_report))
         .route("/api/runs/:id/causal-events", get(get_run_causal_events))
+        .route("/api/runs/:id/cost", get(get_run_cost))
+        .route("/api/runs/:id/decisions", get(get_run_decisions))
+        .route("/api/runs/:id/traces", get(get_run_traces))
+        .route("/api/runs/:id/optimization-program", get(get_run_optimization_program))
+        .route("/api/runs/:id/metric-attacks", get(get_run_metric_attacks))
         .route(
             "/api/runs/:id/evidence-match-report",
             get(get_run_evidence_match_report),
@@ -755,6 +806,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
             get(get_coordination_policy_events),
         )
         .route("/api/coordination/claim", post(claim_task))
+        .route("/api/coordination/check-lease", post(check_lease))
         .route("/api/coordination/heartbeat", post(heartbeat_task))
         .route("/api/coordination/release", post(release_task))
         .layer(cors)
@@ -1646,6 +1698,72 @@ async fn get_run_causal_events(
             Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/runs/:id/cost` — aggregate token/latency cost for a run.
+async fn get_run_cost(Path(id): Path<String>, State(app): State<AppContext>) -> impl IntoResponse {
+    match app.get_run_cost_summary(&id).await {
+        Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/runs/:id/decisions` — decision log for a run.
+async fn get_run_decisions(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.list_run_decisions(&id).await {
+        Ok(decisions) => (StatusCode::OK, Json(decisions)).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/runs/:id/traces` — agent trace spine for a run.
+async fn get_run_traces(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.list_run_traces(&id).await {
+        Ok(traces) => (StatusCode::OK, Json(traces)).into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/runs/:id/optimization-program` — machine-readable success metric for a run.
+async fn get_run_optimization_program(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    let program_path = app
+        .paths
+        .workspaces
+        .join(&id)
+        .join("run")
+        .join("optimization_program.json");
+    match read_optional_json::<OptimizationProgram>(&program_path).await {
+        Ok(Some(program)) => (StatusCode::OK, Json(program)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "OptimizationProgram not yet generated").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/runs/:id/metric-attacks` — Sable's red-team attacks against the objective metric.
+async fn get_run_metric_attacks(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    let attacks_path = app
+        .paths
+        .workspaces
+        .join(&id)
+        .join("run")
+        .join("metric_attacks.json");
+    match read_optional_json::<Vec<MetricAttack>>(&attacks_path).await {
+        Ok(Some(attacks)) => (StatusCode::OK, Json(attacks)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Metric attacks not yet generated").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
 }
@@ -3506,6 +3624,13 @@ async fn claim_task(
     let files = req.files.clone();
     let claimed_at = now.to_rfc3339();
 
+    // Compute expires_at from TTL if provided.
+    let expires_at = if req.ttl_secs > 0 {
+        (now + ChronoDuration::seconds(req.ttl_secs)).to_rfc3339()
+    } else {
+        String::new()
+    };
+
     state.active.insert(
         agent.clone(),
         Assignment {
@@ -3515,6 +3640,10 @@ async fn claim_task(
             claimed_at: claimed_at.clone(),
             last_heartbeat_at: claimed_at,
             status: "active".to_string(),
+            resource_kind: req.resource_kind,
+            ttl_secs: req.ttl_secs,
+            guardrails: req.guardrails,
+            expires_at,
         },
     );
     state.updated_at = now.to_rfc3339();
@@ -3539,6 +3668,112 @@ async fn claim_task(
         Ok(()) => (StatusCode::OK, Json(state)).into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+/// `POST /api/coordination/check-lease` — verify an agent is allowed to act
+/// on a resource and that no guardrail violations exist.
+///
+/// Returns 200 with `allowed: true` when safe to proceed, or `allowed: false`
+/// with `guardrail_violations` describing what must be resolved first.
+async fn check_lease(
+    State(app): State<AppContext>,
+    Json(req): Json<CheckLeaseRequest>,
+) -> impl IntoResponse {
+    let state = match ensure_assignments_state(&app).await {
+        Ok(s) => s,
+        Err(e) => {
+            return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
+        }
+    };
+    let now = Utc::now();
+
+    // Find the assignment that owns this resource.
+    let owner_entry = state.active.iter().find(|(_, assignment)| {
+        assignment
+            .files
+            .iter()
+            .any(|f| req.resource.starts_with(f.as_str()) || f.starts_with(req.resource.as_str()))
+    });
+
+    let (owner, guardrails) = match owner_entry {
+        Some((owner, assignment)) => (Some(owner.clone()), assignment.guardrails.clone()),
+        None => (None, vec![]),
+    };
+
+    // Check TTL expiry: if the claim has an expires_at and it has passed, the
+    // resource is effectively unclaimed — allow access.
+    if let Some((_, assignment)) = owner_entry {
+        if !assignment.expires_at.is_empty() {
+            if let Ok(expires) = chrono::DateTime::parse_from_rfc3339(&assignment.expires_at) {
+                if expires.with_timezone(&Utc) < now {
+                    return (
+                        StatusCode::OK,
+                        Json(CheckLeaseResponse {
+                            allowed: true,
+                            owner: Some(assignment.agent.clone()),
+                            guardrail_violations: vec![],
+                            message: "Lease expired — resource is available.".to_string(),
+                        }),
+                    )
+                    .into_response();
+                }
+            }
+        }
+    }
+
+    // If owned by someone else and not expired, check guardrails.
+    if let Some(ref owner_name) = owner {
+        if owner_name != &req.agent {
+            let response = CheckLeaseResponse {
+                allowed: false,
+                owner: Some(owner_name.clone()),
+                guardrail_violations: vec![format!(
+                    "{} holds an active lease on {}",
+                    owner_name, req.resource
+                )],
+                message: format!(
+                    "Cannot perform '{}' on '{}': owned by {}",
+                    req.action, req.resource, owner_name
+                ),
+            };
+            return (StatusCode::OK, Json(response)).into_response();
+        }
+    }
+
+    // Resource is owned by the requesting agent (or unowned). Check guardrails.
+    // A guardrail starting with "require:" demands the action description contains
+    // the keyword after the colon. All others are advisory strings.
+    let mut violations: Vec<String> = Vec::new();
+    for g in &guardrails {
+        if let Some(keyword) = g.strip_prefix("require:") {
+            if !req.action.to_lowercase().contains(&keyword.to_lowercase()) {
+                violations.push(format!("Action must satisfy guardrail: {g}"));
+            }
+        }
+    }
+
+    let allowed = violations.is_empty();
+    let message = if allowed {
+        format!("Lease check passed for '{}' on '{}'", req.action, req.resource)
+    } else {
+        format!(
+            "{} guardrail violation(s) for '{}' on '{}'",
+            violations.len(),
+            req.action,
+            req.resource
+        )
+    };
+
+    (
+        StatusCode::OK,
+        Json(CheckLeaseResponse {
+            allowed,
+            owner,
+            guardrail_violations: violations,
+            message,
+        }),
+    )
+        .into_response()
 }
 
 async fn heartbeat_task(
@@ -3664,65 +3899,38 @@ async fn scout_draft(
         &uuid::Uuid::new_v4().to_string()[..8]
     );
 
-    // Build a structured spec from the intent text.
-    // Lines starting with verbs become acceptance_criteria; everything else is purpose.
-    let lines: Vec<&str> = intent
-        .lines()
-        .map(str::trim)
-        .filter(|l| !l.is_empty())
-        .collect();
-    let purpose = lines.first().copied().unwrap_or(&intent);
-
-    let criteria: Vec<String> = lines.iter().skip(1).map(|l| format!("  - {l}")).collect();
-
-    let criteria_block = if criteria.is_empty() {
-        "  - run completes without errors".to_string()
-    } else {
-        criteria.join("\n")
+    let operator_model_context = match best_effort_operator_model_root(&app, product_path.as_deref()) {
+        Some(root) => app
+            .load_effective_operator_model_context(Some(&root))
+            .await
+            .unwrap_or(None),
+        None => app.load_effective_operator_model_context(None).await.unwrap_or(None),
     };
 
-    let product_input = product_path
-        .as_ref()
-        .map(|path| format!("  - \"product directory: {path}\""))
-        .unwrap_or_else(|| format!("  - \"product directory: products/{product}/\""));
+    let spec = maybe_llm_draft_spec(
+        &app,
+        &spec_id,
+        &intent,
+        &product,
+        product_path.as_deref(),
+        operator_model_context.as_ref(),
+    )
+    .await
+    .unwrap_or_else(|| {
+        fallback_scout_draft_spec(
+            &spec_id,
+            &intent,
+            &product,
+            product_path.as_deref(),
+            operator_model_context.as_ref(),
+        )
+    });
 
-    let spec_yaml = format!(
-        r#"id: {spec_id}
-title: {title}
-purpose: >
-  {purpose}
-scope:
-  - {product}
-constraints:
-  - remain within the {product} workspace boundary
-  - do not modify files outside the target product
-inputs:
-{product_input}
-outputs:
-  - implementation artifacts in the run workspace
-  - validation.json with pass/fail verdict
-acceptance_criteria:
-{criteria_block}
-forbidden_behaviors:
-  - deleting unrelated files
-  - reaching outside the workspace boundary
-rollback_requirements:
-  - retain prior artifacts unless explicitly cleaned up
-dependencies: []
-performance_expectations:
-  - commands should complete in a reasonable time
-security_expectations:
-  - secrets must not appear in logs or artifact bundles
-"#,
-        spec_id = spec_id,
-        title = title_case(&product),
-        purpose = purpose,
-        product = product,
-        product_input = product_input,
-        criteria_block = criteria_block,
-    );
+    let spec_yaml = match serde_yaml::to_string(&spec) {
+        Ok(text) => text,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
 
-    // Save to factory/specs/drafts/
     let drafts_dir = app.paths.factory.join("specs").join("drafts");
     if let Err(e) = tokio::fs::create_dir_all(&drafts_dir).await {
         return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response();
@@ -3745,6 +3953,156 @@ security_expectations:
         }),
     )
         .into_response()
+}
+
+fn best_effort_operator_model_root(app: &AppContext, raw: Option<&str>) -> Option<PathBuf> {
+    let raw = raw?.trim();
+    if raw.is_empty() {
+        return None;
+    }
+    let candidate = PathBuf::from(raw);
+    let absolute = if candidate.is_absolute() {
+        candidate
+    } else {
+        app.paths.root.join(candidate)
+    };
+    absolute.canonicalize().ok().filter(|path| path.is_dir())
+}
+
+async fn maybe_llm_draft_spec(
+    app: &AppContext,
+    spec_id: &str,
+    intent: &str,
+    product: &str,
+    product_path: Option<&str>,
+    operator_model_context: Option<&OperatorModelContext>,
+) -> Option<Spec> {
+    let provider = llm::build_provider("scout", "claude", &app.paths.setup)?;
+    let operator_context_json = operator_model_context
+        .map(|context| serde_json::to_string_pretty(context).unwrap_or_default())
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "null".to_string());
+    let product_path_text = product_path.unwrap_or("products/<product>");
+    let request = LlmRequest::simple(
+        "You are Scout, drafting a Harkonnen factory spec from operator intent. Respond with valid YAML only, no markdown fences. Use this schema exactly: id, title, purpose, scope, constraints, inputs, outputs, acceptance_criteria, forbidden_behaviors, rollback_requirements, dependencies, performance_expectations, security_expectations. Make the draft concrete, bounded, and operational. If operator-model context is present, treat its guardrails, escalation rules, dependencies, and rhythms as first-class commissioning constraints.",
+        format!(
+            "SPEC ID: {spec_id}\nPRODUCT: {product}\nPRODUCT PATH: {product_path_text}\n\nINTENT:\n{intent}\n\nOPERATOR MODEL CONTEXT:\n```json\n{operator_context_json}\n```\n\nReturn YAML only.",
+        ),
+    );
+    let response = provider.complete(request).await.ok()?;
+    let body = response.content.trim();
+    let stripped = body
+        .trim_start_matches("```yaml")
+        .trim_start_matches("```")
+        .trim_end_matches("```")
+        .trim();
+    let mut parsed = serde_yaml::from_str::<Spec>(stripped).ok()?;
+    parsed.id = spec_id.to_string();
+    if parsed.title.trim().is_empty() {
+        parsed.title = title_case(product);
+    }
+    if parsed.scope.is_empty() {
+        parsed.scope.push(product.to_string());
+    }
+    Some(parsed)
+}
+
+fn fallback_scout_draft_spec(
+    spec_id: &str,
+    intent: &str,
+    product: &str,
+    product_path: Option<&str>,
+    operator_model_context: Option<&OperatorModelContext>,
+) -> Spec {
+    let lines: Vec<&str> = intent
+        .lines()
+        .map(str::trim)
+        .filter(|line| !line.is_empty())
+        .collect();
+    let purpose = lines.first().copied().unwrap_or(intent).to_string();
+    let mut acceptance_criteria = lines.iter().skip(1).map(|line| (*line).to_string()).collect::<Vec<_>>();
+    if acceptance_criteria.is_empty() {
+        acceptance_criteria.push("run completes without errors".to_string());
+    }
+
+    let mut constraints = vec![
+        format!("remain within the {product} workspace boundary"),
+        "do not modify files outside the target product".to_string(),
+    ];
+    let mut dependencies = Vec::new();
+    let mut security_expectations = vec![
+        "secrets must not appear in logs or artifact bundles".to_string(),
+    ];
+
+    if let Some(context) = operator_model_context {
+        for item in context.guardrails.iter().take(3) {
+            push_unique(&mut constraints, format!("operator model guardrail: {item}"));
+        }
+        for item in context.dependencies.iter().take(3) {
+            push_unique(&mut dependencies, format!("operator dependency: {item}"));
+        }
+        if !context.escalation_rules.is_empty() {
+            push_unique(
+                &mut acceptance_criteria,
+                "approval and escalation boundaries remain explicit for any action outside the operator model".to_string(),
+            );
+        }
+        if context
+            .guardrails
+            .iter()
+            .any(|item| contains_security_signal(item))
+        {
+            push_unique(
+                &mut security_expectations,
+                "operator-defined approval, boundary, and credential handling rules are preserved".to_string(),
+            );
+        }
+    }
+
+    Spec {
+        id: spec_id.to_string(),
+        title: title_case(product),
+        purpose,
+        scope: vec![product.to_string()],
+        constraints,
+        inputs: vec![format!(
+            "product directory: {}",
+            product_path.unwrap_or(&format!("products/{product}/"))
+        )],
+        outputs: vec![
+            "implementation artifacts in the run workspace".to_string(),
+            "validation.json with pass/fail verdict".to_string(),
+        ],
+        acceptance_criteria,
+        forbidden_behaviors: vec![
+            "deleting unrelated files".to_string(),
+            "reaching outside the workspace boundary".to_string(),
+        ],
+        rollback_requirements: vec![
+            "retain prior artifacts unless explicitly cleaned up".to_string(),
+        ],
+        dependencies,
+        performance_expectations: vec!["commands should complete in a reasonable time".to_string()],
+        security_expectations,
+        project_components: Vec::new(),
+        scenario_blueprint: None,
+        worker_harness: None,
+        test_commands: Vec::new(),
+    }
+}
+
+fn push_unique(items: &mut Vec<String>, value: String) {
+    if items.iter().any(|existing| existing == &value) {
+        return;
+    }
+    items.push(value);
+}
+
+fn contains_security_signal(value: &str) -> bool {
+    let lower = value.to_ascii_lowercase();
+    ["secret", "credential", "auth", "permission", "security", "boundary"]
+        .iter()
+        .any(|needle| lower.contains(needle))
 }
 
 fn slugify(s: &str) -> String {
@@ -4622,7 +4980,7 @@ async fn post_start_operator_model_session(
 
     if !reused_existing_session {
         let kickoff = format!(
-            "I'm ready to build the operator model for `{}`. We'll treat this as a project-scoped profile and stamp the repo under `.harkonnen/operator-model/`. Let's start with operating rhythms: what recurring work, triggers, or timing patterns shape how work actually moves in this repo?",
+            "I'm ready to build the operator model for `{}`. We'll treat this as a project-scoped profile and stamp the repo under `.harkonnen/operator-model/`. Let's start with operating rhythms: what recurring work, triggers, or timing patterns shape how work actually moves in this repo? Optional question for the initial questionnaire: do you want a personal supervisor card for the operator, and if so which reference image should travel with the markdown template at `/actioncards/user-supervisor-card-template.md`? If not, Jerry remains the default supervisor representation in the system.",
             project_root_text
         );
         if let Err(e) = app

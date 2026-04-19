@@ -26,9 +26,10 @@ use crate::{
         EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
         EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
         HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord, LiveEvent,
-        PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal, ProjectResumeRisk,
-        RunCausalGraph, RunCheckpointRecord, RunEvent, RunRecord, ScenarioResult, Spec,
-        TwinEnvironment, TwinService, ValidationSummary, WorkerHarnessConfig,
+        OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal,
+        ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent, RunRecord,
+        ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary,
+        WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -1757,6 +1758,7 @@ impl AppContext {
             .await?;
         let briefing = self
             .build_coobie_briefing(
+                run_id,
                 spec_obj,
                 target_source,
                 &query_terms,
@@ -1890,6 +1892,16 @@ impl AppContext {
         self.write_json_file(&run_dir.join("intent.json"), &intent)
             .await?;
         push_unique(&mut blackboard.artifact_refs, "intent.json");
+        let optimization_program = self
+            .scout_derive_optimization_program(run_id, spec_obj, target_source, &briefing, &run_dir)
+            .await;
+        push_unique(&mut blackboard.artifact_refs, "optimization_program.json");
+        let metric_attacks = self
+            .sable_generate_metric_attacks(run_id, spec_obj, &optimization_program, &run_dir)
+            .await;
+        if !metric_attacks.is_empty() {
+            push_unique(&mut blackboard.artifact_refs, "metric_attacks.json");
+        }
         self.write_agent_execution(
             &profiles,
             "scout",
@@ -2132,6 +2144,7 @@ impl AppContext {
                 target_source,
                 &briefing,
                 &implementation_plan,
+                Some(&optimization_program),
                 log_path,
                 &implementation_episode,
             )
@@ -2141,6 +2154,34 @@ impl AppContext {
                 self.write_json_file(&run_dir.join("coobie_critique.json"), &critique)
                     .await?;
                 push_unique(&mut blackboard.artifact_refs, "coobie_critique.json");
+                // A2: record decision — did the plan pass or get flagged?
+                {
+                    let chose = if critique.passed {
+                        "proceed_with_plan"
+                    } else {
+                        "proceed_with_plan_flagged"
+                    };
+                    let alternatives = vec!["halt_for_operator_review".to_string()];
+                    let justification = if critique.blocking_concerns.is_empty() {
+                        "Plan passed Coobie critique with no blocking concerns.".to_string()
+                    } else {
+                        format!(
+                            "Blocking concerns found ({}): {}. Proceeding but flagged on blackboard.",
+                            critique.blocking_concerns.len(),
+                            critique.blocking_concerns.join("; ")
+                        )
+                    };
+                    self.record_decision(
+                        run_id,
+                        "coobie",
+                        "planning",
+                        "plan_critique",
+                        chose,
+                        &alternatives,
+                        &justification,
+                    )
+                    .await;
+                }
                 if !critique.passed {
                     push_unique(&mut blackboard.open_blockers, "coobie_plan_critique_failed");
                     tracing::warn!(
@@ -3053,6 +3094,19 @@ next_actions={}",
                             format!("# Sable Generated Scenario Rationale\n\n{rationale}"),
                         )
                         .await;
+
+                        // Record trace for Sable's scenario generation step.
+                        let sable_actions: Vec<String> = summary.results.iter()
+                            .map(|r| format!("scenario '{}': {}", r.scenario_id, if r.passed { "pass" } else { "fail" }))
+                            .collect();
+                        self.record_agent_trace(
+                            run_id, "sable", "hidden_scenarios",
+                            &trace_input_summary(&spec_obj.title),
+                            &[],
+                            &sable_actions,
+                            if summary.passed { "success" } else { "failure" },
+                            None,
+                        ).await;
 
                         // ── Feed Sable's reasoning into project memory ────────
                         if let Ok(proj_store) = self.project_memory_store(&target_source).await {
@@ -5493,6 +5547,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
 
     async fn build_coobie_briefing(
         &self,
+        run_id: &str,
         spec_obj: &Spec,
         target_source: &TargetSourceMetadata,
         query_terms: &[String],
@@ -5617,6 +5672,19 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             &mut open_questions,
         );
 
+        let operator_model_context = self
+            .load_effective_operator_model_context(Some(Path::new(&target_source.source_path)))
+            .await
+            .unwrap_or(None);
+        if let Some(context) = operator_model_context.as_ref() {
+            apply_operator_model_preflight_guidance(
+                context,
+                &mut required_checks,
+                &mut recommended_guardrails,
+                &mut open_questions,
+            );
+        }
+
         // ── Phase 3: causal priors influence preflight ────────────────────────
         // Query this spec's causal history and inject concrete, cause-specific
         // checks and guardrails — not generic heuristics.
@@ -5697,6 +5765,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             application_risks,
             environment_risks,
             regulatory_considerations,
+            operator_model_context,
             recommended_guardrails,
             required_checks,
             open_questions,
@@ -5704,7 +5773,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             generated_at: Utc::now(),
         };
         briefing.coobie_response = self
-            .coobie_llm_briefing_response(spec_obj, target_source, &briefing)
+            .coobie_llm_briefing_response(run_id, spec_obj, target_source, &briefing)
             .await
             .unwrap_or_else(|| crate::coobie::render_coobie_briefing_response(&briefing));
         Ok(briefing)
@@ -5712,6 +5781,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
 
     async fn coobie_llm_briefing_response(
         &self,
+        run_id: &str,
         spec_obj: &Spec,
         target_source: &TargetSourceMetadata,
         briefing: &CoobieBriefing,
@@ -5766,7 +5836,22 @@ Render Coobie's preflight markdown for the pack. Incorporate repo-local guidance
         );
 
         match provider.complete(req).await {
-            Ok(resp) => Some(resp.content),
+            Ok(resp) => {
+                let (reasoning, body) = extract_reasoning(&resp.content);
+                let actions = vec!["render coobie preflight briefing markdown".to_string()];
+                self.record_agent_trace(
+                    run_id, "coobie", "briefing",
+                    &trace_input_summary(&spec_obj.title),
+                    &reasoning, &actions,
+                    "success",
+                    resp.usage.as_ref(),
+                ).await;
+                if let Some(usage) = &resp.usage {
+                    self.record_llm_cost_event(run_id, "coobie", "briefing",
+                        "claude", "", usage).await;
+                }
+                Some(body.to_string())
+            }
             Err(error) => {
                 tracing::warn!(
                     "Coobie LLM call failed ({}), using procedural briefing",
@@ -6032,12 +6117,24 @@ Produce the intent package JSON and incorporate Coobie guardrails, required chec
 
             match provider.complete(req).await {
                 Ok(resp) => {
-                    if let Ok(parsed) = serde_json::from_str::<IntentPackage>(&resp.content.trim())
+                    let (reasoning, body) = extract_reasoning(&resp.content);
+                    let actions = vec![format!("emit intent_package for spec '{}'", spec_obj.id)];
+                    self.record_agent_trace(
+                        &spec_obj.id, "scout", "intake",
+                        &trace_input_summary(&spec_obj.title),
+                        &reasoning, &actions,
+                        "success",
+                        resp.usage.as_ref(),
+                    ).await;
+                    if let Some(usage) = &resp.usage {
+                        self.record_llm_cost_event(&spec_obj.id, "scout", "intake",
+                            "claude", "", usage).await;
+                    }
+                    if let Ok(parsed) = serde_json::from_str::<IntentPackage>(body.trim())
                     {
                         return Ok(parsed);
                     }
-                    let stripped = resp
-                        .content
+                    let stripped = body
                         .trim()
                         .trim_start_matches("```json")
                         .trim_start_matches("```")
@@ -6083,6 +6180,250 @@ Produce the intent package JSON and incorporate Coobie guardrails, required chec
                 "Package evidence for human review".into(),
             ],
         })
+    }
+
+    // ── Phase C: OptimizationProgram ─────────────────────────────────────────
+
+    /// Scout: derive a machine-readable `OptimizationProgram` for this run.
+    ///
+    /// Uses the spec's acceptance criteria and Coobie briefing to generate a
+    /// concrete objective metric, editable surface, constraints, and evaluation
+    /// plan. Falls back to a stub when no LLM is available.
+    ///
+    /// Returns the program and writes `optimization_program.json` to the run dir.
+    async fn scout_derive_optimization_program(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+        run_dir: &Path,
+    ) -> crate::models::OptimizationProgram {
+        use crate::models::OptimizationProgram;
+
+        let mut program = OptimizationProgram {
+            run_id: run_id.to_string(),
+            spec_id: spec_obj.id.clone(),
+            objective_metric: "acceptance_criteria_pass_rate".to_string(),
+            objective_description: format!(
+                "All acceptance criteria for spec '{}' must pass.",
+                spec_obj.title
+            ),
+            editable_surface: spec_obj
+                .scenario_blueprint
+                .as_ref()
+                .map(|bp| bp.code_under_test.clone())
+                .unwrap_or_else(|| spec_obj.scope.clone()),
+            constraints: briefing
+                .recommended_guardrails
+                .iter()
+                .take(5)
+                .cloned()
+                .collect(),
+            evaluation_plan: spec_obj
+                .acceptance_criteria
+                .iter()
+                .map(|c| format!("Verify: {c}"))
+                .collect(),
+            time_budget_secs: None,
+            generated_at: Utc::now(),
+        };
+
+        if let Some(provider) = llm::build_provider("scout", "default", &self.paths.setup) {
+            let spec_yaml =
+                serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
+            let guardrails_block = if briefing.recommended_guardrails.is_empty() {
+                "none".to_string()
+            } else {
+                briefing
+                    .recommended_guardrails
+                    .iter()
+                    .take(6)
+                    .map(|g| format!("- {g}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let req = LlmRequest::simple(
+                "You are Scout, a spec analyst for a software factory. \
+                 Given a spec and prior-failure guardrails, produce an OptimizationProgram \
+                 as a single raw JSON object — no prose, no markdown fences. \
+                 Schema: {\"objective_metric\": string, \"objective_description\": string, \
+                 \"editable_surface\": [string], \"constraints\": [string], \
+                 \"evaluation_plan\": [string], \"time_budget_secs\": number|null}. \
+                 objective_metric must be a short camelCase or snake_case identifier. \
+                 evaluation_plan must be a list of concrete verification steps.",
+                format!(
+                    "SPEC:\n```yaml\n{spec_yaml}```\n\n\
+                     GUARDRAILS FROM PRIOR FAILURES:\n{guardrails_block}\n\n\
+                     Produce the OptimizationProgram JSON for this spec."
+                ),
+            );
+            if let Ok(resp) = provider.complete(req).await {
+                let (reasoning, body) = extract_reasoning(&resp.content);
+                let actions = vec![format!("emit optimization_program for spec '{}'", spec_obj.id)];
+                self.record_agent_trace(
+                    run_id, "scout", "optimization_program",
+                    &trace_input_summary(&spec_obj.title),
+                    &reasoning, &actions,
+                    "success",
+                    resp.usage.as_ref(),
+                ).await;
+                if let Some(usage) = &resp.usage {
+                    self.record_llm_cost_event(run_id, "scout", "optimization_program",
+                        "claude", "", usage).await;
+                }
+                let stripped = body
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```")
+                    .trim();
+                #[derive(Deserialize, Default)]
+                struct RawProgram {
+                    #[serde(default)]
+                    objective_metric: String,
+                    #[serde(default)]
+                    objective_description: String,
+                    #[serde(default)]
+                    editable_surface: Vec<String>,
+                    #[serde(default)]
+                    constraints: Vec<String>,
+                    #[serde(default)]
+                    evaluation_plan: Vec<String>,
+                    #[serde(default)]
+                    time_budget_secs: Option<u64>,
+                }
+                if let Ok(raw) = serde_json::from_str::<RawProgram>(stripped) {
+                    if !raw.objective_metric.is_empty() {
+                        program.objective_metric = raw.objective_metric;
+                        program.objective_description = raw.objective_description;
+                        if !raw.editable_surface.is_empty() {
+                            program.editable_surface = raw.editable_surface;
+                        }
+                        if !raw.constraints.is_empty() {
+                            program.constraints = raw.constraints;
+                        }
+                        if !raw.evaluation_plan.is_empty() {
+                            program.evaluation_plan = raw.evaluation_plan;
+                        }
+                        program.time_budget_secs = raw.time_budget_secs;
+                    }
+                }
+            }
+        }
+
+        let _ = self
+            .write_json_file(&run_dir.join("optimization_program.json"), &program)
+            .await;
+        program
+    }
+
+    // ── Phase D: Adversarial Sable — MetricAttack ─────────────────────────────
+
+    /// Sable: generate red-team attacks against the run's stated objective metric.
+    ///
+    /// Called after `scout_derive_optimization_program` when an `OptimizationProgram`
+    /// is present. Returns a list of `MetricAttack` objects and writes
+    /// `metric_attacks.json` to the run dir.
+    async fn sable_generate_metric_attacks(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        program: &crate::models::OptimizationProgram,
+        run_dir: &Path,
+    ) -> Vec<crate::models::MetricAttack> {
+        use crate::models::MetricAttack;
+
+        let now = Utc::now();
+        let mut attacks: Vec<MetricAttack> = Vec::new();
+
+        if let Some(provider) = llm::build_provider("sable", "claude-opus", &self.paths.setup) {
+            let eval_plan = if program.evaluation_plan.is_empty() {
+                "none specified".to_string()
+            } else {
+                program
+                    .evaluation_plan
+                    .iter()
+                    .map(|s| format!("- {s}"))
+                    .collect::<Vec<_>>()
+                    .join("\n")
+            };
+            let req = LlmRequest::simple(
+                "You are Sable, an adversarial evaluator for a software factory. \
+                 Given an objective metric and evaluation plan, generate 2-3 concrete ways \
+                 an implementation could game or cheat the metric without actually satisfying \
+                 the spec's intent. \
+                 Respond with a single raw JSON array of attack objects — no prose, no fences. \
+                 Each object: {\"exploit_description\": string, \
+                 \"detection_signals\": [string], \"mitigations\": [string]}. \
+                 Be specific. Focus on shallow implementations, cached outputs, hardcoded \
+                 values, and measurement artifacts.",
+                format!(
+                    "SPEC: {} ({})\n\n\
+                     OBJECTIVE METRIC: {}\n\
+                     OBJECTIVE DESCRIPTION: {}\n\n\
+                     EVALUATION PLAN:\n{eval_plan}\n\n\
+                     Generate attacks against this metric.",
+                    spec_obj.title,
+                    spec_obj.id,
+                    program.objective_metric,
+                    program.objective_description,
+                ),
+            );
+            if let Ok(resp) = provider.complete(req).await {
+                let (reasoning, body) = extract_reasoning(&resp.content);
+                let actions = vec![format!(
+                    "generate metric attacks for objective '{}'",
+                    program.objective_metric
+                )];
+                self.record_agent_trace(
+                    run_id, "sable", "metric_attacks",
+                    &trace_input_summary(&format!("{} metric attack generation", spec_obj.id)),
+                    &reasoning, &actions,
+                    "success",
+                    resp.usage.as_ref(),
+                ).await;
+                if let Some(usage) = &resp.usage {
+                    self.record_llm_cost_event(run_id, "sable", "metric_attacks",
+                        "claude", "", usage).await;
+                }
+                let stripped = body
+                    .trim()
+                    .trim_start_matches("```json")
+                    .trim_start_matches("```")
+                    .trim_end_matches("```")
+                    .trim();
+                #[derive(Deserialize, Default)]
+                struct RawAttack {
+                    #[serde(default)]
+                    exploit_description: String,
+                    #[serde(default)]
+                    detection_signals: Vec<String>,
+                    #[serde(default)]
+                    mitigations: Vec<String>,
+                }
+                if let Ok(raw_attacks) = serde_json::from_str::<Vec<RawAttack>>(stripped) {
+                    for (i, raw) in raw_attacks.into_iter().enumerate() {
+                        if !raw.exploit_description.is_empty() {
+                            attacks.push(MetricAttack {
+                                attack_id: format!("{run_id}-attack-{i}"),
+                                run_id: run_id.to_string(),
+                                exploit_description: raw.exploit_description,
+                                detection_signals: raw.detection_signals,
+                                mitigations: raw.mitigations,
+                                status: "not_detected".to_string(),
+                                generated_at: now,
+                            });
+                        }
+                    }
+                }
+            }
+        }
+
+        let _ = self
+            .write_json_file(&run_dir.join("metric_attacks.json"), &attacks)
+            .await;
+        attacks
     }
 
     /// Mason: build an implementation plan, using an LLM when available.
@@ -6146,7 +6487,22 @@ Produce the implementation plan markdown. Treat guardrails and required checks a
             );
 
             match provider.complete(req).await {
-                Ok(resp) => return resp.content,
+                Ok(resp) => {
+                    let (reasoning, body) = extract_reasoning(&resp.content);
+                    let actions = vec![format!("produce implementation plan for spec '{}'", spec_obj.id)];
+                    self.record_agent_trace(
+                        &spec_obj.id, "mason", "plan",
+                        &trace_input_summary(&spec_obj.title),
+                        &reasoning, &actions,
+                        "success",
+                        resp.usage.as_ref(),
+                    ).await;
+                    if let Some(usage) = &resp.usage {
+                        self.record_llm_cost_event(&spec_obj.id, "mason", "plan",
+                            "gemini", "", usage).await;
+                    }
+                    return body.to_string();
+                }
                 Err(e) => tracing::warn!("Mason LLM call failed ({}), using stub", e),
             }
         }
@@ -6351,7 +6707,21 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
         let raw_response_path = run_dir.join("mason_raw_response.txt");
         let _ = tokio::fs::write(&raw_response_path, &response.content).await;
 
-        let proposal = match parse_mason_edit_proposal(&response.content) {
+        let (reasoning, edit_body) = extract_reasoning(&response.content);
+        let edit_actions = vec![format!("generate file edits for spec '{}'", spec_obj.id)];
+        self.record_agent_trace(
+            run_id, "mason", "edits",
+            &trace_input_summary(&spec_obj.title),
+            &reasoning, &edit_actions,
+            "success",
+            response.usage.as_ref(),
+        ).await;
+        if let Some(usage) = &response.usage {
+            self.record_llm_cost_event(run_id, "mason", "edits",
+                "gemini", "", usage).await;
+        }
+
+        let proposal = match parse_mason_edit_proposal(edit_body) {
             Ok(proposal) => proposal,
             Err(error) => {
                 let preview: String = response.content.chars().take(500).collect();
@@ -8276,6 +8646,7 @@ Produce the validation analysis and note any checks Coobie asked for that are st
         _target_source: &TargetSourceMetadata,
         briefing: &CoobieBriefing,
         implementation_plan: &str,
+        optimization_program: Option<&crate::models::OptimizationProgram>,
         log_path: &Path,
         episode_id: &str,
     ) -> Result<CoobieCritiqueResult> {
@@ -8286,6 +8657,24 @@ Produce the validation analysis and note any checks Coobie asked for that are st
         let mut dead_end_matches: Vec<String> = Vec::new();
         let mut advisory_concerns: Vec<String> = Vec::new();
         let mut addressed_guardrails: Vec<String> = Vec::new();
+
+        // Phase C: check whether the plan addresses the stated objective metric.
+        if let Some(program) = optimization_program {
+            let metric_lower = program.objective_metric.to_lowercase();
+            let metric_terms: Vec<&str> = metric_lower
+                .split(|c: char| c == '_' || c == '-' || c.is_whitespace())
+                .filter(|w| w.len() >= 3)
+                .collect();
+            let metric_addressed = metric_terms
+                .iter()
+                .any(|term| plan_lower.contains(term));
+            if !metric_addressed && !program.objective_metric.is_empty() {
+                advisory_concerns.push(format!(
+                    "Plan does not appear to address the stated objective metric '{}': {}",
+                    program.objective_metric, program.objective_description
+                ));
+            }
+        }
 
         // Load dead-end entries for this spec and check whether the plan's text
         // overlaps significantly with a known failure constraint.
@@ -8409,7 +8798,20 @@ Produce the validation analysis and note any checks Coobie asked for that are st
                         #[serde(default)]
                         addressed_guardrails: Vec<String>,
                     }
-                    let stripped = strip_json_fences(&resp.content);
+                    let (critique_reasoning, critique_body) = extract_reasoning(&resp.content);
+                    let critique_actions = vec![format!("critique implementation plan for spec '{}'", spec_obj.id)];
+                    self.record_agent_trace(
+                        run_id, "coobie", "critique",
+                        &trace_input_summary(&format!("{} plan critique", spec_obj.id)),
+                        &critique_reasoning, &critique_actions,
+                        "success",
+                        resp.usage.as_ref(),
+                    ).await;
+                    if let Some(usage) = &resp.usage {
+                        self.record_llm_cost_event(run_id, "coobie", "critique",
+                            "claude", "", usage).await;
+                    }
+                    let stripped = strip_json_fences(critique_body);
                     if let Ok(llm) = serde_json::from_str::<LlmCritique>(stripped.trim()) {
                         // Merge LLM findings with rule-based — deduplicate.
                         for c in llm.blocking_concerns {
@@ -8793,6 +9195,108 @@ Write the twin environment narrative and identify any simulation gaps against Co
             source_path: canonical.display().to_string(),
             git,
         })
+    }
+
+
+    pub async fn load_effective_operator_model_context(
+        &self,
+        project_root: Option<&Path>,
+    ) -> Result<Option<OperatorModelContext>> {
+        let profile = match project_root {
+            Some(root) => self.operator_models.resolve_effective_profile(root).await?,
+            None => self.operator_models.find_active_global_profile().await?,
+        };
+        let Some(profile) = profile else {
+            return Ok(None);
+        };
+
+        let session = self
+            .operator_models
+            .find_active_session_for_profile(&profile.profile_id)
+            .await?;
+        let source_thread_id = session.as_ref().and_then(|value| value.thread_id.clone());
+        let messages = match source_thread_id.as_deref() {
+            Some(thread_id) => self.chat.list_messages(thread_id).await.unwrap_or_default(),
+            None => Vec::new(),
+        };
+        let transcript_excerpt = build_operator_model_transcript_excerpt(&messages, 12);
+        let mut context = fallback_operator_model_context(
+            &profile,
+            source_thread_id.clone(),
+            transcript_excerpt.clone(),
+        );
+
+        if !transcript_excerpt.is_empty() {
+            if let Some(provider) = llm::build_provider("coobie", "default", &self.paths.setup) {
+                #[derive(Debug, Deserialize, Default)]
+                struct RawOperatorModelContext {
+                    #[serde(default)]
+                    summary: String,
+                    #[serde(default)]
+                    operating_rhythms: Vec<String>,
+                    #[serde(default)]
+                    guardrails: Vec<String>,
+                    #[serde(default)]
+                    escalation_rules: Vec<String>,
+                    #[serde(default)]
+                    dependencies: Vec<String>,
+                    #[serde(default)]
+                    open_questions: Vec<String>,
+                }
+
+                let transcript_block = transcript_excerpt
+                    .iter()
+                    .map(|line| format!("- {line}"))
+                    .collect::<Vec<_>>()
+                    .join("\n");
+                let request = LlmRequest::simple(
+                    "You are Coobie, summarizing an operator-model interview for Harkonnen Labs. Return one raw JSON object only with keys: summary, operating_rhythms, guardrails, escalation_rules, dependencies, open_questions. Keep every item concrete, reusable, and short. Prefer durable operating logic over biography.",
+                    format!(
+                        "PROFILE:
+- scope: {}
+- display_name: {}
+- project_root: {}
+
+TRANSCRIPT EXCERPT:
+{}
+
+Return JSON only.",
+                        profile.scope.as_str(),
+                        profile.display_name,
+                        profile
+                            .project_root
+                            .clone()
+                            .unwrap_or_else(|| "global".to_string()),
+                        transcript_block,
+                    ),
+                );
+                if let Ok(resp) = provider.complete(request).await {
+                    let (_, body) = extract_reasoning(&resp.content);
+                    let stripped = body
+                        .trim()
+                        .trim_start_matches("```json")
+                        .trim_start_matches("```")
+                        .trim_end_matches("```")
+                        .trim();
+                    if let Ok(raw) = serde_json::from_str::<RawOperatorModelContext>(stripped) {
+                        if !raw.summary.trim().is_empty() {
+                            context.summary = raw.summary.trim().to_string();
+                        }
+                        extend_unique(&mut context.operating_rhythms, raw.operating_rhythms, 5);
+                        extend_unique(&mut context.guardrails, raw.guardrails, 6);
+                        extend_unique(&mut context.escalation_rules, raw.escalation_rules, 5);
+                        extend_unique(&mut context.dependencies, raw.dependencies, 5);
+                        extend_unique(&mut context.open_questions, raw.open_questions, 5);
+                    }
+                }
+            }
+        }
+
+        if context.summary.trim().is_empty() {
+            context.summary = fallback_operator_model_summary(&context);
+        }
+
+        Ok(Some(context))
     }
 
     async fn project_evidence_bundle_path(
@@ -9246,6 +9750,274 @@ Write the twin environment narrative and identify any simulation gaps against Co
             .event_tx
             .send(crate::models::LiveEvent::RunEvent(live.clone()));
         Ok(live)
+    }
+
+    // ── A1: LLM cost recording ────────────────────────────────────────────────
+
+    /// Record a single LLM call's token and latency usage.
+    /// Fire-and-forget: errors are logged but never propagate to the caller.
+    async fn record_llm_cost_event(
+        &self,
+        run_id: &str,
+        agent: &str,
+        phase: &str,
+        provider: &str,
+        model: &str,
+        usage: &crate::llm::LlmUsage,
+    ) {
+        let event_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        if let Err(e) = sqlx::query(
+            r#"
+            INSERT INTO run_cost_events
+                (event_id, run_id, agent, phase, provider, model, input_tokens, output_tokens, latency_ms, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10)
+            "#,
+        )
+        .bind(&event_id)
+        .bind(run_id)
+        .bind(agent)
+        .bind(phase)
+        .bind(provider)
+        .bind(model)
+        .bind(usage.input_tokens)
+        .bind(usage.output_tokens)
+        .bind(usage.latency_ms as i64)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!("record_llm_cost_event failed: {e}");
+        }
+    }
+
+    /// Aggregate all cost events for a run into a summary.
+    pub async fn get_run_cost_summary(
+        &self,
+        run_id: &str,
+    ) -> Result<crate::models::RunCostSummary> {
+        let rows = sqlx::query(
+            r#"
+            SELECT agent, SUM(input_tokens) as input_tokens, SUM(output_tokens) as output_tokens,
+                   COUNT(*) as call_count, SUM(latency_ms) as latency_ms
+            FROM run_cost_events
+            WHERE run_id = ?1
+            GROUP BY agent
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut summary = crate::models::RunCostSummary {
+            run_id: run_id.to_string(),
+            ..Default::default()
+        };
+        for row in rows {
+            let agent: String = row.get("agent");
+            let input: u32 = row.try_get("input_tokens").unwrap_or(0);
+            let output: u32 = row.try_get("output_tokens").unwrap_or(0);
+            let calls: u32 = row.try_get("call_count").unwrap_or(0);
+            let latency: u32 = row.try_get("latency_ms").unwrap_or(0);
+            summary.total_input_tokens += input;
+            summary.total_output_tokens += output;
+            summary.total_tokens += input + output;
+            summary.total_latency_ms += latency as u64;
+            summary.call_count += calls;
+            summary.by_agent.push(crate::models::AgentCostSummary {
+                agent,
+                input_tokens: input,
+                output_tokens: output,
+                total_tokens: input + output,
+                call_count: calls,
+                latency_ms: latency as u64,
+            });
+        }
+        Ok(summary)
+    }
+
+    // ── A2: Decision log ──────────────────────────────────────────────────────
+
+    /// Record a significant agent decision — what was chosen, alternatives
+    /// considered, and the justification. Fire-and-forget.
+    async fn record_decision(
+        &self,
+        run_id: &str,
+        agent: &str,
+        phase: &str,
+        decision_kind: &str,
+        chose: &str,
+        alternatives: &[String],
+        justification: &str,
+    ) {
+        let decision_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let alternatives_json =
+            serde_json::to_string(alternatives).unwrap_or_else(|_| "[]".to_string());
+        if let Err(e) = sqlx::query(
+            r#"
+            INSERT INTO decision_log
+                (decision_id, run_id, agent, phase, decision_kind, chose, alternatives_json, justification, approved_by, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, NULL, ?9)
+            "#,
+        )
+        .bind(&decision_id)
+        .bind(run_id)
+        .bind(agent)
+        .bind(phase)
+        .bind(decision_kind)
+        .bind(chose)
+        .bind(&alternatives_json)
+        .bind(justification)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!("record_decision failed: {e}");
+        }
+    }
+
+    /// List decision records for a run.
+    pub async fn list_run_decisions(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<crate::models::DecisionRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT decision_id, run_id, agent, phase, decision_kind, chose,
+                   alternatives_json, justification, approved_by, created_at
+            FROM decision_log
+            WHERE run_id = ?1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let alternatives_json: String = row.get("alternatives_json");
+                let alternatives: Vec<String> =
+                    serde_json::from_str(&alternatives_json).unwrap_or_default();
+                let created_at_str: String = row.get("created_at");
+                let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                Ok(crate::models::DecisionRecord {
+                    decision_id: row.get("decision_id"),
+                    run_id: row.get("run_id"),
+                    agent: row.get("agent"),
+                    phase: row.get("phase"),
+                    decision_kind: row.get("decision_kind"),
+                    chose: row.get("chose"),
+                    alternatives,
+                    justification: row.get("justification"),
+                    approved_by: row.get("approved_by"),
+                    created_at,
+                })
+            })
+            .collect()
+    }
+
+    // ── Phase B: Agent Trace Spine ────────────────────────────────────────────
+
+    /// Record a structured trace for one agent LLM call. Fire-and-forget.
+    ///
+    /// `reasoning_steps` and `actions_taken` should be extracted from the
+    /// LLM response before calling this. If the response contains a leading
+    /// `<reasoning>...</reasoning>` block, extract_reasoning() pulls it out.
+    async fn record_agent_trace(
+        &self,
+        run_id: &str,
+        agent: &str,
+        phase: &str,
+        input_summary: &str,
+        reasoning_steps: &[String],
+        actions_taken: &[String],
+        outcome: &str,
+        usage: Option<&crate::llm::LlmUsage>,
+    ) {
+        let trace_id = uuid::Uuid::new_v4().to_string();
+        let now = Utc::now();
+        let reasoning_json =
+            serde_json::to_string(reasoning_steps).unwrap_or_else(|_| "[]".to_string());
+        let actions_json =
+            serde_json::to_string(actions_taken).unwrap_or_else(|_| "[]".to_string());
+        let (input_tokens, output_tokens, latency_ms) = usage
+            .map(|u| (u.input_tokens, u.output_tokens, u.latency_ms))
+            .unwrap_or((0, 0, 0));
+
+        if let Err(e) = sqlx::query(
+            r#"
+            INSERT INTO agent_traces
+                (trace_id, run_id, agent, phase, input_summary, reasoning_steps,
+                 actions_taken, outcome, input_tokens, output_tokens, latency_ms, created_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12)
+            "#,
+        )
+        .bind(&trace_id)
+        .bind(run_id)
+        .bind(agent)
+        .bind(phase)
+        .bind(input_summary)
+        .bind(&reasoning_json)
+        .bind(&actions_json)
+        .bind(outcome)
+        .bind(input_tokens)
+        .bind(output_tokens)
+        .bind(latency_ms as i64)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        {
+            tracing::warn!("record_agent_trace failed: {e}");
+        }
+    }
+
+    /// List all traces for a run ordered by time.
+    pub async fn list_run_traces(&self, run_id: &str) -> Result<Vec<crate::models::AgentTrace>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT trace_id, run_id, agent, phase, input_summary, reasoning_steps,
+                   actions_taken, outcome, input_tokens, output_tokens, latency_ms, created_at
+            FROM agent_traces
+            WHERE run_id = ?1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter()
+            .map(|row| {
+                let rs_json: String = row.get("reasoning_steps");
+                let at_json: String = row.get("actions_taken");
+                let created_at_str: String = row.get("created_at");
+                let reasoning_steps: Vec<String> =
+                    serde_json::from_str(&rs_json).unwrap_or_default();
+                let actions_taken: Vec<String> =
+                    serde_json::from_str(&at_json).unwrap_or_default();
+                let created_at = chrono::DateTime::parse_from_rfc3339(&created_at_str)
+                    .map(|dt| dt.with_timezone(&Utc))
+                    .unwrap_or_else(|_| Utc::now());
+                Ok(crate::models::AgentTrace {
+                    trace_id: row.get("trace_id"),
+                    run_id: row.get("run_id"),
+                    agent: row.get("agent"),
+                    phase: row.get("phase"),
+                    input_summary: row.get("input_summary"),
+                    reasoning_steps,
+                    actions_taken,
+                    outcome: row.get("outcome"),
+                    input_tokens: row.try_get("input_tokens").unwrap_or(0),
+                    output_tokens: row.try_get("output_tokens").unwrap_or(0),
+                    latency_ms: row.try_get::<i64, _>("latency_ms").unwrap_or(0) as u64,
+                    created_at,
+                })
+            })
+            .collect()
     }
 
     /// Build and write `exploration_log.md` to the run directory.
@@ -10788,6 +11560,33 @@ Write the twin environment narrative and identify any simulation gaps against Co
                 lesson.intervention.as_deref().unwrap_or("none"),
                 lesson.pattern,
             );
+
+            // A2: record promotion decision
+            {
+                let chose = if candidate.edited_json.is_some() {
+                    "promote_edited_candidate"
+                } else {
+                    "promote_original_candidate"
+                };
+                let alternatives = vec!["discard_candidate".to_string()];
+                let justification = format!(
+                    "Operator kept candidate '{}' (kind: {}, confidence: {:.2}). {}",
+                    candidate.candidate_id,
+                    candidate.kind,
+                    candidate.confidence,
+                    candidate.label.as_str()
+                );
+                self.record_decision(
+                    run_id,
+                    "coobie",
+                    "consolidation",
+                    "consolidation_promotion",
+                    chose,
+                    &alternatives,
+                    &justification,
+                )
+                .await;
+            }
 
             self.persist_lesson(
                 lesson.clone(),
@@ -16908,6 +17707,39 @@ fn contains_any(haystack: &str, needles: &[&str]) -> bool {
         .any(|needle| haystack.contains(&needle.to_lowercase()))
 }
 
+// ── Phase B: Trace extraction utilities ──────────────────────────────────────
+
+/// Extract a leading `<reasoning>…</reasoning>` block from an LLM response.
+/// Returns `(reasoning_steps, rest_of_content)`.
+///
+/// If no block is present, returns an empty vec and the full content as-is.
+fn extract_reasoning(content: &str) -> (Vec<String>, &str) {
+    let trimmed = content.trim_start();
+    if let Some(after_open) = trimmed.strip_prefix("<reasoning>") {
+        if let Some(close_pos) = after_open.find("</reasoning>") {
+            let reasoning_block = &after_open[..close_pos];
+            let rest = after_open[close_pos + "</reasoning>".len()..].trim_start();
+            let steps: Vec<String> = reasoning_block
+                .lines()
+                .map(|l| l.trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            return (steps, rest);
+        }
+    }
+    (vec![], content)
+}
+
+/// Build a short input summary (≤ 200 chars) from a prompt string.
+fn trace_input_summary(s: &str) -> String {
+    let trimmed = s.trim();
+    if trimmed.len() <= 200 {
+        trimmed.to_string()
+    } else {
+        format!("{}…", &trimmed[..197])
+    }
+}
+
 fn format_memory_context(memory_hits: &[String]) -> String {
     if memory_hits.is_empty() {
         "No memory hits collected for this run.".to_string()
@@ -18078,6 +18910,161 @@ fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
         );
     }
     out
+}
+
+
+fn build_operator_model_transcript_excerpt(
+    messages: &[crate::chat::ChatMessage],
+    max_lines: usize,
+) -> Vec<String> {
+    let mut selected = messages
+        .iter()
+        .filter(|message| message.role != "system")
+        .filter_map(|message| {
+            let content = message.content.trim();
+            if content.is_empty() {
+                return None;
+            }
+            let speaker = match message.role.as_str() {
+                "operator" => "operator",
+                "agent" => message.agent.as_deref().unwrap_or("agent"),
+                other => other,
+            };
+            Some(format!("{}: {}", speaker, content.replace('\n', " ")))
+        })
+        .collect::<Vec<_>>();
+    if selected.len() > max_lines {
+        selected = selected.split_off(selected.len() - max_lines);
+    }
+    selected
+}
+
+fn fallback_operator_model_context(
+    profile: &crate::models::OperatorModelProfile,
+    source_thread_id: Option<String>,
+    transcript_excerpt: Vec<String>,
+) -> OperatorModelContext {
+    let mut context = OperatorModelContext {
+        profile_id: profile.profile_id.clone(),
+        scope: profile.scope.clone(),
+        display_name: profile.display_name.clone(),
+        project_root: profile.project_root.clone(),
+        source_thread_id,
+        transcript_excerpt,
+        ..OperatorModelContext::default()
+    };
+
+    for line in &context.transcript_excerpt {
+        let normalized = operator_model_fact_text(line);
+        if normalized.is_empty() {
+            continue;
+        }
+        let lower = normalized.to_ascii_lowercase();
+        if lower.contains('?') {
+            push_unique_limited(&mut context.open_questions, normalized.clone(), 5);
+        }
+        if ["every ", "daily", "weekly", "monthly", "when ", "each ", "friday", "monday"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(&mut context.operating_rhythms, normalized.clone(), 5);
+        }
+        if ["approve", "approval", "escalat", "human", "override", "confirm"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(&mut context.escalation_rules, normalized.clone(), 5);
+        }
+        if ["depend", "blocked", "waiting", "needs ", "need ", "from "]
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(&mut context.dependencies, normalized.clone(), 5);
+        }
+        if ["do not", "don't", "never", "must", "only", "avoid", "guardrail", "stay within"]
+            .iter()
+            .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(&mut context.guardrails, normalized.clone(), 6);
+        }
+    }
+
+    context.summary = fallback_operator_model_summary(&context);
+    context
+}
+
+fn fallback_operator_model_summary(context: &OperatorModelContext) -> String {
+    if let Some(first) = context.operating_rhythms.first() {
+        return format!(
+            "{} is active for this target; current interview emphasis starts with {}",
+            context.display_name, first
+        );
+    }
+    if let Some(first) = context.guardrails.first() {
+        return format!(
+            "{} is active for this target; primary guardrail: {}",
+            context.display_name, first
+        );
+    }
+    format!(
+        "{} is active for this target, but the operator-model interview is still light.",
+        context.display_name
+    )
+}
+
+fn operator_model_fact_text(line: &str) -> String {
+    let trimmed = line.trim();
+    if let Some((_, rest)) = trimmed.split_once(':') {
+        return rest.trim().to_string();
+    }
+    trimmed.to_string()
+}
+
+fn push_unique_limited(items: &mut Vec<String>, value: String, limit: usize) {
+    let trimmed = value.trim();
+    if trimmed.is_empty() || items.iter().any(|existing| existing == trimmed) {
+        return;
+    }
+    if items.len() < limit {
+        items.push(trimmed.to_string());
+    }
+}
+
+fn extend_unique(items: &mut Vec<String>, incoming: Vec<String>, limit: usize) {
+    for value in incoming {
+        push_unique_limited(items, value, limit);
+    }
+}
+
+fn apply_operator_model_preflight_guidance(
+    context: &OperatorModelContext,
+    required_checks: &mut Vec<String>,
+    recommended_guardrails: &mut Vec<String>,
+    open_questions: &mut Vec<String>,
+) {
+    if !context.summary.trim().is_empty() {
+        recommended_guardrails.push(format!(
+            "Operator model ({}) summary — {}",
+            context.display_name, context.summary
+        ));
+    }
+    for guardrail in context.guardrails.iter().take(4) {
+        recommended_guardrails.push(format!("Operator model guardrail — {guardrail}"));
+    }
+    for rule in context.escalation_rules.iter().take(3) {
+        required_checks.push(format!("Operator escalation boundary — {rule}"));
+    }
+    for dependency in context.dependencies.iter().take(3) {
+        required_checks.push(format!(
+            "Operator dependency to confirm before execution — {dependency}"
+        ));
+    }
+    for question in context.open_questions.iter().take(3) {
+        open_questions.push(format!("Operator-model follow-up — {question}"));
+    }
+    recommended_guardrails.dedup();
+    required_checks.dedup();
+    open_questions.dedup();
 }
 
 // ── Causal preflight guidance ─────────────────────────────────────────────────

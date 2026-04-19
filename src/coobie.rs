@@ -702,6 +702,11 @@ pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
         .project_memory_root
         .clone()
         .unwrap_or_else(|| "not recorded".to_string());
+    let operator_model_section = briefing
+        .operator_model_context
+        .as_ref()
+        .map(render_operator_model_context)
+        .unwrap_or_else(|| "- No operator-model context was attached to this run yet.".to_string());
 
     format!(
         "# Coobie Preflight Response
@@ -728,6 +733,9 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 {}
 
 ## Core Memory Context
+{}
+
+## Operator Model Context
 {}
 
 ## Domain Signals
@@ -819,6 +827,7 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             &briefing.core_memory_hits,
             "No Harkonnen core memory hits were retrieved yet.",
         ),
+        operator_model_section,
         render_bullet_lines(
             &briefing.domain_signals,
             "No domain signals were detected yet."
@@ -893,6 +902,42 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
         ),
         render_bullet_lines(&briefing.open_questions, "No open questions were raised."),
     )
+}
+
+
+fn render_operator_model_context(context: &crate::models::OperatorModelContext) -> String {
+    let mut lines = Vec::new();
+    if !context.summary.trim().is_empty() {
+        lines.push(format!("- Summary: {}", context.summary.trim()));
+    }
+    if !context.operating_rhythms.is_empty() {
+        lines.push(format!(
+            "- Operating rhythms: {}",
+            context.operating_rhythms.join(" | ")
+        ));
+    }
+    if !context.guardrails.is_empty() {
+        lines.push(format!("- Guardrails: {}", context.guardrails.join(" | ")));
+    }
+    if !context.escalation_rules.is_empty() {
+        lines.push(format!(
+            "- Escalation rules: {}",
+            context.escalation_rules.join(" | ")
+        ));
+    }
+    if !context.dependencies.is_empty() {
+        lines.push(format!("- Dependencies: {}", context.dependencies.join(" | ")));
+    }
+    if !context.open_questions.is_empty() {
+        lines.push(format!(
+            "- Open questions: {}",
+            context.open_questions.join(" | ")
+        ));
+    }
+    if lines.is_empty() {
+        lines.push("- Operator-model profile exists, but no durable context has been distilled yet.".to_string());
+    }
+    lines.join("\n")
 }
 
 pub fn render_coobie_report_response(report: &CausalReport) -> String {

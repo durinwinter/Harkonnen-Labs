@@ -671,6 +671,99 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
+    // ── A1: LLM cost events ───────────────────────────────────────────────────
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS run_cost_events (
+            event_id    TEXT PRIMARY KEY,
+            run_id      TEXT NOT NULL,
+            agent       TEXT NOT NULL DEFAULT '',
+            phase       TEXT NOT NULL DEFAULT '',
+            provider    TEXT NOT NULL DEFAULT '',
+            model       TEXT NOT NULL DEFAULT '',
+            input_tokens  INTEGER NOT NULL DEFAULT 0,
+            output_tokens INTEGER NOT NULL DEFAULT 0,
+            latency_ms    INTEGER NOT NULL DEFAULT 0,
+            created_at  TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_run_cost_events_run_id
+        ON run_cost_events (run_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    // ── A2: Decision log ──────────────────────────────────────────────────────
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS decision_log (
+            decision_id     TEXT PRIMARY KEY,
+            run_id          TEXT NOT NULL,
+            agent           TEXT NOT NULL DEFAULT '',
+            phase           TEXT NOT NULL DEFAULT '',
+            decision_kind   TEXT NOT NULL DEFAULT '',
+            chose           TEXT NOT NULL DEFAULT '',
+            alternatives_json TEXT NOT NULL DEFAULT '[]',
+            justification   TEXT NOT NULL DEFAULT '',
+            approved_by     TEXT,
+            created_at      TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_decision_log_run_id
+        ON decision_log (run_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    // ── A3: ActionLease columns on assignments ────────────────────────────────
+    // The assignments are stored as JSON in assignments.json (file-based), so
+    // the lease fields live on the Assignment struct. No SQLite table needed.
+
+    // ── Phase B: Agent Trace Spine ────────────────────────────────────────────
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS agent_traces (
+            trace_id          TEXT PRIMARY KEY,
+            run_id            TEXT NOT NULL,
+            agent             TEXT NOT NULL DEFAULT '',
+            phase             TEXT NOT NULL DEFAULT '',
+            input_summary     TEXT NOT NULL DEFAULT '',
+            reasoning_steps   TEXT NOT NULL DEFAULT '[]',
+            actions_taken     TEXT NOT NULL DEFAULT '[]',
+            outcome           TEXT NOT NULL DEFAULT '',
+            input_tokens      INTEGER NOT NULL DEFAULT 0,
+            output_tokens     INTEGER NOT NULL DEFAULT 0,
+            latency_ms        INTEGER NOT NULL DEFAULT 0,
+            created_at        TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_agent_traces_run_agent
+        ON agent_traces (run_id, agent, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     Ok(pool)
 }
 

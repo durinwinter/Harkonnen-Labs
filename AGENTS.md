@@ -398,6 +398,8 @@ security_expectations: [auth, secrets, isolation]
 - **Boundary discipline**: never let factory code reach into `factory/scenarios/` (Sable only)
 - **Memory discipline**: after any run that produces a reusable pattern, store it via Coobie
 - **Setup portability**: never hardcode paths or provider names in Rust source — use `SetupConfig`
+- **Frontend on this workstation**: when you need `node` or `npm`, run them via `flatpak-spawn --host ...` rather than assuming the sandbox has a native Node toolchain
+- **TypeDB direction**: when Phase 6 opens, target the Rust-based TypeDB 3.x line in a container-first deployment; do not design around or install the legacy Java distribution
 - **MCP first**: prefer registering a new capability as an MCP server over adding Rust code
 
 ---

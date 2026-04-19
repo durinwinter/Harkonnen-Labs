@@ -536,8 +536,11 @@ Current scope: `{}`. Current layer: `{}`.",
             scope, pending_layer
         ));
         if !project_root.is_empty() {
-            prompt.push_str(&format!("
-Target project root: `{}`.", project_root));
+            prompt.push_str(&format!(
+                "
+Target project root: `{}`.",
+                project_root
+            ));
         }
         if scope == "project" {
             prompt.push_str("
@@ -559,6 +562,20 @@ fn agent_display(agent: &str) -> &'static str {
         "flint" => "Flint",
         "keeper" => "Keeper",
         _ => "Coobie",
+    }
+}
+
+fn synthetic_chat_thread(run_id: Option<&str>) -> ChatThread {
+    ChatThread {
+        thread_id: "synthetic-packchat-thread".to_string(),
+        run_id: run_id.map(str::to_string),
+        spec_id: None,
+        title: "Synthetic PackChat thread".to_string(),
+        status: "open".to_string(),
+        thread_kind: ChatThreadKind::General,
+        metadata_json: default_thread_metadata(),
+        created_at: Utc::now(),
+        updated_at: Utc::now(),
     }
 }
 
@@ -617,6 +634,17 @@ pub async fn dispatch_message(
 }
 
 pub async fn complete_agent_reply(
+    agent: &str,
+    user_content: &str,
+    history: &[ChatMessage],
+    run_id: Option<&str>,
+    paths: &Paths,
+) -> Result<String> {
+    let thread = synthetic_chat_thread(run_id);
+    complete_agent_reply_for_thread(agent, user_content, history, &thread, paths).await
+}
+
+async fn complete_agent_reply_for_thread(
     agent: &str,
     user_content: &str,
     history: &[ChatMessage],
@@ -770,7 +798,7 @@ async fn generate_agent_reply(
     thread: &ChatThread,
     paths: &Paths,
 ) -> Option<String> {
-    match complete_agent_reply(agent, user_content, history, thread, paths).await {
+    match complete_agent_reply_for_thread(agent, user_content, history, thread, paths).await {
         Ok(content) => Some(content),
         Err(e) => {
             tracing::warn!("PackChat agent reply failed for {} ({})", agent, e);

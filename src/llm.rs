@@ -49,10 +49,25 @@ impl LlmRequest {
     }
 }
 
+/// Token and latency usage for a single LLM call.
+#[derive(Debug, Clone, Default, serde::Serialize, serde::Deserialize)]
+pub struct LlmUsage {
+    pub input_tokens: u32,
+    pub output_tokens: u32,
+    pub latency_ms: u64,
+}
+
+impl LlmUsage {
+    pub fn total_tokens(&self) -> u32 {
+        self.input_tokens + self.output_tokens
+    }
+}
+
 /// Resolved response from any provider.
 #[derive(Debug, Clone)]
 pub struct LlmResponse {
     pub content: String,
+    pub usage: Option<LlmUsage>,
 }
 
 // ── Trait ─────────────────────────────────────────────────────────────────────
@@ -183,6 +198,16 @@ struct AnthropicMessage<'a> {
 #[derive(Deserialize)]
 struct AnthropicResponse {
     content: Vec<AnthropicContent>,
+    #[serde(default)]
+    usage: AnthropicUsage,
+}
+
+#[derive(Deserialize, Default)]
+struct AnthropicUsage {
+    #[serde(default)]
+    input_tokens: u32,
+    #[serde(default)]
+    output_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -223,6 +248,7 @@ impl LlmProvider for AnthropicClient {
         let mut attempt = 0u32;
         loop {
             attempt += 1;
+            let t0 = std::time::Instant::now();
             let resp = self
                 .http
                 .post("https://api.anthropic.com/v1/messages")
@@ -256,9 +282,15 @@ impl LlmProvider for AnthropicClient {
                 bail!("Anthropic API error {}: {}", status, body);
             }
 
+            let latency_ms = t0.elapsed().as_millis() as u64;
             let parsed: AnthropicResponse =
                 resp.json().await.context("parsing Anthropic response")?;
 
+            let usage = Some(LlmUsage {
+                input_tokens: parsed.usage.input_tokens,
+                output_tokens: parsed.usage.output_tokens,
+                latency_ms,
+            });
             let content = parsed
                 .content
                 .into_iter()
@@ -266,7 +298,7 @@ impl LlmProvider for AnthropicClient {
                 .collect::<Vec<_>>()
                 .join("");
 
-            return Ok(LlmResponse { content });
+            return Ok(LlmResponse { content, usage });
         }
     }
 }
@@ -309,6 +341,16 @@ struct GeminiGenerationConfig {
 #[derive(Deserialize)]
 struct GeminiResponse {
     candidates: Vec<GeminiCandidate>,
+    #[serde(rename = "usageMetadata", default)]
+    usage_metadata: GeminiUsageMetadata,
+}
+
+#[derive(Deserialize, Default)]
+struct GeminiUsageMetadata {
+    #[serde(rename = "promptTokenCount", default)]
+    prompt_token_count: u32,
+    #[serde(rename = "candidatesTokenCount", default)]
+    candidates_token_count: u32,
 }
 
 #[derive(Deserialize)]
@@ -375,6 +417,7 @@ impl LlmProvider for GeminiClient {
             model, self.api_key
         );
 
+        let t0 = std::time::Instant::now();
         let resp = self
             .http
             .post(&url)
@@ -390,8 +433,14 @@ impl LlmProvider for GeminiClient {
             bail!("Gemini API error {}: {}", status, body);
         }
 
+        let latency_ms = t0.elapsed().as_millis() as u64;
         let parsed: GeminiResponse = resp.json().await.context("parsing Gemini response")?;
 
+        let usage = Some(LlmUsage {
+            input_tokens: parsed.usage_metadata.prompt_token_count,
+            output_tokens: parsed.usage_metadata.candidates_token_count,
+            latency_ms,
+        });
         let content = parsed
             .candidates
             .into_iter()
@@ -400,7 +449,7 @@ impl LlmProvider for GeminiClient {
             .collect::<Vec<_>>()
             .join("");
 
-        Ok(LlmResponse { content })
+        Ok(LlmResponse { content, usage })
     }
 }
 
@@ -430,6 +479,16 @@ struct OpenAiMessage<'a> {
 #[derive(Deserialize)]
 struct OpenAiResponse {
     choices: Vec<OpenAiChoice>,
+    #[serde(default)]
+    usage: OpenAiUsage,
+}
+
+#[derive(Deserialize, Default)]
+struct OpenAiUsage {
+    #[serde(default)]
+    prompt_tokens: u32,
+    #[serde(default)]
+    completion_tokens: u32,
 }
 
 #[derive(Deserialize)]
@@ -461,6 +520,7 @@ impl LlmProvider for OpenAiClient {
             messages,
         };
 
+        let t0 = std::time::Instant::now();
         let resp = self
             .http
             .post(&self.base_url)
@@ -477,8 +537,14 @@ impl LlmProvider for OpenAiClient {
             bail!("OpenAI API error {}: {}", status, body);
         }
 
+        let latency_ms = t0.elapsed().as_millis() as u64;
         let parsed: OpenAiResponse = resp.json().await.context("parsing OpenAI response")?;
 
+        let usage = Some(LlmUsage {
+            input_tokens: parsed.usage.prompt_tokens,
+            output_tokens: parsed.usage.completion_tokens,
+            latency_ms,
+        });
         let content = parsed
             .choices
             .into_iter()
@@ -486,7 +552,7 @@ impl LlmProvider for OpenAiClient {
             .collect::<Vec<_>>()
             .join("");
 
-        Ok(LlmResponse { content })
+        Ok(LlmResponse { content, usage })
     }
 }
 

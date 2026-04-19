@@ -1,10 +1,14 @@
 import { useState } from 'react';
+import OperatorModelFlow from './OperatorModelFlow';
+import ActionCardTile from './ActionCardTile';
+import { getActionCard, NEW_RUN_MODE_CARD_IDS } from './actionCards';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 const STEP_LABELS = ['Describe', 'Review Spec', 'Launch'];
 
 export default function NewRunFlow({ onClose, onRunStarted }) {
   const [step, setStep] = useState(0);
+  const [entryMode, setEntryMode] = useState('draft');
   const [intent, setIntent] = useState('');
   const [product, setProduct] = useState('');
   const [projectPath, setProjectPath] = useState('');
@@ -119,6 +123,10 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
     }
   }
 
+  const interviewMode = entryMode === 'interview';
+  const draftModeCard = getActionCard(NEW_RUN_MODE_CARD_IDS.draft);
+  const interviewModeCard = getActionCard(NEW_RUN_MODE_CARD_IDS.interview);
+
   return (
     <div className="nrf-backdrop" onClick={e => { if (e.target === e.currentTarget) onClose?.(); }}>
       <div className="nrf-modal">
@@ -139,8 +147,31 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
         {step === 0 && (
           <div className="nrf-body">
             <p className="nrf-lead">
-              Tell Scout what you want to build. Be as specific as possible - it will draft a structured YAML spec for you to review.
+              {interviewMode
+                ? 'Start with a repo-scoped operator interview. Coobie will capture how work actually runs in this project, and you can draft the spec from the same modal once that context is clearer.'
+                : 'Tell Scout what you want to build. Be as specific as possible - it will draft a structured YAML spec for you to review.'}
             </p>
+
+            <div className="nrf-mode-grid">
+              <button
+                className={`nrf-mode-card ${!interviewMode ? 'active' : ''}`}
+                type="button"
+                onClick={() => setEntryMode('draft')}
+              >
+                <ActionCardTile card={draftModeCard} variant="mode" />
+                <span className="nrf-mode-title">Draft Spec Now</span>
+                <span className="nrf-mode-copy">Go straight to Scout and draft the implementation spec from your intent.</span>
+              </button>
+              <button
+                className={`nrf-mode-card ${interviewMode ? 'active' : ''}`}
+                type="button"
+                onClick={() => setEntryMode('interview')}
+              >
+                <ActionCardTile card={interviewModeCard} variant="mode" />
+                <span className="nrf-mode-title">Interview Me First</span>
+                <span className="nrf-mode-copy">Start a repo-scoped operator-model session so Coobie can capture how this work actually runs.</span>
+              </button>
+            </div>
 
             <div className="nrf-field">
               <label className="nrf-label">Product name</label>
@@ -155,7 +186,7 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
             </div>
 
             <div className="nrf-field">
-              <label className="nrf-label">Project path (optional)</label>
+              <label className="nrf-label">Project path {interviewMode ? '(required for interview)' : '(optional)'}</label>
               <div className="nrf-path-row">
                 <input
                   className="nrf-input nrf-mono"
@@ -168,7 +199,14 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
                   Browse...
                 </button>
               </div>
+              {interviewMode && !projectPath.trim() && (
+                <div className="nrf-hint">Choose the commissioned repo path to start or resume the project-scoped interview.</div>
+              )}
             </div>
+
+            {interviewMode && (
+              <OperatorModelFlow active={interviewMode} projectPath={projectPath} product={product} />
+            )}
 
             <div className="nrf-field">
               <label className="nrf-label">Describe your intent</label>
@@ -188,7 +226,6 @@ Examples:
 
             {draftError && <div className="nrf-error">{draftError}</div>}
 
-
             <label className="nrf-checkbox">
               <input
                 type="checkbox"
@@ -201,7 +238,7 @@ Examples:
             <div className="nrf-actions">
               <button className="nrf-btn secondary" type="button" onClick={onClose}>Cancel</button>
               <button className="nrf-btn primary" type="button" onClick={draftSpec} disabled={!intent.trim() || !product.trim() || drafting}>
-                {drafting ? 'Scout is drafting...' : 'Draft Spec ->'}
+                {drafting ? 'Scout is drafting...' : interviewMode ? 'Draft Spec When Ready ->' : 'Draft Spec ->'}
               </button>
             </div>
           </div>
@@ -298,7 +335,7 @@ Examples:
           backdrop-filter: blur(4px);
         }
         .nrf-modal {
-          width: min(620px, calc(100vw - 2rem));
+          width: min(760px, calc(100vw - 2rem));
           max-height: calc(100vh - 2rem);
           overflow: auto;
           background: #13161a;
@@ -380,6 +417,41 @@ Examples:
           text-transform: uppercase;
           letter-spacing: 0.1em;
           color: var(--accent-gold, #c2a372);
+        }
+        .nrf-mode-grid {
+          display: grid;
+          grid-template-columns: repeat(2, minmax(0, 1fr));
+          gap: 0.75rem;
+        }
+        .nrf-mode-card {
+          display: flex;
+          flex-direction: column;
+          gap: 0.35rem;
+          text-align: left;
+          border-radius: 14px;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.04);
+          color: #fff;
+          padding: 0.85rem 0.95rem;
+          cursor: pointer;
+        }
+        .nrf-mode-card.active {
+          border-color: rgba(194, 163, 114, 0.45);
+          background: rgba(194, 163, 114, 0.12);
+          box-shadow: inset 0 0 0 1px rgba(194, 163, 114, 0.2);
+        }
+        .nrf-mode-card :global(.act-card) {
+          min-height: 100%;
+        }
+        .nrf-mode-title {
+          font-size: 0.92rem;
+          font-weight: 700;
+        }
+        .nrf-mode-copy,
+        .nrf-hint {
+          color: rgba(255, 255, 255, 0.68);
+          line-height: 1.45;
+          font-size: 0.82rem;
         }
         .nrf-path-row {
           display: flex;
@@ -520,28 +592,39 @@ Examples:
           gap: 0.7rem;
           align-items: center;
           justify-content: space-between;
-          background: rgba(255, 255, 255, 0.03);
           border: 1px solid rgba(255, 255, 255, 0.08);
+          background: rgba(255, 255, 255, 0.04);
           border-radius: 12px;
-          padding: 0.6rem 0.7rem;
+          padding: 0.75rem 0.85rem;
         }
         .nrf-picker-open {
           border: none;
-          cursor: pointer;
-          border-radius: 10px;
-          font: inherit;
-          flex: 1 1 auto;
-          text-align: left;
-          background: transparent;
+          background: none;
           color: #fff;
-          padding: 0.2rem 0.25rem;
+          cursor: pointer;
+          font: inherit;
+          text-align: left;
+          flex: 1;
         }
         .nrf-picker-empty {
-          padding: 1.1rem;
-          border-radius: 12px;
-          background: rgba(255, 255, 255, 0.03);
-          color: rgba(255, 255, 255, 0.72);
-          text-align: center;
+          color: rgba(255, 255, 255, 0.7);
+          padding: 1rem 0.2rem;
+        }
+        @media (max-width: 720px) {
+          .nrf-modal {
+            width: min(100vw - 1rem, 760px);
+          }
+          .nrf-header,
+          .nrf-path-row,
+          .nrf-confirm-block,
+          .nrf-picker-item,
+          .nrf-mode-grid {
+            flex-direction: column;
+            grid-template-columns: 1fr;
+          }
+          .nrf-actions {
+            flex-direction: column-reverse;
+          }
         }
       `}</style>
     </div>

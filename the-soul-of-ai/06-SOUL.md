@@ -1,4 +1,4 @@
-# SOUL.md — The Identity of Harkonnen Labs
+# 06-SOUL.md — The Identity of Harkonnen Labs
 
 This document answers three questions: *what is this place, why does it exist, and what does it believe?*
 

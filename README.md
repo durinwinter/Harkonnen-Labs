@@ -482,5 +482,5 @@ Mid-term:
 Long-term:
 
 * **Phase 7** — E-CARE, causal attribution corpus, and stronger publishable causal benchmark claims
-* **Phase 8 — Soul Store** — typed autobiographical, epistemic, ethical, and behavioral continuity store for persisted agent identities. Six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis) backed by TypeDB. See [MASTER_SPEC.md](MASTER_SPEC.md) Part 5 and [What-Is-An-AI-Soul.md](the-soul-of-ai/What-Is-An-AI-Soul.md) for the full design.
+* **Phase 8 — Soul Store** — typed autobiographical, epistemic, ethical, and behavioral continuity store for persisted agent identities. Six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis) backed by TypeDB. See [MASTER_SPEC.md](MASTER_SPEC.md) Part 5 and [02-What-Is-An-AI-Soul.md](the-soul-of-ai/02-What-Is-An-AI-Soul.md) for the full design.
 * **Self-improving software factory** — each run makes the next run better, operator models stamp every commissioned repo, and Soul Store gives each Labrador a persistent identity that evolves without drifting

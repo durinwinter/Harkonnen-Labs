@@ -5,7 +5,7 @@
 This chapter bridges theory and implementation. It takes the questions raised in *What Is an AI Soul?* — what is identity, what is continuity, what does it mean for an agent to remain *itself* while learning — and translates them into computable metrics and a concrete data architecture.
 
 It also follows the architectural transition laid out in
-[Artificial-Identity-Architecture.md](Artificial-Identity-Architecture.md):
+[03-Artificial-Identity-Architecture.md](03-Artificial-Identity-Architecture.md):
 once the soul is treated as a governed multi-anchor stack, its continuity can
 no longer be evaluated by vibes alone.
 

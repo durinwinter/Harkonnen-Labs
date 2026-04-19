@@ -3,7 +3,7 @@
 **This is the single canonical reference for Harkonnen Labs.**
 It collapses ARCHITECTURE.md, AGENTS.md, COOBIE_SPEC.md, OPERATOR_MODEL_ACTIVATION_PLAN.md, soul_store_codex_spec.md, BENCHMARKS.md, and ROADMAP.md into one coherent document.
 
-For source docs still referenced individually: [SOUL.md](the-soul-of-ai/SOUL.md) and [What-Is-An-AI-Soul.md](the-soul-of-ai/What-Is-An-AI-Soul.md) (identity + theory, in `the-soul-of-ai/`), CLAUDE.md (Claude-specific conventions), and the agent profiles under `factory/agents/profiles/`.
+For source docs still referenced individually: [06-SOUL.md](the-soul-of-ai/06-SOUL.md) and [02-What-Is-An-AI-Soul.md](the-soul-of-ai/02-What-Is-An-AI-Soul.md) (identity + theory, in `the-soul-of-ai/`), CLAUDE.md (Claude-specific conventions), and the agent profiles under `factory/agents/profiles/`.
 
 ---
 

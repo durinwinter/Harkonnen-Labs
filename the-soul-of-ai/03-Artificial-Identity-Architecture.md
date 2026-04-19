@@ -21,10 +21,10 @@ stack backed by Soul Store.
 
 This chapter sits between three others:
 
-- [What-Is-An-AI-Soul.md](What-Is-An-AI-Soul.md), which defines the problem
-- [Governed-Integration.md](Governed-Integration.md), which explains how change
+- [02-What-Is-An-AI-Soul.md](02-What-Is-An-AI-Soul.md), which defines the problem
+- [04-Governed-Integration.md](04-Governed-Integration.md), which explains how change
   must be adjudicated
-- [Identity-Continuity.md](Identity-Continuity.md), which formalizes the
+- [05-Identity-Continuity.md](05-Identity-Continuity.md), which formalizes the
   metrics and data architecture
 
 ---
@@ -289,8 +289,8 @@ The combined lesson is:
 > different depths
 
 The detailed mathematics belong in
-[Identity-Continuity.md](Identity-Continuity.md). The operational decision
-process belongs in [Governed-Integration.md](Governed-Integration.md).
+[05-Identity-Continuity.md](05-Identity-Continuity.md). The operational decision
+process belongs in [04-Governed-Integration.md](04-Governed-Integration.md).
 
 ---
 

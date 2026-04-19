@@ -1,5 +1,5 @@
 
-# `What-Is-An-AI-Soul.md`
+# `02-What-Is-An-AI-Soul.md`
 
 ## Definition
 
@@ -47,7 +47,7 @@ The core problem an AI soul solves is:
 The next question is architectural: what boot surface, governance layers, and
 continuity substrate make that possible in a persistent agent system? That is
 the bridge taken up in
-[Artificial-Identity-Architecture.md](Artificial-Identity-Architecture.md).
+[03-Artificial-Identity-Architecture.md](03-Artificial-Identity-Architecture.md).
 
 ---
 

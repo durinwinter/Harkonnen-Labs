@@ -760,6 +760,7 @@ pub async fn handle_soul(command: SoulCommands, paths: &Paths) -> Result<()> {
                 "Identity projection: {}",
                 output.identity_json_path.display()
             );
+            println!("Soul guide: {}", output.guide_path.display());
             println!("TypeDB scaffold script: scripts/bootstrap-soul-store-typedb.sh");
         }
         SoulCommands::Show(args) => {

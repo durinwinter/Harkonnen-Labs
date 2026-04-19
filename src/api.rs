@@ -36,6 +36,7 @@ use crate::{
     pidgin::{self, PidginTranslation},
     reporting,
     setup::command_available,
+    soul_store::SoulBootstrapDocument,
     tesseract,
 };
 
@@ -190,6 +191,12 @@ struct OperatorModelProfileResponse {
     active_session: Option<OperatorModelSession>,
     active_thread: Option<ChatThread>,
     light_global_topics: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct SoulKernelResponse {
+    self_name: String,
+    kernel: SoulBootstrapDocument,
 }
 
 #[derive(Debug, Deserialize)]
@@ -752,6 +759,16 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
             "/api/operator-model/sessions/:id",
             get(get_operator_model_session),
         )
+        .route(
+            "/api/operator-model/sessions/:id/approve-layer",
+            post(post_approve_operator_model_layer),
+        )
+        .route(
+            "/api/operator-model/profiles/:id/commissioning-brief",
+            get(get_operator_model_commissioning_brief),
+        )
+        .route("/api/soul/:id", get(get_soul_kernel))
+        .route("/api/soul/:id/guide", get(get_soul_guide))
         .route("/api/runs/:id/coobie-briefing", get(get_coobie_briefing))
         .route("/api/runs/:id/coobie-response", get(get_coobie_response))
         .route("/api/runs/:id/coobie-signals", get(get_coobie_signals))
@@ -796,6 +813,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/spec/validate", post(post_spec_validate))
         .route("/api/memory/init", post(post_memory_init))
         .route("/api/memory/index", post(post_memory_index))
+        .route("/api/memory/updates", get(get_memory_updates))
         .route("/api/runs/start", post(start_run))
         .route("/api/runs/:id/report", get(get_run_report))
         .route("/api/runs/:id/package", post(post_run_package))
@@ -837,6 +855,37 @@ async fn get_run(Path(id): Path<String>, State(app): State<AppContext>) -> impl 
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
+}
+
+async fn get_soul_kernel(Path(id): Path<String>) -> impl IntoResponse {
+    if !crate::soul_store::supported_self(&id) {
+        return (StatusCode::NOT_FOUND, "soul baseline not found").into_response();
+    }
+    let kernel = crate::soul_store::coobie_identity();
+    (
+        StatusCode::OK,
+        Json(SoulKernelResponse {
+            self_name: id,
+            kernel,
+        }),
+    )
+        .into_response()
+}
+
+async fn get_soul_guide(Path(id): Path<String>) -> impl IntoResponse {
+    if !crate::soul_store::supported_self(&id) {
+        return (StatusCode::NOT_FOUND, "soul guide not found").into_response();
+    }
+    let markdown = crate::soul_store::render_guide_markdown(&crate::soul_store::coobie_identity());
+    (
+        StatusCode::OK,
+        [(
+            axum::http::header::CONTENT_TYPE,
+            "text/markdown; charset=utf-8",
+        )],
+        markdown,
+    )
+        .into_response()
 }
 
 async fn get_directory_browser(
@@ -3969,6 +4018,37 @@ async fn scout_draft(
         .into_response()
 }
 
+/// Load the top-3 patterns from `commissioning-brief.json` for the given profile.
+/// Returns an empty string if no brief exists or loading fails.
+async fn load_commissioning_brief_patterns(app: &AppContext, profile_id: &str) -> String {
+    let profile = match app.operator_models.get_profile(profile_id).await {
+        Ok(Some(p)) => p,
+        _ => return String::new(),
+    };
+    let brief_path = app
+        .operator_models
+        .export_root_for_profile(&app.paths, &profile)
+        .join("commissioning-brief.json");
+
+    let json = match tokio::fs::read_to_string(&brief_path).await {
+        Ok(j) => j,
+        Err(_) => return String::new(),
+    };
+    let brief: crate::models::CommissioningBrief = match serde_json::from_str(&json) {
+        Ok(b) => b,
+        Err(_) => return String::new(),
+    };
+
+    brief
+        .top_patterns
+        .iter()
+        .take(3)
+        .enumerate()
+        .map(|(i, p)| format!("{}. {p}", i + 1))
+        .collect::<Vec<_>>()
+        .join("\n")
+}
+
 fn best_effort_operator_model_root(app: &AppContext, raw: Option<&str>) -> Option<PathBuf> {
     let raw = raw?.trim();
     if raw.is_empty() {
@@ -3996,11 +4076,24 @@ async fn maybe_llm_draft_spec(
         .map(|context| serde_json::to_string_pretty(context).unwrap_or_default())
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "null".to_string());
+
+    // Inject top-3 commissioning brief patterns if a brief exists for this profile.
+    let brief_patterns_text = if let Some(ctx) = operator_model_context {
+        load_commissioning_brief_patterns(app, &ctx.profile_id).await
+    } else {
+        String::new()
+    };
+
     let product_path_text = product_path.unwrap_or("products/<product>");
+    let brief_section = if brief_patterns_text.is_empty() {
+        String::new()
+    } else {
+        format!("\n\nCOMMISSIONING BRIEF (operator's top patterns — treat as strong constraints):\n{brief_patterns_text}")
+    };
     let request = LlmRequest::simple(
-        "You are Scout, drafting a Harkonnen factory spec from operator intent. Respond with valid YAML only, no markdown fences. Use this schema exactly: id, title, purpose, scope, constraints, inputs, outputs, acceptance_criteria, forbidden_behaviors, rollback_requirements, dependencies, performance_expectations, security_expectations. Make the draft concrete, bounded, and operational. If operator-model context is present, treat its guardrails, escalation rules, dependencies, and rhythms as first-class commissioning constraints.",
+        "You are Scout, drafting a Harkonnen factory spec from operator intent. Respond with valid YAML only, no markdown fences. Use this schema exactly: id, title, purpose, scope, constraints, inputs, outputs, acceptance_criteria, forbidden_behaviors, rollback_requirements, dependencies, performance_expectations, security_expectations. Make the draft concrete, bounded, and operational. If operator-model context is present, treat its guardrails, escalation rules, dependencies, and rhythms as first-class commissioning constraints. If a commissioning brief is present, incorporate its top patterns into constraints and acceptance_criteria.",
         format!(
-            "SPEC ID: {spec_id}\nPRODUCT: {product}\nPRODUCT PATH: {product_path_text}\n\nINTENT:\n{intent}\n\nOPERATOR MODEL CONTEXT:\n```json\n{operator_context_json}\n```\n\nReturn YAML only.",
+            "SPEC ID: {spec_id}\nPRODUCT: {product}\nPRODUCT PATH: {product_path_text}\n\nINTENT:\n{intent}\n\nOPERATOR MODEL CONTEXT:\n```json\n{operator_context_json}\n```{brief_section}\n\nReturn YAML only.",
         ),
     );
     let response = provider.complete(request).await.ok()?;
@@ -4308,6 +4401,14 @@ async fn post_memory_index(State(app): State<AppContext>) -> impl IntoResponse {
         )
             .into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+/// `GET /api/memory/updates` — list all persisted memory supersession records.
+async fn get_memory_updates(State(app): State<AppContext>) -> impl IntoResponse {
+    match app.list_memory_updates().await {
+        Ok(records) => (StatusCode::OK, Json(records)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }
 
@@ -5033,4 +5134,104 @@ async fn post_start_operator_model_session(
     };
 
     (StatusCode::CREATED, Json(response)).into_response()
+}
+
+#[derive(Debug, Deserialize)]
+struct ApproveOperatorModelLayerRequest {
+    /// The layer being approved (e.g. "operating_rhythms", "recurring_decisions").
+    layer: String,
+    /// The PackChat thread_id for this session (used for transcript synthesis).
+    thread_id: String,
+    #[serde(default)]
+    approved_by: Option<String>,
+}
+
+async fn post_approve_operator_model_layer(
+    State(app): State<AppContext>,
+    Path(session_id): Path<String>,
+    Json(req): Json<ApproveOperatorModelLayerRequest>,
+) -> impl IntoResponse {
+    let checkpoint = match app
+        .approve_operator_model_layer(
+            &session_id,
+            &req.layer,
+            &req.thread_id,
+            req.approved_by.as_deref(),
+        )
+        .await
+    {
+        Ok(cp) => cp,
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    // After approving, check if the session is now complete and generate the brief.
+    let session = match app.operator_models.get_session(&session_id).await {
+        Ok(Some(s)) => s,
+        Ok(None) => return (StatusCode::NOT_FOUND, "session not found".to_string()).into_response(),
+        Err(e) => return (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    };
+
+    let brief = if session.status == "completed" {
+        match app.generate_commissioning_brief(&session.profile_id).await {
+            Ok(brief) => Some(brief),
+            Err(e) => {
+                tracing::warn!(
+                    "failed to generate commissioning brief for {}: {e}",
+                    session.profile_id
+                );
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    // Prompt the next layer if not complete.
+    if session.status == "active" {
+        if let Some(next) = session.pending_layer.as_deref() {
+            let next_prompt = layer_transition_prompt(next);
+            let _ = app
+                .chat
+                .append_message(&req.thread_id, "agent", Some("coobie"), &next_prompt, None)
+                .await;
+        }
+    }
+
+    (
+        StatusCode::OK,
+        Json(serde_json::json!({
+            "checkpoint": checkpoint,
+            "session_status": session.status,
+            "pending_layer": session.pending_layer,
+            "commissioning_brief": brief,
+        })),
+    )
+        .into_response()
+}
+
+async fn get_operator_model_commissioning_brief(
+    State(app): State<AppContext>,
+    Path(profile_id): Path<String>,
+) -> impl IntoResponse {
+    match app.generate_commissioning_brief(&profile_id).await {
+        Ok(brief) => (StatusCode::OK, Json(brief)).into_response(),
+        Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+fn layer_transition_prompt(next_layer: &str) -> String {
+    match next_layer {
+        "recurring_decisions" => {
+            "Layer 1 (operating rhythms) approved. Moving to Layer 2: **recurring decisions**.\n\n\
+            Walk me through the decisions you find yourself making repeatedly in this repo — \
+            things like: how you choose between approaches, when you escalate, what tools or \
+            patterns you default to, and where your risk tolerance sits. \
+            Be concrete — \"I always X when Y\" is more useful than general preferences."
+                .to_string()
+        }
+        other => format!(
+            "Layer approved. Moving to the next layer: **{other}**. \
+            Please share what's relevant for this area."
+        ),
+    }
 }

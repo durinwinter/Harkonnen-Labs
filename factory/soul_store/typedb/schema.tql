@@ -40,11 +40,14 @@ entity experience,
 
 entity belief,
   owns uuid @key,
+  owns name,
   owns narrative_summary,
   owns confidence,
   owns scope,
   plays revised_into:prior,
-  plays revised_into:next;
+  plays revised_into:next,
+  plays reflected_on:target,
+  plays stabilizes:source;
 
 entity trait,
   owns uuid @key,
@@ -72,8 +75,10 @@ entity adaptation,
 
 entity reflection,
   owns uuid @key,
+  owns name,
   owns narrative_summary,
-  owns revision_reason;
+  owns revision_reason,
+  plays reflected_on:source;
 
 entity causal_pattern,
   owns uuid @key,

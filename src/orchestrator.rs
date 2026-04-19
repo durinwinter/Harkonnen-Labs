@@ -26,7 +26,7 @@ use crate::{
         EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
         EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, HiddenScenarioCheckResult,
         HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord, LiveEvent,
-        OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal,
+        CommissioningBrief, OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal,
         ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent, RunRecord,
         ScenarioResult, Spec, TwinEnvironment, TwinService, ValidationSummary, WorkerHarnessConfig,
     },
@@ -1648,6 +1648,7 @@ impl AppContext {
                             scored_checks: 0,
                             passed_scored_checks: 0,
                             results: Vec::new(),
+                            failure_kind: None,
                         };
                         let fallback_hidden = HiddenScenarioSummary {
                             passed: false,
@@ -9428,6 +9429,21 @@ Return JSON only.",
             context.summary = fallback_operator_model_summary(&context);
         }
 
+        // Merge commissioning brief patterns if one exists for this profile.
+        let brief_path = self
+            .operator_models
+            .export_root_for_profile(&self.paths, &profile)
+            .join("commissioning-brief.json");
+        if let Ok(json) = tokio::fs::read_to_string(&brief_path).await {
+            if let Ok(brief) = serde_json::from_str::<CommissioningBrief>(&json) {
+                extend_unique(&mut context.operating_rhythms, brief.operating_rhythms, 8);
+                for pattern in brief.top_patterns.iter().take(3) {
+                    let entry = format!("commissioning brief — {pattern}");
+                    push_unique(&mut context.guardrails, &entry);
+                }
+            }
+        }
+
         Ok(Some(context))
     }
 
@@ -10204,6 +10220,143 @@ Return JSON only.",
                 })
             })
             .collect()
+    }
+
+    // ── v1-D: Operator Model Interview ───────────────────────────────────────
+
+    /// Synthesize and persist a checkpoint for the given interview layer,
+    /// advance the session to `next_layer` (or complete it if None),
+    /// and return the checkpoint.
+    pub async fn approve_operator_model_layer(
+        &self,
+        session_id: &str,
+        layer: &str,
+        thread_id: &str,
+        approved_by: Option<&str>,
+    ) -> Result<crate::models::OperatorModelLayerCheckpoint> {
+        let session = self
+            .operator_models
+            .get_session(session_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("operator model session not found: {session_id}"))?;
+
+        let messages = self.chat.list_messages(thread_id).await?;
+        let layer_messages: Vec<_> = messages
+            .iter()
+            .filter(|m| {
+                // rough heuristic: include all messages (layer content is mixed in one thread)
+                !m.content.trim().is_empty()
+            })
+            .collect();
+
+        let transcript = layer_messages
+            .iter()
+            .map(|m| format!("[{}] {}", m.role, m.content))
+            .collect::<Vec<_>>()
+            .join("\n");
+
+        let summary_md = if let Some(provider) =
+            llm::build_provider("coobie", "default", &self.paths.setup)
+        {
+            let prompt = format!(
+                "You are Coobie synthesizing an operator-model layer checkpoint for the `{layer}` layer.\n\
+                Extract all concrete, reusable facts from the interview transcript below.\n\
+                Return a markdown bullet list of durable operating facts only. No filler prose.\n\n\
+                TRANSCRIPT:\n{transcript}"
+            );
+            let request = crate::llm::LlmRequest::simple(
+                "You are Coobie. Return a markdown bullet list of concrete operator-model facts extracted from the transcript. No preamble.",
+                prompt,
+            );
+            provider
+                .complete(request)
+                .await
+                .map(|r| r.content.trim().to_string())
+                .unwrap_or_else(|_| format!("Layer `{layer}` checkpoint (synthesis unavailable)."))
+        } else {
+            format!("Layer `{layer}` checkpoint.")
+        };
+
+        let raw_notes = serde_json::json!({
+            "layer": layer,
+            "message_count": layer_messages.len(),
+            "transcript_excerpt": transcript.chars().take(2000).collect::<String>(),
+        });
+
+        let next_layer = next_interview_layer(layer);
+
+        self.operator_models
+            .save_layer_checkpoint(
+                session_id,
+                &session.profile_id,
+                layer,
+                &summary_md,
+                &raw_notes,
+                approved_by,
+                next_layer,
+            )
+            .await
+    }
+
+    /// Read approved checkpoints for a profile and build (or rebuild) `commissioning-brief.json`.
+    pub async fn generate_commissioning_brief(
+        &self,
+        profile_id: &str,
+    ) -> Result<CommissioningBrief> {
+        let profile = self
+            .operator_models
+            .get_profile(profile_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("operator model profile not found: {profile_id}"))?;
+
+        let checkpoints = self
+            .operator_models
+            .list_approved_checkpoints_for_profile(profile_id)
+            .await?;
+
+        let mut operating_rhythms: Vec<String> = Vec::new();
+        let mut recurring_decisions: Vec<String> = Vec::new();
+
+        for cp in &checkpoints {
+            let lines: Vec<String> = cp
+                .summary_md
+                .lines()
+                .map(|l| l.trim_start_matches("- ").trim().to_string())
+                .filter(|l| !l.is_empty())
+                .collect();
+            match cp.layer.as_str() {
+                "operating_rhythms" => operating_rhythms.extend(lines),
+                "recurring_decisions" => recurring_decisions.extend(lines),
+                _ => {}
+            }
+        }
+
+        // Top-3 patterns for Scout: rhythms first, then decisions
+        let top_patterns: Vec<String> = operating_rhythms
+            .iter()
+            .chain(recurring_decisions.iter())
+            .take(3)
+            .cloned()
+            .collect();
+
+        let brief = CommissioningBrief {
+            profile_id: profile_id.to_string(),
+            generated_at: chrono::Utc::now().to_rfc3339(),
+            operating_rhythms,
+            recurring_decisions,
+            top_patterns,
+            preferred_tools: Vec::new(),
+            risk_tolerances: Vec::new(),
+        };
+
+        // Persist to export root
+        let export_root = self.operator_models.export_root_for_profile(&self.paths, &profile);
+        tokio::fs::create_dir_all(&export_root).await?;
+        let brief_path = export_root.join("commissioning-brief.json");
+        let json = serde_json::to_string_pretty(&brief)?;
+        tokio::fs::write(&brief_path, json).await?;
+
+        Ok(brief)
     }
 
     // ── Phase B: Agent Trace Spine ────────────────────────────────────────────
@@ -19259,6 +19412,14 @@ fn render_agent_response_log(agent_executions: &[AgentExecution]) -> String {
         );
     }
     out
+}
+
+/// Returns the next layer name in the two-layer MVP sequence, or None when done.
+fn next_interview_layer(current: &str) -> Option<&'static str> {
+    match current {
+        "operating_rhythms" => Some("recurring_decisions"),
+        _ => None,
+    }
 }
 
 fn build_operator_model_transcript_excerpt(

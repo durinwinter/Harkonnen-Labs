@@ -1008,6 +1008,15 @@ pub struct OperatorModelEntry {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryUpdateRecord {
+    pub update_id: String,
+    pub old_memory_id: String,
+    pub new_memory_id: String,
+    pub reason: String,
+    pub created_at: String,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorModelExport {
@@ -1062,6 +1071,27 @@ pub struct OperatorModelContext {
     pub open_questions: Vec<String>,
     #[serde(default)]
     pub transcript_excerpt: Vec<String>,
+}
+
+/// Artifact generated after both MVP interview layers are approved.
+/// Written to `<export_root>/commissioning-brief.json` and read by Scout/Coobie.
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct CommissioningBrief {
+    pub profile_id: String,
+    pub generated_at: String,
+    /// Operating rhythm facts extracted from layer 1.
+    #[serde(default)]
+    pub operating_rhythms: Vec<String>,
+    /// Recurring decision patterns extracted from layer 2.
+    #[serde(default)]
+    pub recurring_decisions: Vec<String>,
+    /// Top-3 patterns for Scout intent prompt injection.
+    #[serde(default)]
+    pub top_patterns: Vec<String>,
+    #[serde(default)]
+    pub preferred_tools: Vec<String>,
+    #[serde(default)]
+    pub risk_tolerances: Vec<String>,
 }
 
 // ── Cost / usage tracking ─────────────────────────────────────────────────────

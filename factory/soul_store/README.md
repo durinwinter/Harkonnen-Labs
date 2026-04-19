@@ -16,6 +16,8 @@ It is intentionally narrow:
   Seed data for Coobie's invariant soul kernel.
 - `projections/coobie_identity_kernel.json`
   Inspectable projection of the same seed model for humans and tooling.
+- `coobie_soul_guide.md`
+  Plain-English explanation of what Coobie preserves and what changes are allowed.
 
 ## Generate / Refresh
 

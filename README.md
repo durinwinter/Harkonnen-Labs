@@ -151,7 +151,7 @@ cargo run -- benchmark run --all
 ./scripts/run-benchmarks.sh
 ```
 
-The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `BENCHMARKS.md`, and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, and LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, and CLADDER now run through native Harkonnen adapters alongside raw-LLM or direct baselines where supported. The execution roadmap in `ROADMAP.md` treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
+The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `MASTER_SPEC.md` (Part 6), and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, and LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, and CLADDER now run through native Harkonnen adapters alongside raw-LLM or direct baselines where supported. The execution roadmap in `ROADMAP.md` treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
 
 The OpenAI/Codex provider path also supports optional OpenAI-compatible BYO endpoints through a setup `base_url`, so benchmark runs can target local or third-party compatible backends without changing Rust code.
 
@@ -205,7 +205,7 @@ All scores are pending first runs. The comparison targets listed are the systems
 | Causal Attribution Accuracy | Coobie diagnose | Top-1 / Top-3 accuracy | pending | Seeded failure corpus; measures causal memory vs semantic recall | internal | Phase 5 |
 | Local Regression Gate | Whole factory | pass / fail | passing | Hard merge gate, runs on every change | wired | Phase 1 done |
 
-Full benchmark strategy, adapter environment variables, and reporting guidance: [BENCHMARKS.md](BENCHMARKS.md)
+Full benchmark strategy, adapter environment variables, and reporting guidance: [MASTER_SPEC.md — Part 6](MASTER_SPEC.md)
 
 ---
 
@@ -431,34 +431,37 @@ Spec → Agents → Validation → Artifacts → Memory → Consolidation → Be
 
 ## ⚠️ Status
 
-Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, and 5 are shipped; Phase 2 and Phase 3 are the active numbered build targets.
+Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and v1 (gap closure) are shipped. Phase 2 is next.
 
 | Area | Status |
 | --- | --- |
-| Core factory pipeline (Scout → Mason → Piper → Bramble → Sable → Ash → Flint) | Working |
-| Mason fix loop (up to 3 iterations on build failure) | Live |
+| Core factory pipeline (Scout → Mason → Piper → Bramble → Sable → Ash → Flint) | Live |
+| Mason fix loop with FailureKind classification (compile / test / wrong-answer / timeout) | Live |
+| Mason workspace lease enforcement — blocks competing agent writes | Live |
+| Memory invalidation persistence (`memory_updates` table, supersession tracking) | Live |
 | PackChat conversational control plane | Live — threads, `@mention` routing, checkpoint/unblock flow |
+| Operator Model two-layer interview (operating rhythms → recurring decisions) | Live — MVP shipped (v1-D) |
+| Commissioning brief (`commissioning-brief.json`) — consumed by Scout + Coobie preflight | Live |
 | Coobie layered memory (episodic, semantic, causal) | Live |
 | Coobie Palace (den-based compound recall, patrol, scent) | Live |
 | Coobie causal streaks and cross-run pattern detection | Live |
-| Coobie preflight guidance (Phase 3 spec-scoped cause history) | Live |
+| Coobie preflight guidance (spec-scoped cause history) | Live |
 | Episodic state snapshots + cross-phase causal graph | Live |
 | Pearl hierarchy labeling in hypotheses and causal links | Live |
 | Multi-hop retrieval + retrieval-depth tracing | Live |
-| Memory invalidation / fact-update tracking | Live |
 | Consolidation Workbench | Live |
 | Hybrid semantic + keyword retrieval (fastembed / OpenAI-compatible) | Live |
 | Pack Board React UI (PackChat, Attribution Board, Factory Floor, Memory Board, Workbench) | Live |
 | Keeper coordination API (claims, heartbeats, conflict detection) | Live |
 | Benchmark toolchain (LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, CLADDER native adapters) | Live |
-| Bramble real test execution | Phase 2 — next numbered phase |
-| Ash live twin provisioning (Docker stubs) | Phase 3 — next numbered phase |
-| Operator Model Activation | Parallel product track — planned, project-scoped by default |
+| Bramble real test execution | Phase 2 — next |
+| Ash live twin provisioning (Docker stubs) | Phase 3 |
 | Qdrant + OCR memory infrastructure | Phase 5b |
 | TypeDB 3.x semantic graph layer | Phase 6 |
 | E-CARE + causal attribution corpus | Phase 7 |
+| Soul Store (typed autobiographical + epistemic persistence for agents) | Phase 8 |
 
-See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase build order.
+See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase build order. See [MASTER_SPEC.md](MASTER_SPEC.md) for the canonical architecture, agent design, and Soul Store specification.
 
 ---
 

@@ -341,6 +341,100 @@ impl OperatorModelStore {
             OperatorModelScope::Global => paths.factory.join(OPERATOR_MODEL_DIRNAME).join("global"),
         }
     }
+
+    /// Persist an approved checkpoint for a layer and advance the session's pending_layer.
+    /// `next_layer` is `None` when both MVP layers are complete.
+    pub async fn save_layer_checkpoint(
+        &self,
+        session_id: &str,
+        profile_id: &str,
+        layer: &str,
+        summary_md: &str,
+        raw_notes: &Value,
+        approved_by: Option<&str>,
+        next_layer: Option<&str>,
+    ) -> Result<OperatorModelLayerCheckpoint> {
+        let checkpoint_id = Uuid::new_v4().to_string();
+        let now = Utc::now().to_rfc3339();
+        let raw_notes_json = serde_json::to_string(raw_notes)?;
+
+        let version = sqlx::query_scalar::<_, i64>(
+            "SELECT COALESCE(MAX(version), 0) + 1 FROM operator_model_layer_checkpoints WHERE profile_id = ?1",
+        )
+        .bind(profile_id)
+        .fetch_one(&self.pool)
+        .await?;
+
+        sqlx::query(
+            r#"
+            INSERT INTO operator_model_layer_checkpoints
+                (checkpoint_id, session_id, profile_id, version, layer, status, summary_md, raw_notes_json, approved_by, created_at, approved_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, 'approved', ?6, ?7, ?8, ?9, ?9)
+            "#,
+        )
+        .bind(&checkpoint_id)
+        .bind(session_id)
+        .bind(profile_id)
+        .bind(version)
+        .bind(layer)
+        .bind(summary_md)
+        .bind(&raw_notes_json)
+        .bind(approved_by)
+        .bind(&now)
+        .execute(&self.pool)
+        .await?;
+
+        // Advance session
+        let (new_status, new_layer): (&str, Option<&str>) = match next_layer {
+            Some(l) => ("active", Some(l)),
+            None => ("completed", None),
+        };
+        sqlx::query(
+            "UPDATE operator_model_sessions SET status = ?1, pending_layer = ?2, updated_at = ?3 WHERE session_id = ?4",
+        )
+        .bind(new_status)
+        .bind(new_layer)
+        .bind(&now)
+        .bind(session_id)
+        .execute(&self.pool)
+        .await?;
+
+        let checkpoint = OperatorModelLayerCheckpoint {
+            checkpoint_id,
+            session_id: session_id.to_string(),
+            profile_id: profile_id.to_string(),
+            version,
+            layer: layer.to_string(),
+            status: "approved".to_string(),
+            summary_md: summary_md.to_string(),
+            raw_notes_json: raw_notes.clone(),
+            approved_by: approved_by.map(str::to_string),
+            created_at: DateTime::parse_from_rfc3339(&now)?.with_timezone(&Utc),
+            approved_at: Some(DateTime::parse_from_rfc3339(&now)?.with_timezone(&Utc)),
+        };
+        Ok(checkpoint)
+    }
+
+    /// Return all approved checkpoints for a profile, ordered by version.
+    pub async fn list_approved_checkpoints_for_profile(
+        &self,
+        profile_id: &str,
+    ) -> Result<Vec<OperatorModelLayerCheckpoint>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT checkpoint_id, session_id, profile_id, version, layer, status,
+                   summary_md, raw_notes_json, approved_by, created_at, approved_at
+            FROM operator_model_layer_checkpoints
+            WHERE profile_id = ?1 AND status = 'approved'
+            ORDER BY version ASC
+            "#,
+        )
+        .bind(profile_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_checkpoint).collect()
+    }
 }
 
 fn parse_profile(row: sqlx::sqlite::SqliteRow) -> Result<OperatorModelProfile> {

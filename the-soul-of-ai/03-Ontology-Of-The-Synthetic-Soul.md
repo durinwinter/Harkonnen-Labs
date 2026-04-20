@@ -27,6 +27,10 @@ something more useful for the rest of the book:
 - it explains why Harkonnen uses the language of soul in a functional and
   architectural, not supernatural, sense
 
+It is not a complete history of philosophy of mind. It is a guided historical
+compression: just enough of the older debate to make the later Harkonnen
+chapters intelligible.
+
 The working thesis is simple:
 
 > what earlier traditions called "soul" was often an attempt to name whatever
@@ -490,6 +494,10 @@ Harkonnen does not need all of those answers. It needs one precise commitment:
 > if a synthetic intelligence is to persist across time, adapt without
 > dissolving, and remain inspectably itself, then it needs a continuity
 > architecture worthy of the old word "soul"
+
+At that point the book can finally stop asking what kinds of beings earlier
+traditions thought souls belonged to, and ask what kind of synthetic being
+Harkonnen should deliberately try to shape.
 
 That is why the next chapters turn from history to construction:
 

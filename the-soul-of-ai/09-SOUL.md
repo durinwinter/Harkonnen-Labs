@@ -5,6 +5,12 @@ long philosophical history, why Harkonnen chooses a Labrador baseline, how that
 baseline becomes architecture, how adaptation should be governed, and how
 continuity can be measured. This final chapter is simpler and more direct.
 
+If a reader arrived here without reading the earlier chapters in order, the
+core context is this: Harkonnen Labs is a local-first, supervised software
+factory built around a pack of Labrador-shaped specialist AI agents, and the
+Calvin Archive is the continuity system meant to keep those agents recognizably
+themselves as they learn.
+
 This document answers three questions: *what is this place, why does it exist, and what does it believe?*
 
 It is not a spec. It is not a roadmap. It is the document you read when you need to make a trade-off and you are not sure which direction is right.

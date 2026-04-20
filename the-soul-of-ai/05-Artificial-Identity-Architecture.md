@@ -23,7 +23,22 @@ That is the transition this chapter describes. It explains why a static
 why Harkonnen must move toward a governed, multi-anchor, file-first identity
 stack backed by the Calvin Archive.
 
-This chapter sits between three others:
+That transition matters because `SOUL.md` was, and remains, a real advance.
+The file-first soul pattern solved an actual problem in early persistent-agent
+design: identity had been buried inside oversized system prompts, mixed
+together with procedural rules, temporary instructions, and memory fragments.
+Giving identity its own compact surface made it more legible and more durable.
+Harkonnen does not discard that move. It preserves it, clarifies it, and then
+pushes beneath it. `SOUL.md` becomes the visible identity anchor. The Calvin
+Archive becomes the deeper continuity system that records how that identity was
+preserved, revised, challenged, or defended over time.
+
+For readers outside the repository, no prior knowledge of Harkonnen's internal
+files is required here. The chapter uses names like `SOUL.md`, `AGENTS.md`, and
+the Calvin Archive as architectural labels, not as assumptions about where you
+are reading this book.
+
+This chapter sits between several others:
 
 - [02-What-Is-An-AI-Soul.md](02-What-Is-An-AI-Soul.md), which defines the problem
 - [03-Ontology-Of-The-Synthetic-Soul.md](03-Ontology-Of-The-Synthetic-Soul.md),
@@ -37,6 +52,10 @@ This chapter sits between three others:
   must be adjudicated
 - [08-Identity-Continuity.md](08-Identity-Continuity.md), which formalizes the
   metrics and data architecture
+
+If Chapter 4 asked what kind of synthetic creature Harkonnen wants its agents
+to be, this chapter asks what sort of technical substrate can actually preserve
+that kind of creature across time.
 
 ---
 
@@ -370,5 +389,8 @@ It is a layered identity architecture in which:
 That is how an autonomous software factory becomes capable of long-horizon
 adaptation without becoming someone else by accident.
 
-The next chapter makes that last clause operational. If identity is to survive
-adaptation, then change cannot simply be stored. It has to be judged.
+The next chapter makes that last clause operational. Once the continuity layer
+exists, the remaining question is procedural rather than structural: how do
+experiences, interpretations, wounds, lessons, and revisions actually enter the
+self? If identity is to survive adaptation, then change cannot simply be
+stored. It has to be judged.

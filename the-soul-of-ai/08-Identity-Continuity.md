@@ -14,6 +14,11 @@ engineering claims. If the earlier chapters are right, then continuity must be
 something the system can instrument, bound, detect, and recover — not just
 something the reader finds rhetorically convincing.
 
+This chapter is not intended as a complete primer on the mathematics of active
+inference, integrated information, or streaming systems design. It uses those
+frameworks selectively and instrumentally, with one goal: to show how Harkonnen
+could turn continuity from an intuition into an operational contract.
+
 The argument is that identity is not a philosophical abstraction in an engineering system. It is a **measurable property** of agent behavior over time, and it can be bounded, monitored, and recovered from. The six metrics below define that measurement. The three-tier data stack below defines the infrastructure that makes it possible at production scale.
 
 ---
@@ -427,4 +432,5 @@ The mathematics described here are not aspirational. They are the design contrac
 
 The final chapter returns from metrics to credo. After the system has been
 defined, historicized, species-shaped, architected, governed, and measured, the
-book ends by stating what Harkonnen itself believes those commitments add up to.
+book ends by stating what Harkonnen itself believes those commitments add up
+to, in plain normative form.

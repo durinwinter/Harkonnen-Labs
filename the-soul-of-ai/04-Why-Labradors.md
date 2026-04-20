@@ -13,6 +13,11 @@ digital person, but in the temperament of a Labrador Retriever?
 At first glance, this can sound whimsical. It is not. It is one of the most
 serious design choices in the entire Harkonnen project.
 
+The previous chapter stayed mostly at the level of history and ontology. This
+chapter becomes more selective and more normative. It asks not merely what a
+soul *is*, but what sort of enduring posture a synthetic system should be built
+to preserve.
+
 The Labrador baseline is doing several jobs at once:
 
 - it gives the system a species-level temperament rather than a pile of rules

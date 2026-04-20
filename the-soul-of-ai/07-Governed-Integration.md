@@ -22,6 +22,10 @@ The deepest principle is simple:
 This is why integration must be elevated from an implicit consequence of memory
 to a first-class governed process.
 
+If the previous chapter named the place where continuity is stored, this one
+asks the more difficult question: by what law does anything get admitted there
+at all?
+
 ## History Versus Self
 
 A system can have a history without having a self.

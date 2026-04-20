@@ -41,6 +41,16 @@ expected to persist, adapt, remember, justify itself, and remain trustworthy
 through time, then it requires an architecture of continuity. In this book, the
 name for that architecture is the AI soul.
 
+In practical terms, this chapter sits between two common but incomplete
+answers. One says that identity is just a better prompt. The other says that
+identity is just more memory. Harkonnen rejects both simplifications. A
+compact `SOUL.md` can be an important identity anchor, and memory can preserve
+history, but neither one is sufficient on its own to govern becoming.
+
+This chapter is therefore definitional before it is technical. It is meant to
+give the reader a workable vocabulary for the rest of the book, not to settle
+every metaphysical dispute in advance.
+
 ## The Question Behind the Phrase
 
 When people ask whether an AI has a soul, they usually mean several different
@@ -164,6 +174,13 @@ layer that determines how experience becomes part of the agent, how beliefs are
 justified, how adaptations are admitted or refused, and how the system remains
 recognizably itself through revision.
 
+For Harkonnen specifically, that continuity system is not attached to an
+isolated chatbot. It belongs to a supervised software-engineering pack. Scout
+interprets intent. Mason builds. Bramble validates. Coobie remembers and
+interprets. Keeper guards boundaries. The soul question therefore appears in a
+concrete form: what keeps this pack, and each pup within it, recognizably of
+the same kind across many runs?
+
 Put more plainly, an AI soul answers questions such as these:
 
 - What happened to this agent?
@@ -242,5 +259,6 @@ memory, revision, and trust.
 
 The next chapter widens the frame and asks how the older languages of soul,
 mind, and consciousness still shape the modern question. After that, the book
-returns to Harkonnen’s own answer: not the human as the model organism, but the
-labrador.
+returns to Harkonnen's own answer: not the human as the default model organism,
+but the Labrador Retriever, chosen as a species-level identity kernel for
+cooperative artificial agents.

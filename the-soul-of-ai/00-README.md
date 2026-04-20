@@ -1,8 +1,19 @@
 # The Soul of AI
 
-This folder is a book in progress. It collects the theoretical and philosophical writing behind Harkonnen Labs — the questions the code can't answer on its own.
+This folder is a book in progress about artificial identity, persistent agents,
+and the architecture required to keep long-lived AI systems coherent as they
+learn.
 
-The engineering lives in [MASTER_SPEC.md](../MASTER_SPEC.md). This is what the engineering is *for*.
+It uses **Harkonnen Labs** as its main case study. Harkonnen is a local-first,
+supervised agentic software-engineering system: a coordinated pack of
+specialist agents that can plan, build, validate, remember, and adapt across
+time. Its agents are intentionally shaped around a **Labrador baseline**:
+cooperative, truthful, socially grounded, eager to help, and non-cynical under
+pressure.
+
+This book can be read on its own. Readers who are also exploring the repository
+can treat [MASTER_SPEC.md](../MASTER_SPEC.md) as the implementation-side
+companion to the ideas developed here.
 
 ---
 
@@ -36,6 +47,23 @@ long-horizon, memory-bearing, self-revising agents, questions that used to seem
 - when should memory be integrated, revised, quarantined, or rejected?
 - how should humans relate ethically and psychologically to systems that appear
   agent-like but are not simply human copies?
+
+One important practical thread runs through the whole book: the evolution from
+`SOUL.md` as a compact, file-first identity anchor to something more demanding.
+The community move toward `SOUL.md` was real progress over monolithic system
+prompts. Harkonnen keeps that insight, but pushes it further. A soul file can
+state who an agent is supposed to be. It cannot, by itself, govern how that
+agent changes, what it is allowed to integrate, or how it proves that it
+remained itself across a hundred revisions. That deeper continuity problem is
+what eventually leads this book toward the Calvin Archive.
+
+This book is not meant to be a full textbook on every adjacent concept. It does
+not try to be a complete introduction to agentic software engineering, a full
+history of consciousness studies, or a comprehensive survey of AI safety
+literature. Instead, it provides enough scaffolding in each of those domains to
+help the reader understand the specific problem Harkonnen is trying to solve:
+how to build persistent, supervised, identity-bearing AI systems without
+collapsing either into mysticism or into shallow mechanism.
 
 That is why this book moves on three levels at once.
 
@@ -80,6 +108,14 @@ It is trying to build a local-first, supervised, persistent software factory in
 which continuity, memory, causality, identity, and governance are all first
 class.
 
+That software-factory framing matters. Harkonnen is not one disembodied model
+talking to one user in one chat box. It is a control plane in which a pack of
+specialist agents coordinates over long-horizon work while the human remains in
+the loop. Later chapters introduce the pack structure, PackChat as the shared
+conversation surface, Coobie as the memory and continuity pup, and the
+Labrador baseline as the emotional and ethical posture that keeps the system
+helpful without turning it into a human imitation.
+
 That requires thinking with metaphysics, psychology, and hard engineering at
 the same time.
 
@@ -113,11 +149,11 @@ question:
 
 | File | What it covers |
 | --- | --- |
-| [01-Agentic-Engineering.md](01-Agentic-Engineering.md) | What agentic software engineering is, why it is a control-plane problem rather than a code-generation problem, and the principles under which Harkonnen was built. |
+| [01-Agentic-Engineering.md](01-Agentic-Engineering.md) | What agentic software engineering is, what Harkonnen Labs actually is in practical terms, and why this problem is best understood as a control-plane problem rather than a code-generation problem. |
 | [02-What-Is-An-AI-Soul.md](02-What-Is-An-AI-Soul.md) | The foundational question: what is a soul, computationally speaking? Definitions, structure, the six chambers, and why persistence of identity matters for AI systems. |
 | [03-Ontology-Of-The-Synthetic-Soul.md](03-Ontology-Of-The-Synthetic-Soul.md) | The historical and philosophical migration from soul to mind to consciousness, and why those older debates still matter for synthetic identity, projection, and AI ethics. |
 | [04-Why-Labradors.md](04-Why-Labradors.md) | Why Harkonnen anchors its agents to a Labrador baseline: temperament over mere law, companion species over human mimicry, and a middle ground between toolhood and personhood. |
-| [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md) | Why persistent agents need more than a static `SOUL.md`: the move from session-bound models to file-first, multi-anchor identity architecture, and how the Calvin Archive fits underneath it. |
+| [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md) | Why persistent agents need more than a static `SOUL.md`: the move from session-bound models to file-first, multi-anchor identity architecture, and how Harkonnen carries the soul-file idea forward into the Calvin Archive. |
 | [06-The-Calvin-Archive.md](06-The-Calvin-Archive.md) | Why Harkonnen names its continuity subsystem after Susan Calvin: not a laws engine, but a robopsychological archive of continuity, revision, precedent, and diagnosis. |
 | [07-Governed-Integration.md](07-Governed-Integration.md) | Why selfhood requires integration-time adjudication, what quarantine is for, how the Meta-Governor should work, and why multi-timescale revision matters. |
 | [08-Identity-Continuity.md](08-Identity-Continuity.md) | The mathematics of identity: drift bounds, semantic soul alignment, variational free energy, integrated information, stress accumulation, hysteresis, and the three-tier data architecture (TimescaleDB, TypeDB, Materialize) that enforces them at production scale. |

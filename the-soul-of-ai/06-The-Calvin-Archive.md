@@ -33,6 +33,11 @@ That is much closer to Susan Calvin than to the popular caricature of Asimov as
 
 This chapter explains why.
 
+It also clarifies a tonal shift in the book. Earlier chapters use the language
+of soul because that language is historically and philosophically necessary.
+This chapter asks how to keep that continuity problem legible without making the
+subsystem sound mystical, ornamental, or detached from engineering practice.
+
 ---
 
 ## Why Not "Asimov Blocks"?

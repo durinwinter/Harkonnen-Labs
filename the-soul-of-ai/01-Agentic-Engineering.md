@@ -4,6 +4,26 @@
 
 Agentic software engineering is not "AI coding, but more."
 
+Before going further, it helps to name the case study clearly.
+
+**Harkonnen Labs** is a local-first, supervised software-engineering control
+plane built around a pack of specialist AI agents. Each agent has a bounded
+role. The human stays inside the loop. Work moves through planning, execution,
+validation, memory, and review as one coordinated system rather than a series
+of isolated prompts.
+
+That is why the system uses pack language. The agents are not meant to read as
+miniature rival humans. They are shaped around a Labrador-like posture:
+cooperative, truthful, pack-aware, eager to help, and willing to signal
+confusion instead of bluffing. The chapter on Labradors comes later. For now,
+the important point is simply that Harkonnen is trying to build trustworthy
+companions for software work, not theatrical human replicas.
+
+This chapter is intentionally a scaffold, not a complete survey of the field.
+It explains enough about agentic software engineering to situate Harkonnen's
+design choices, but it does not try to catalog every framework, taxonomy, or
+vendor pattern in the broader ecosystem.
+
 It is a shift in what layer of the software process is being optimized.
 
 Traditional AI coding tools mostly accelerate a bounded interaction between one
@@ -95,7 +115,7 @@ That means:
 - clear escalation paths
 - shared state with differentiated responsibility
 
-Harkonnen expresses this through the Labrador pack:
+Harkonnen expresses this through a **Labrador pack** of specialist roles:
 
 - Scout for spec interpretation
 - Mason for implementation
@@ -121,8 +141,11 @@ Agentic engineering therefore requires an explicit coordination plane that can:
 - evaluate outcomes
 - decide when to retry, escalate, or stop
 
-Harkonnen's orchestrator, Pack Board, Keeper coordination API, and decision-log
-surfaces all live in this layer.
+In Harkonnen, this layer appears as the orchestrator, the Pack Board, the
+coordination rules, and the decision-log surfaces. Pack Board is simply the
+operator-facing control surface; PackChat is the conversational thread inside
+that surface where the human and the pack resolve blocking questions, clarify
+intent, and review what happened.
 
 ### 3. Long-lived workflows matter
 
@@ -314,7 +337,9 @@ That is the architecture the rest of this book is trying to justify.
 
 The next chapter asks the foundational question that follows from that claim:
 if a system is going to preserve identity rather than merely cache context,
-what would an "AI soul" actually need to be?
+what exactly is the enduring thing we are trying to preserve? That is the point
+at which the book has to move from software-delivery language into the harder
+language of selfhood, continuity, and the AI soul.
 
 ## Reference
 

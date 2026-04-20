@@ -840,6 +840,8 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/coordination/check-lease", post(check_lease))
         .route("/api/coordination/heartbeat", post(heartbeat_task))
         .route("/api/coordination/release", post(release_task))
+        .route("/health", get(get_health))
+        .route("/api/status", get(get_server_status))
         .layer(cors)
         .with_state(app);
 
@@ -5261,4 +5263,89 @@ fn layer_transition_prompt(next_layer: &str) -> String {
             Please share what's relevant for this area."
         ),
     }
+}
+
+// ── Health and operational endpoints ─────────────────────────────────────────
+
+#[derive(Debug, Serialize)]
+struct HealthResponse {
+    status: &'static str,
+    version: &'static str,
+    uptime_secs: u64,
+    db_ok: bool,
+    memory_index_ok: bool,
+}
+
+#[derive(Debug, Serialize)]
+struct ServerStatusResponse {
+    active_runs: usize,
+    agent_claim_count: usize,
+    memory_entry_count: usize,
+    last_benchmark_run: Option<String>,
+}
+
+async fn get_health(State(app): State<AppContext>) -> impl IntoResponse {
+    let db_ok = sqlx::query("SELECT 1")
+        .fetch_one(&app.pool)
+        .await
+        .is_ok();
+
+    let memory_index_ok = app.paths.memory.join("index.json").exists();
+
+    let body = HealthResponse {
+        status: if db_ok { "ok" } else { "degraded" },
+        version: env!("CARGO_PKG_VERSION"),
+        uptime_secs: app.started_at.elapsed().as_secs(),
+        db_ok,
+        memory_index_ok,
+    };
+
+    let code = if db_ok {
+        StatusCode::OK
+    } else {
+        StatusCode::SERVICE_UNAVAILABLE
+    };
+
+    (code, Json(body)).into_response()
+}
+
+async fn get_server_status(State(app): State<AppContext>) -> impl IntoResponse {
+    let active_runs = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM runs WHERE status = 'running'",
+    )
+    .fetch_one(&app.pool)
+    .await
+    .unwrap_or(0) as usize;
+
+    let agent_claim_count = sqlx::query_scalar::<_, i64>(
+        "SELECT COUNT(*) FROM assignments WHERE status = 'active'",
+    )
+    .fetch_one(&app.pool)
+    .await
+    .unwrap_or(0) as usize;
+
+    let memory_entry_count = app
+        .memory_store
+        .list_entries()
+        .await
+        .map(|v| v.len())
+        .unwrap_or(0);
+
+    let last_benchmark_run: Option<String> = sqlx::query_scalar(
+        "SELECT created_at FROM benchmark_runs ORDER BY created_at DESC LIMIT 1",
+    )
+    .fetch_optional(&app.pool)
+    .await
+    .unwrap_or(None);
+
+    (
+        StatusCode::OK,
+        Json(ServerStatusResponse {
+            active_runs,
+            agent_claim_count,
+            memory_entry_count,
+            last_benchmark_run,
+        }),
+    )
+        .into_response()
 }

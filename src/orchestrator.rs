@@ -54,6 +54,7 @@ pub struct AppContext {
     pub chat: crate::chat::ChatStore,
     #[allow(dead_code)]
     pub operator_models: crate::operator_model::OperatorModelStore,
+    pub started_at: std::time::Instant,
 }
 
 #[derive(Debug, Clone)]
@@ -687,6 +688,7 @@ impl AppContext {
             event_tx,
             chat,
             operator_models,
+            started_at: std::time::Instant::now(),
         })
     }
 
@@ -3475,6 +3477,15 @@ Top memory hits:
             let _ = self.sync_blackboard(&blackboard, Some(&run_dir)).await;
         }
         self.package_artifacts(run_id).await?;
+        let generated_docs = self
+            .flint_generate_docs(run_id, spec_obj, target_source, &run_dir, &briefing)
+            .await?;
+        for artifact in &generated_docs {
+            push_unique(&mut blackboard.artifact_refs, artifact);
+        }
+        if !generated_docs.is_empty() {
+            let _ = self.sync_blackboard(&blackboard, Some(&run_dir)).await;
+        }
         let artifacts_end = self
             .record_event(
                 run_id,
@@ -3482,7 +3493,14 @@ Top memory hits:
                 "artifacts",
                 "flint",
                 "complete",
-                "Artifact bundle refreshed",
+                &if generated_docs.is_empty() {
+                    "Artifact bundle refreshed".to_string()
+                } else {
+                    format!(
+                        "Artifact bundle refreshed; generated {} doc artifact(s)",
+                        generated_docs.len()
+                    )
+                },
                 log_path,
             )
             .await?;
@@ -9160,6 +9178,283 @@ Write the twin environment narrative and identify any simulation gaps against Co
                 None
             }
         }
+    }
+
+    async fn flint_generate_docs(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        run_dir: &Path,
+        briefing: &CoobieBriefing,
+    ) -> Result<Vec<String>> {
+        let docs_dir = self.paths.artifacts.join("docs").join(run_id);
+        tokio::fs::create_dir_all(&docs_dir)
+            .await
+            .with_context(|| format!("creating {}", docs_dir.display()))?;
+
+        let run_artifacts = list_relative_files(run_dir, run_dir).unwrap_or_default();
+        let validation: Option<ValidationSummary> =
+            read_optional_json_file(&run_dir.join("validation.json"))?;
+        let hidden_scenarios: Option<HiddenScenarioSummary> =
+            read_optional_json_file(&run_dir.join("hidden_scenarios.json"))?;
+        let twin: Option<TwinEnvironment> = read_optional_json_file(&run_dir.join("twin.json"))?;
+        let build_output = read_optional_text_file(&run_dir.join("build_output.txt"))?;
+        let validation_analysis =
+            read_optional_text_file(&run_dir.join("validation_analysis.md"))?;
+        let twin_narrative = read_optional_text_file(&run_dir.join("twin_narrative.md"))?;
+
+        let provider = llm::build_provider("flint", "claude-haiku", &self.paths.setup);
+        let prompt_support = self.agent_prompt_support("flint", spec_obj, target_source);
+        let repo_context_block = prompt_support
+            .as_ref()
+            .map(|support| support.repo_context_block.as_str())
+            .unwrap_or(
+                "REPO-LOCAL CONTEXT:
+- No repo-local context guidance was loaded.
+
+REPO-LOCAL SKILL BUNDLES:
+- No repo-local skill bundles were loaded.",
+            );
+        let system_instruction = prompt_support
+            .as_ref()
+            .map(|support| {
+                format!(
+                    "{}
+
+Task contract:
+You are Flint, the artifact retriever for a software factory. Produce review-friendly documentation artifacts for a completed run. Keep them concrete, outcome-focused, and grounded in the actual run evidence. Avoid filler and avoid inventing behavior that is not supported by the provided context.",
+                    support.system_instruction
+                )
+            })
+            .unwrap_or_else(|| {
+                "You are Flint, the artifact retriever for a software factory. Produce review-friendly documentation artifacts for a completed run. Keep them concrete, outcome-focused, and grounded in the actual run evidence. Avoid filler and avoid inventing behavior that is not supported by the provided context.".to_string()
+            });
+
+        let validation_line = validation
+            .as_ref()
+            .map(|summary| {
+                format!(
+                    "passed={} summary={}",
+                    summary.passed,
+                    truncate_text(&summarize_validation(summary), 240)
+                )
+            })
+            .unwrap_or_else(|| "none".to_string());
+        let hidden_line = hidden_scenarios
+            .as_ref()
+            .map(|summary| {
+                format!(
+                    "passed={} scenarios={}",
+                    summary.passed,
+                    summary.results.len()
+                )
+            })
+            .unwrap_or_else(|| "none".to_string());
+        let twin_line = twin
+            .as_ref()
+            .map(|environment| {
+                let running = environment
+                    .services
+                    .iter()
+                    .filter(|service| service.status == "running")
+                    .count();
+                format!(
+                    "status={} services={} running={}",
+                    environment.status,
+                    environment.services.len(),
+                    running
+                )
+            })
+            .unwrap_or_else(|| "none".to_string());
+        let changed_paths = target_source
+            .git
+            .as_ref()
+            .map(|git| git.changed_paths.as_slice())
+            .unwrap_or(&[]);
+        let prompt_context = format!(
+            "RUN ID: {run_id}
+SPEC: {} — {}
+PURPOSE: {}
+TARGET: {} ({})
+SCOPE:
+{}
+
+OUTPUTS:
+{}
+
+ACCEPTANCE CRITERIA:
+{}
+
+DEPENDENCIES:
+{}
+
+COOBIE REQUIRED CHECKS:
+{}
+
+COOBIE ENVIRONMENT RISKS:
+{}
+
+CHANGED PATHS:
+{}
+
+RUN ARTIFACTS:
+{}
+
+VALIDATION:
+{}
+
+HIDDEN SCENARIOS:
+{}
+
+TWIN:
+{}
+
+BUILD OUTPUT EXCERPT:
+{}
+
+VALIDATION ANALYSIS EXCERPT:
+{}
+
+TWIN NARRATIVE EXCERPT:
+{}
+
+{repo_context_block}",
+            spec_obj.id,
+            spec_obj.title,
+            spec_obj.purpose,
+            target_source.label,
+            target_source.source_path,
+            render_list(&spec_obj.scope, "No scope items were declared."),
+            render_list(&spec_obj.outputs, "No output artifacts were declared."),
+            render_list(
+                &spec_obj.acceptance_criteria,
+                "No acceptance criteria were declared."
+            ),
+            render_list(&spec_obj.dependencies, "No dependencies were declared."),
+            render_list(
+                &briefing.required_checks,
+                "No Coobie required checks were recorded."
+            ),
+            render_list(
+                &briefing.environment_risks,
+                "No Coobie environment risks were recorded."
+            ),
+            if changed_paths.is_empty() {
+                "No changed paths were reported by git metadata.".to_string()
+            } else {
+                changed_paths.join("\n")
+            },
+            if run_artifacts.is_empty() {
+                "No run artifacts were found.".to_string()
+            } else {
+                run_artifacts.join("\n")
+            },
+            validation_line,
+            hidden_line,
+            twin_line,
+            truncate_text(build_output.as_deref().unwrap_or(""), 1800),
+            truncate_text(validation_analysis.as_deref().unwrap_or(""), 1400),
+            truncate_text(twin_narrative.as_deref().unwrap_or(""), 1200),
+            repo_context_block = repo_context_block,
+        );
+
+        let readme = match provider.as_ref() {
+            Some(provider) => {
+                let request = LlmRequest::simple(
+                    system_instruction.clone(),
+                    format!(
+                        "{prompt_context}
+
+Write `README.md` for this run artifact set.
+
+Requirements:
+- Use Markdown.
+- Cover what was built or changed, how to validate it, the key artifacts to inspect, and any notable risks or gaps.
+- Keep it concise but useful for a human reviewing the run later.
+- Stay grounded in the supplied evidence only.
+- Do not wrap the answer in code fences."
+                    ),
+                );
+                provider
+                    .complete(request)
+                    .await
+                    .map(|resp| resp.content)
+                    .unwrap_or_else(|error| {
+                        tracing::warn!("Flint README generation failed ({}), using fallback", error);
+                        render_flint_readme_fallback(
+                            run_id,
+                            spec_obj,
+                            target_source,
+                            &run_artifacts,
+                            validation.as_ref(),
+                            hidden_scenarios.as_ref(),
+                            twin.as_ref(),
+                        )
+                    })
+            }
+            None => render_flint_readme_fallback(
+                run_id,
+                spec_obj,
+                target_source,
+                &run_artifacts,
+                validation.as_ref(),
+                hidden_scenarios.as_ref(),
+                twin.as_ref(),
+            ),
+        };
+        tokio::fs::write(docs_dir.join("README.md"), readme.trim())
+            .await
+            .with_context(|| format!("writing {}", docs_dir.join("README.md").display()))?;
+
+        let mut generated = vec!["docs/README.md".to_string()];
+        if spec_needs_api_docs(spec_obj, &run_artifacts) {
+            let api_doc = match provider.as_ref() {
+                Some(provider) => {
+                    let request = LlmRequest::simple(
+                        system_instruction,
+                        format!(
+                            "{prompt_context}
+
+Write `API.md` for this run artifact set if the run exposes or modifies an API surface.
+
+Requirements:
+- Use Markdown.
+- Focus on interfaces, dependencies, expected inputs/outputs, and validation notes that matter to a reviewer.
+- If the provided context does not justify an API reference, reply with exactly `SKIP_API_DOC`.
+- Do not wrap the answer in code fences."
+                        ),
+                    );
+                    provider
+                        .complete(request)
+                        .await
+                        .map(|resp| resp.content)
+                        .unwrap_or_else(|error| {
+                            tracing::warn!("Flint API doc generation failed ({}), using fallback", error);
+                            render_flint_api_fallback(
+                                spec_obj,
+                                &run_artifacts,
+                                twin.as_ref(),
+                                validation.as_ref(),
+                            )
+                        })
+                }
+                None => render_flint_api_fallback(
+                    spec_obj,
+                    &run_artifacts,
+                    twin.as_ref(),
+                    validation.as_ref(),
+                ),
+            };
+            if api_doc.trim() != "SKIP_API_DOC" && !api_doc.trim().is_empty() {
+                tokio::fs::write(docs_dir.join("API.md"), api_doc.trim())
+                    .await
+                    .with_context(|| format!("writing {}", docs_dir.join("API.md").display()))?;
+                generated.push("docs/API.md".to_string());
+            }
+        }
+
+        Ok(generated)
     }
 
     fn build_tool_plan(&self, briefing: &CoobieBriefing) -> String {
@@ -18874,6 +19169,236 @@ fn truncate_text(text: &str, max_len: usize) -> String {
         let mut out = trimmed.chars().take(max_len).collect::<String>();
         out.push_str("...");
         out
+    }
+}
+
+fn read_optional_text_file(path: &Path) -> Result<Option<String>> {
+    if !path.exists() {
+        return Ok(None);
+    }
+    let raw =
+        std::fs::read_to_string(path).with_context(|| format!("reading {}", path.display()))?;
+    Ok(Some(raw))
+}
+
+fn read_optional_json_file<T>(path: &Path) -> Result<Option<T>>
+where
+    T: for<'de> Deserialize<'de>,
+{
+    let Some(raw) = read_optional_text_file(path)? else {
+        return Ok(None);
+    };
+    let parsed = serde_json::from_str(&raw)
+        .with_context(|| format!("parsing JSON from {}", path.display()))?;
+    Ok(Some(parsed))
+}
+
+fn spec_needs_api_docs(spec_obj: &Spec, run_artifacts: &[String]) -> bool {
+    let spec_text = format!(
+        "{} {} {} {} {} {}",
+        spec_obj.id,
+        spec_obj.title,
+        spec_obj.purpose,
+        spec_obj.scope.join(" "),
+        spec_obj.outputs.join(" "),
+        spec_obj.acceptance_criteria.join(" ")
+    )
+    .to_lowercase();
+    let signals = [
+        "api",
+        "endpoint",
+        "rest",
+        "http",
+        "graphql",
+        "webhook",
+        "route",
+        "openapi",
+        "swagger",
+    ];
+    if signals.iter().any(|signal| spec_text.contains(signal)) {
+        return true;
+    }
+    run_artifacts.iter().any(|artifact| {
+        let artifact = artifact.to_lowercase();
+        artifact.contains("api")
+            || artifact.contains("openapi")
+            || artifact.contains("swagger")
+            || artifact.contains("routes")
+    })
+}
+
+fn render_flint_readme_fallback(
+    run_id: &str,
+    spec_obj: &Spec,
+    target_source: &TargetSourceMetadata,
+    run_artifacts: &[String],
+    validation: Option<&ValidationSummary>,
+    hidden_scenarios: Option<&HiddenScenarioSummary>,
+    twin: Option<&TwinEnvironment>,
+) -> String {
+    let validation_summary = validation
+        .map(|summary| format!("{} ({})", summary.passed, summarize_validation(summary)))
+        .unwrap_or_else(|| "not recorded".to_string());
+    let hidden_summary = hidden_scenarios
+        .map(|summary| format!("{} ({} scenario results)", summary.passed, summary.results.len()))
+        .unwrap_or_else(|| "not recorded".to_string());
+    let twin_summary = twin
+        .map(|environment| {
+            format!(
+                "{} ({} services)",
+                environment.status,
+                environment.services.len()
+            )
+        })
+        .unwrap_or_else(|| "not recorded".to_string());
+    format!(
+        "# {title}
+
+## Run Summary
+- Run ID: {run_id}
+- Spec ID: {spec_id}
+- Purpose: {purpose}
+- Target: {target} ({target_path})
+
+## Scope
+{scope}
+
+## Outputs
+{outputs}
+
+## Validation Snapshot
+- Validation: {validation_summary}
+- Hidden scenarios: {hidden_summary}
+- Twin environment: {twin_summary}
+
+## Key Artifacts
+{artifacts}
+
+## Review Notes
+- Acceptance criteria should be reviewed against the generated artifacts and validation results.
+- This README was generated from run metadata and artifacts so operators can quickly reorient themselves on the outcome.
+",
+        title = spec_obj.title,
+        spec_id = spec_obj.id,
+        purpose = spec_obj.purpose,
+        target = target_source.label,
+        target_path = target_source.source_path,
+        scope = render_list(&spec_obj.scope, "- No scope items were recorded."),
+        outputs = render_list(&spec_obj.outputs, "- No output artifacts were declared."),
+        artifacts = render_list(
+            run_artifacts,
+            "- No run artifacts were available when the docs were generated."
+        ),
+    )
+}
+
+fn render_flint_api_fallback(
+    spec_obj: &Spec,
+    run_artifacts: &[String],
+    twin: Option<&TwinEnvironment>,
+    validation: Option<&ValidationSummary>,
+) -> String {
+    let interface_lines = spec_obj
+        .scope
+        .iter()
+        .chain(spec_obj.outputs.iter())
+        .chain(spec_obj.acceptance_criteria.iter())
+        .filter(|line| {
+            let lower = line.to_lowercase();
+            ["api", "endpoint", "rest", "http", "graphql", "webhook", "route"]
+                .iter()
+                .any(|signal| lower.contains(signal))
+        })
+        .cloned()
+        .collect::<Vec<_>>();
+    let twin_lines = twin
+        .map(|environment| {
+            environment
+                .services
+                .iter()
+                .map(|service| {
+                    format!(
+                        "- {} [{}] status={} {}",
+                        service.name, service.kind, service.status, service.details
+                    )
+                })
+                .collect::<Vec<_>>()
+        })
+        .unwrap_or_default();
+    format!(
+        "# API Reference
+
+## Intended Interface Surface
+{interfaces}
+
+## Dependencies
+{dependencies}
+
+## Twin Coverage
+{twin_lines}
+
+## Validation Note
+{validation_note}
+
+## Related Artifacts
+{artifacts}
+",
+        interfaces = render_list(
+            &interface_lines,
+            "- No explicit API-facing requirements were captured in the spec text."
+        ),
+        dependencies = render_list(
+            &spec_obj.dependencies,
+            "- No external dependencies were declared."
+        ),
+        twin_lines = render_list(
+            &twin_lines,
+            "- No twin environment details were available for API-facing dependencies."
+        ),
+        validation_note = validation
+            .map(|summary| {
+                format!(
+                    "- Validation passed: {}\n- Summary: {}",
+                    summary.passed,
+                    summarize_validation(summary)
+                )
+            })
+            .unwrap_or_else(|| "- No validation summary was available.".to_string()),
+        artifacts = render_list(
+            run_artifacts,
+            "- No related run artifacts were available."
+        ),
+    )
+}
+
+fn summarize_validation(validation: &ValidationSummary) -> String {
+    let scored = if validation.scored_checks == 0 {
+        "no scored checks recorded".to_string()
+    } else {
+        format!(
+            "{} of {} scored checks passed",
+            validation.passed_scored_checks, validation.scored_checks
+        )
+    };
+    let failing_checks = validation
+        .results
+        .iter()
+        .filter(|result| !result.passed)
+        .map(|result| format!("{} ({})", result.scenario_id, truncate_text(&result.details, 80)))
+        .take(3)
+        .collect::<Vec<_>>();
+    let failure_kind = validation
+        .failure_kind
+        .as_ref()
+        .map(|kind| format!("{kind:?}"))
+        .unwrap_or_else(|| "unknown".to_string());
+    if failing_checks.is_empty() {
+        format!("{scored}; failure_kind={failure_kind}")
+    } else {
+        format!(
+            "{scored}; failure_kind={failure_kind}; failing checks: {}",
+            failing_checks.join(", ")
+        )
     }
 }
 

@@ -9,7 +9,7 @@ use tokio::process::Command;
 
 use crate::{
     aider_polyglot, cladder, config::Paths, frames, helmet, livecodebench, locomo, longmemeval,
-    streamingqa,
+    spec_adherence, streamingqa,
 };
 
 const SKIP_EXIT_CODE: i32 = 10;
@@ -835,6 +835,24 @@ async fn run_builtin_step(
                 )
             }
             livecodebench::LcbSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "spec_adherence" => match spec_adherence::run_with_overrides(paths, &step.env).await? {
+            spec_adherence::SpecAdherenceSuiteOutcome::Completed(output) => {
+                let status = spec_adherence::status_for_output(&output);
+                let reason = spec_adherence::reason_for_output(&output);
+                (
+                    status,
+                    spec_adherence::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            spec_adherence::SpecAdherenceSuiteOutcome::Skipped(reason) => (
                 BenchmarkStatus::Skipped,
                 String::new(),
                 String::new(),

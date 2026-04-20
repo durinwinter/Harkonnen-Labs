@@ -30,6 +30,7 @@ mod reporting;
 mod scenarios;
 mod setup;
 mod spec;
+mod spec_adherence;
 mod streamingqa;
 mod tesseract;
 mod workspace;

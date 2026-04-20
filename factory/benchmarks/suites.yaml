@@ -63,6 +63,33 @@ suites:
         label: "LongMemEval adapter"
         builtin: "longmemeval"
 
+  - id: "harkonnen_spec_adherence"
+    title: "Spec Adherence Rate"
+    subsystem: "factory"
+    category: "spec_adherence"
+    tier: "target"
+    description: >-
+      Harkonnen-native LLM-as-judge benchmark that scores whether recent run
+      outputs satisfy the spec acceptance criteria captured by Scout.
+    baseline_reference: >-
+      Internal baseline: compare completeness and precision across recent runs,
+      and use without-scout mode to estimate what Scout's formalization adds.
+    setup_notes:
+      - "If SPEC_ADHERENCE_DATASET is unset, the adapter judges the most recent completed runs from the local SQLite DB."
+      - "Optionally set SPEC_ADHERENCE_LIMIT for smoke runs and SPEC_ADHERENCE_OUTPUT for a custom artifact directory."
+      - "Set SPEC_ADHERENCE_MIN_COMPLETENESS to fail the suite below a required aggregate completeness threshold."
+      - "Set SPEC_ADHERENCE_MODE=without_scout or SPEC_ADHERENCE_WITHOUT_SCOUT=true to judge against derived intent criteria instead of Scout acceptance criteria."
+    tags:
+      - "internal"
+      - "phase3"
+      - "factory"
+      - "scout"
+      - "spec"
+    steps:
+      - id: "spec_adherence_adapter"
+        label: "Spec adherence adapter"
+        builtin: "spec_adherence"
+
   - id: "longmemeval_raw_llm"
     title: "Raw LLM Baseline on LongMemEval"
     subsystem: "baseline"

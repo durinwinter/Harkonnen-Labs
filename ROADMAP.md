@@ -357,6 +357,7 @@ and the integration-governance design in [the-soul-of-ai/07-Governed-Integration
 - Calvin Archive Meta-Governor with explicit `accept`, `modify`, `reject`, and `quarantine` outcomes for identity-relevant integration events
 - File-first soul package projection with `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`, generated from and checked against canonical continuity state
 - Integrity-hash verification and heartbeat audits so the projected soul package cannot drift silently away from the Calvin Archive
+- Explicit continuity contract: `SOUL.md` declares the identity kernel; the Calvin Archive proves its continuity through experience, revision, and quarantine history
 - Quarantine ledger: unresolved items persist with pending evidence conditions, salience decay, and re-evaluation triggers
 - Pattern-level reflection over compressed cross-episode structures so schema revision is distinct from ordinary belief revision
 - Stress-estimator computation (backed by TimescaleDB) so recurring unresolved strain triggers governed reflection instead of ad hoc self-rewrite

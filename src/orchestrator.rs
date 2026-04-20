@@ -28,8 +28,8 @@ use crate::{
         HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage, LessonRecord, LiveEvent,
         CommissioningBrief, OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord,
         PriorCauseSignal, ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent,
-        RunRecord, ScenarioResult, SoulIdentityContext, Spec, TwinEnvironment, TwinService,
-        ValidationSummary, WorkerHarnessConfig,
+        RunRecord, ScenarioResult, SoulIdentityContext, Spec, TwinEnvironment, TwinFailureMode,
+        TwinService, TwinServiceSpec, ValidationSummary, WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -2781,9 +2781,21 @@ next_actions={}",
                 log_path,
             )
             .await?;
-        let twin = self.build_twin_environment(run_id, spec_obj);
+        let twin = self.ash_provision_twin(run_id, spec_obj, &run_dir).await?;
         self.write_json_file(&run_dir.join("twin.json"), &twin)
             .await?;
+        if tokio::fs::try_exists(run_dir.join("twin_env.json"))
+            .await
+            .unwrap_or(false)
+        {
+            push_unique(&mut blackboard.artifact_refs, "twin_env.json");
+        }
+        if tokio::fs::try_exists(run_dir.join("docker-compose.yml"))
+            .await
+            .unwrap_or(false)
+        {
+            push_unique(&mut blackboard.artifact_refs, "docker-compose.yml");
+        }
         if let Some(narrative) = self
             .ash_twin_narrative(spec_obj, target_source, &twin, &briefing)
             .await
@@ -3203,6 +3215,19 @@ next_actions={}",
         }
         self.write_json_file(&run_dir.join("hidden_scenarios.json"), &hidden_scenarios)
             .await?;
+        if let Err(error) = self.ash_teardown_twin(&twin, &run_dir).await {
+            let _ = self
+                .record_event(
+                    run_id,
+                    Some(&hidden_episode),
+                    "twin",
+                    "ash",
+                    "warning",
+                    &format!("Twin teardown skipped: {error}"),
+                    log_path,
+                )
+                .await;
+        }
         push_unique(&mut blackboard.artifact_refs, "hidden_scenarios.json");
         self.write_agent_execution(
             &profiles,
@@ -8325,6 +8350,27 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         })
     }
 
+    async fn run_command_capture_owned(
+        &self,
+        program: &str,
+        args: &[String],
+        cwd: &Path,
+    ) -> Result<CommandOutcome> {
+        let output = Command::new(program)
+            .args(args)
+            .current_dir(cwd)
+            .output()
+            .await
+            .with_context(|| format!("running {} in {}", program, cwd.display()))?;
+
+        Ok(CommandOutcome {
+            success: output.status.success(),
+            code: output.status.code(),
+            stdout: String::from_utf8_lossy(&output.stdout).trim().to_string(),
+            stderr: String::from_utf8_lossy(&output.stderr).trim().to_string(),
+        })
+    }
+
     async fn run_command_capture_streaming(
         &self,
         run_id: &str,
@@ -9179,7 +9225,12 @@ Write the twin environment narrative and identify any simulation gaps against Co
         lines.join("\n") + "\n"
     }
 
-    fn build_twin_environment(&self, run_id: &str, spec_obj: &Spec) -> TwinEnvironment {
+    async fn ash_provision_twin(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        run_dir: &Path,
+    ) -> Result<TwinEnvironment> {
         let mut services = vec![
             TwinService {
                 name: "workspace_fs".to_string(),
@@ -9224,40 +9275,237 @@ Write the twin environment narrative and identify any simulation gaps against Co
             .machine
             .as_ref()
             .and_then(|machine| machine.fingerprint.as_ref());
-        if fingerprint
-            .map(|fingerprint| fingerprint.docker || fingerprint.podman)
-            .unwrap_or(false)
-        {
+        let docker_available = fingerprint
+            .map(|fingerprint| fingerprint.docker)
+            .unwrap_or_else(|| command_available("docker"));
+        let podman_available = fingerprint
+            .map(|fingerprint| fingerprint.podman)
+            .unwrap_or_else(|| command_available("podman"));
+        if docker_available || podman_available {
             services.push(TwinService {
                 name: "container_runtime".to_string(),
                 kind: "container".to_string(),
                 status: "ready".to_string(),
-                details: "Container runtime available for twin workloads.".to_string(),
+                details: if docker_available {
+                    "Docker is available for twin workloads.".to_string()
+                } else {
+                    "Podman is available; twin provisioning currently simulates when docker compose is unavailable.".to_string()
+                },
             });
         }
 
-        for dependency in &spec_obj.dependencies {
-            let name = dependency
-                .to_lowercase()
-                .chars()
-                .map(|ch| if ch.is_ascii_alphanumeric() { ch } else { '_' })
-                .collect::<String>();
-            if services.iter().any(|service| service.name == name) {
+        let twin_specs = self.derive_twin_service_specs(spec_obj);
+        let compose_project = format!("run-{}-twin", normalize_twin_service_name(run_id));
+        let compose_file = run_dir.join("docker-compose.yml");
+        let mut endpoint_map = std::collections::BTreeMap::new();
+        let mut container_statuses = Vec::new();
+
+        if !twin_specs.is_empty() {
+            tokio::fs::write(&compose_file, render_twin_compose_yaml(&twin_specs))
+                .await
+                .with_context(|| format!("writing {}", compose_file.display()))?;
+        }
+
+        let mut compose_up_ok = false;
+        let mut compose_error: Option<String> = None;
+        if !twin_specs.is_empty() && docker_available {
+            let args = vec![
+                "compose".to_string(),
+                "-p".to_string(),
+                compose_project.clone(),
+                "-f".to_string(),
+                compose_file.display().to_string(),
+                "up".to_string(),
+                "-d".to_string(),
+            ];
+            let up = self.run_command_capture_owned("docker", &args, run_dir).await?;
+            if up.success {
+                compose_up_ok = true;
+                for _ in 0..10 {
+                    let ps_args = vec![
+                        "compose".to_string(),
+                        "-p".to_string(),
+                        compose_project.clone(),
+                        "-f".to_string(),
+                        compose_file.display().to_string(),
+                        "ps".to_string(),
+                    ];
+                    let ps = self
+                        .run_command_capture_owned("docker", &ps_args, run_dir)
+                        .await?;
+                    if ps.success {
+                        break;
+                    }
+                    tokio::time::sleep(std::time::Duration::from_secs(1)).await;
+                }
+            } else {
+                compose_error = Some(if up.stderr.is_empty() {
+                    up.stdout
+                } else {
+                    up.stderr
+                });
+            }
+        }
+
+        for spec in &twin_specs {
+            let service_name = normalize_twin_service_name(&spec.name);
+            if services.iter().any(|service| service.name == service_name) {
                 continue;
             }
+
+            let detail_prefix = format!("{} ({})", spec.name, spec.image);
+            let (status, details) = if matches!(
+                spec.failure_mode,
+                Some(TwinFailureMode::ConnectionRefusal)
+            ) {
+                (
+                    "failed".to_string(),
+                    format!("{detail_prefix} omitted from compose to simulate connection refusal."),
+                )
+            } else if compose_up_ok {
+                let endpoint = self
+                    .query_twin_service_endpoint(&compose_project, &compose_file, run_dir, spec)
+                    .await?;
+                if let Some(endpoint) = endpoint.clone() {
+                    endpoint_map.insert(service_name.clone(), endpoint.clone());
+                    (
+                        "running".to_string(),
+                        format!("{detail_prefix} running at {endpoint}"),
+                    )
+                } else {
+                    (
+                        "running".to_string(),
+                        format!("{detail_prefix} running with no published port binding."),
+                    )
+                }
+            } else {
+                let reason = compose_error.clone().unwrap_or_else(|| {
+                    "docker unavailable; falling back to simulated twin.".to_string()
+                });
+                (
+                    "simulated".to_string(),
+                    format!("{detail_prefix} simulated. {reason}"),
+                )
+            };
+
+            container_statuses.push(status.clone());
             services.push(TwinService {
-                name,
+                name: service_name,
                 kind: "dependency".to_string(),
-                status: "simulated".to_string(),
-                details: format!("Synthetic twin stub for dependency {}", dependency),
+                status,
+                details,
             });
         }
 
-        TwinEnvironment {
+        self.write_json_file(
+            &run_dir.join("twin_env.json"),
+            &serde_json::json!({ "services": endpoint_map }),
+        )
+        .await?;
+
+        let overall_status = if container_statuses.iter().any(|status| status == "running")
+            && container_statuses
+                .iter()
+                .any(|status| status == "failed" || status == "simulated")
+        {
+            "partial"
+        } else if container_statuses.iter().any(|status| status == "running") {
+            "running"
+        } else if container_statuses.iter().any(|status| status == "simulated") {
+            "simulated"
+        } else if container_statuses.iter().any(|status| status == "failed") {
+            "failed"
+        } else {
+            "ready"
+        };
+
+        Ok(TwinEnvironment {
             name: format!("run-{run_id}-twin"),
-            status: "ready".to_string(),
+            status: overall_status.to_string(),
+            compose_project: if twin_specs.is_empty() {
+                None
+            } else {
+                Some(compose_project)
+            },
             services,
             created_at: Utc::now(),
+        })
+    }
+
+    async fn ash_teardown_twin(&self, twin: &TwinEnvironment, run_dir: &Path) -> Result<()> {
+        let Some(project) = twin.compose_project.as_ref() else {
+            return Ok(());
+        };
+        let compose_file = run_dir.join("docker-compose.yml");
+        if !tokio::fs::try_exists(&compose_file).await.unwrap_or(false) {
+            return Ok(());
+        }
+        if !command_available("docker") {
+            return Ok(());
+        }
+        let args = vec![
+            "compose".to_string(),
+            "-p".to_string(),
+            project.clone(),
+            "-f".to_string(),
+            compose_file.display().to_string(),
+            "down".to_string(),
+            "--remove-orphans".to_string(),
+        ];
+        let _ = self.run_command_capture_owned("docker", &args, run_dir).await?;
+        Ok(())
+    }
+
+    fn derive_twin_service_specs(&self, spec_obj: &Spec) -> Vec<TwinServiceSpec> {
+        if !spec_obj.twin_services.is_empty() {
+            return spec_obj.twin_services.clone();
+        }
+
+        spec_obj
+            .dependencies
+            .iter()
+            .map(|dependency| {
+                known_twin_dependency_spec(dependency).unwrap_or_else(|| TwinServiceSpec {
+                    name: normalize_twin_service_name(dependency),
+                    image: "busybox:latest".to_string(),
+                    port: None,
+                    env: Default::default(),
+                    failure_mode: None,
+                })
+            })
+            .collect()
+    }
+
+    async fn query_twin_service_endpoint(
+        &self,
+        compose_project: &str,
+        compose_file: &Path,
+        run_dir: &Path,
+        spec: &TwinServiceSpec,
+    ) -> Result<Option<String>> {
+        let Some(port) = spec.port else {
+            return Ok(None);
+        };
+        let args = vec![
+            "compose".to_string(),
+            "-p".to_string(),
+            compose_project.to_string(),
+            "-f".to_string(),
+            compose_file.display().to_string(),
+            "port".to_string(),
+            normalize_twin_service_name(&spec.name),
+            port.to_string(),
+        ];
+        let output = self.run_command_capture_owned("docker", &args, run_dir).await?;
+        if output.success {
+            let endpoint = output.stdout.lines().last().unwrap_or("").trim().to_string();
+            if endpoint.is_empty() {
+                Ok(None)
+            } else {
+                Ok(Some(endpoint))
+            }
+        } else {
+            Ok(None)
         }
     }
 

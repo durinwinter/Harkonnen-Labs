@@ -1,6 +1,6 @@
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct ProjectComponent {
@@ -313,6 +313,8 @@ pub struct Spec {
     pub performance_expectations: Vec<String>,
     pub security_expectations: Vec<String>,
     #[serde(default)]
+    pub twin_services: Vec<TwinServiceSpec>,
+    #[serde(default)]
     pub project_components: Vec<ProjectComponent>,
     #[serde(default)]
     pub scenario_blueprint: Option<ScenarioBlueprint>,
@@ -320,6 +322,26 @@ pub struct Spec {
     pub worker_harness: Option<WorkerHarnessConfig>,
     #[serde(default)]
     pub test_commands: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum TwinFailureMode {
+    AuthExpiry,
+    RateLimit,
+    ConnectionRefusal,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct TwinServiceSpec {
+    pub name: String,
+    pub image: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub port: Option<u16>,
+    #[serde(default)]
+    pub env: BTreeMap<String, String>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub failure_mode: Option<TwinFailureMode>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -743,6 +765,8 @@ pub struct TwinService {
 pub struct TwinEnvironment {
     pub name: String,
     pub status: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub compose_project: Option<String>,
     pub services: Vec<TwinService>,
     pub created_at: DateTime<Utc>,
 }

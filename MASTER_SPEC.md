@@ -328,6 +328,19 @@ The Calvin Archive is a first-class subsystem for Harkonnen Labs. It is not a ve
 
 The user metaphor: **What if labrador retrievers evolved and maintained their fundamental personalities?**
 
+The most important architectural relationship is this:
+
+> `SOUL.md` should state the identity kernel. The Calvin Archive should prove
+> its continuity.
+
+`SOUL.md` remains the compact, high-salience identity declaration the system can
+read at boot. The Calvin Archive is the deeper continuity substrate that
+records how that identity survives contact with experience: what challenged it,
+what revisions preserved it, what was accepted, and what was quarantined. The
+soul package is therefore the boot-time and inspection surface for identity,
+while the Calvin Archive is the canonical history and continuity proof beneath
+it.
+
 ### Design Principles
 
 1. **Soul is structured, not blob-like.** Soul is represented as typed entities, typed relations, and typed attributes.
@@ -391,7 +404,10 @@ surface over the Calvin Archive, not the canonical source of continuity.
 | `HEARTBEAT.md` | Scheduled integrity checks, reflection triggers, and autonomy routines |
 
 These files should be bootstrapped from and checked against canonical Calvin Archive
-state so that the package stays readable without becoming the only truth.
+state so that the package stays readable without becoming the only truth. A
+healthy implementation preserves both layers: the soul package for compact
+declaration and routing, and the Calvin Archive for typed continuity,
+revision history, and diagnostic legibility.
 
 ### Core Entities
 

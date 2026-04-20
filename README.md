@@ -134,6 +134,7 @@ PackChat shifts the factory from pure autonomous orchestration to **supervised a
 * **fastembed / OpenAI-compatible embeddings + SQLite vector store** → hybrid semantic + keyword retrieval (live)
 * **(Planned / Optional) TypeDB 3.x service** → durable semantic graph + typed relational queries, not the hot-path store
 * **(Phase 8) Three-tier identity stack** — TimescaleDB hypertables (behavioral telemetry, stress accumulation), TypeDB (Calvin Archive ontology, six chambers), Materialize streaming SQL (real-time `D*` drift monitoring via SUBSCRIBE). See [the-soul-of-ai/08-Identity-Continuity.md](the-soul-of-ai/08-Identity-Continuity.md) for the full data architecture.
+  The soul package remains the boot-time identity surface, but the Calvin Archive is the canonical continuity substrate underneath it: `SOUL.md` declares the kernel, the archive proves its continuity.
 * **(Future) Causal graph / causaloids** → executable causal reasoning via DeepCausality
 
 ---

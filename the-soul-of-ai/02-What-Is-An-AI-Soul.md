@@ -1,5 +1,5 @@
 
-# `02-What-Is-An-AI-Soul.md`
+# What Is An AI Soul?
 
 ## Definition
 

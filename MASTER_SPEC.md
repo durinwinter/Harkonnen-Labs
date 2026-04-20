@@ -738,11 +738,11 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 
 **Unlocks:** Typed autobiographical and identity continuity for persisted agent selves. Required before Harkonnen can legitimately claim agents that evolve without losing who they are.
 
-**Phase 8-A — TypeDB schema bootstrap:**
-- Soul Store TypeDB schema file (see TypeQL skeleton in Part 5)
-- Rust TypeDB adapter (`src/soul_store/typedb.rs`)
-- Insert/query support for soul, agent-self, experience, belief, evidence, trait, value-commitment, integration-candidate, quarantine-entry, integration-policy
-- Basic revision graph (`revised-into` relation)
+**Phase 8-A — Storage layer bootstrap:**
+
+- **TimescaleDB hypertable** for episodic behavioral telemetry: agent events, drift samples, SSA snapshots, stress accumulations. Compression policy (7-day chunks), retention policy (30-day window). This is the time-series foundation for `D*` estimation and the stress-estimator.
+- **TypeDB Soul Store schema** (see TypeQL skeleton in Part 5): Rust TypeDB adapter (`src/soul_store/typedb.rs`), insert/query support for soul, agent-self, experience, belief, evidence, trait, value-commitment, integration-candidate, quarantine-entry, integration-policy, basic revision graph (`revised-into` relation)
+- **Materialize streaming SQL views**: `D*` drift alert view (sliding window over TimescaleDB via SUBSCRIBE), SSA tracking view, live Meta-Governor signal surface. `D*` and SSA are the two always-on continuous signals.
 - File-first soul package projection support for `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, `HEARTBEAT.md`
 - Integrity-hash verification for the projected soul package at boot and during heartbeat audits
 
@@ -753,12 +753,15 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 - Continuity snapshot generation
 - Belief explanation queries
 - Pack relationship modeling
-- Stress-estimator computation with evolution-threshold hooks for governed reflection rather than direct self-rewrite
+- Stress-estimator computation backed by TimescaleDB hypertable; evolution-threshold hooks trigger governed reflection rather than direct self-rewrite
 - Heartbeat-driven package integrity audit and quarantine re-evaluation scheduling
 
-**Phase 8-C — Drift and kernel:**
-- Drift detection
-- Unjustified-drift scoring rather than stasis-maximizing stability
+**Phase 8-C — Drift, kernel, and identity metrics:**
+
+- `D*` drift detection and unjustified-drift scoring (Materialize-backed, continuous)
+- SSA (Semantic Soul Alignment) per-run computation and TimescaleDB storage
+- F (Variational Free Energy) on-demand computation — high F signals that the agent must seek clarification or update beliefs before proceeding
+- Φ (Integrated Information) on-demand computation over Soul Store graph — post-learning drop in Φ triggers quarantine rather than direct integration
 - Lab-ness score computation
 - Kernel preservation checks
 - Denial / fragmentation / overfitting / trauma-analog pathology detection

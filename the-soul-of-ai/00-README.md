@@ -13,8 +13,7 @@ This book is built around a refusal.
 It refuses the idea that we must choose between two inadequate ways of talking
 about advanced AI systems:
 
-- as a purely philosophical topic about soul, mind, consciousness, and moral
-  status
+- as a purely philosophical topic about soul, mind, consciousness, and moral status
 - as a purely mechanistic topic about orchestration, memory, control planes,
   telemetry, and evaluation
 

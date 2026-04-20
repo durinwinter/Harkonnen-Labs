@@ -281,27 +281,48 @@ decides what becomes part of itself. This is the phase where Harkonnen moves
 from identity continuity as a typed graph to identity continuity as a governed
 integration process.
 
+The design for this phase — including the formal metrics and the three-tier data
+stack — is specified in [the-soul-of-ai/07-Identity-Continuity.md](the-soul-of-ai/07-Identity-Continuity.md)
+and the integration-governance design in [the-soul-of-ai/06-Governed-Integration.md](the-soul-of-ai/06-Governed-Integration.md).
+
 **What to build:**
+
+**Storage layer (three-tier):**
+
+- **TimescaleDB hypertable bootstrap** — episodic behavioral telemetry store for agent events, drift samples, stress accumulation, and SSA snapshots. Hypertable compression policy (7-day chunks, 30-day retention window). Provides the time-series foundation for D* estimation and stress computation.
+- **TypeDB Soul Store schema** — typed ontological layer for the six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis), integration candidates, quarantine entries, revision graphs, and causal patterns. Schema spec in MASTER_SPEC Part 5.
+- **Materialize streaming SQL views** — real-time `D*` drift monitoring (sliding window over TimescaleDB events via SUBSCRIBE), live Meta-Governor alert views, and SSA tracking views. `D*` and SSA are the two primary continuous signals; Φ and F are computed on-demand.
+
+**Governance and integration:**
 
 - Soul Store Meta-Governor with explicit `accept`, `modify`, `reject`, and `quarantine` outcomes for identity-relevant integration events
 - File-first soul package projection with `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`, generated from and checked against canonical continuity state
 - Integrity-hash verification and heartbeat audits so the projected soul package cannot drift silently away from Soul Store
 - Quarantine ledger: unresolved items persist with pending evidence conditions, salience decay, and re-evaluation triggers
 - Pattern-level reflection over compressed cross-episode structures so schema revision is distinct from ordinary belief revision
-- Stress-estimator computation so recurring unresolved strain triggers governed reflection instead of ad hoc self-rewrite
+- Stress-estimator computation (backed by TimescaleDB) so recurring unresolved strain triggers governed reflection instead of ad hoc self-rewrite
 - Slow-loop integration-policy revision flow, more conservative than ordinary updates and naturally attachable to human endorsement
 - Cross-layer hysteresis measurement so rollback quality is judged by residual behavioral drift, not only by restored file contents
 - Presence continuity checks so model/provider swaps preserve identity semantics rather than resetting the pack by accident
 - Pathology detection for trauma-analog overweighting, denial, fragmentation, and hyper-local overfitting
 
+**Metrics implementation (from chapter 07):**
+
+- **`D*` (Drift Bound)** — `D* = α/γ`, where α is behavioral deviation rate (from episodic log) and γ is recovery rate (from consolidation events). Materialize view watches `D*` continuously; Meta-Governor triggered if session drift exceeds bound.
+- **SSA (Semantic Soul Alignment)** — cross-domain weighted action-pattern consistency against Labrador persona goals. Computed per run window and stored as a TimescaleDB event.
+- **F (Variational Free Energy)** — KL divergence between agent's generative model and actual observations; high F signals that the agent must seek clarification or update beliefs. Computed on-demand, not streamed.
+- **Φ (Integrated Information)** — bipartition-minimized causal integration measure over the Soul Store graph. Used to gate Soul Store updates: a post-learning drop in Φ triggers quarantine rather than direct integration.
+
 **Benchmark gate:**
 
-- unjustified-drift score published
+- D* (unjustified-drift score) published — continuous via Materialize view
+- SSA baseline score published — per-run, stored in TimescaleDB
 - healthy quarantine-rate / resolution-rate baseline published
 - schema-revision stability benchmark published
 - stress / hysteresis recovery benchmark published
+- Φ post-learning drop detection wired (quarantine trigger, not yet a published score)
 
-**Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; and policy-level revision is slower, more conservative, and explicitly reviewable.
+**Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; D* and SSA are instrumented and streaming; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; and policy-level revision is slower, more conservative, and explicitly reviewable.
 
 ---
 

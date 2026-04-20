@@ -1,0 +1,20 @@
+{
+  "PRD": "docs/PRD.md",
+  "UML_class": "docs/UML_class.md",
+  "UML_sequence": "docs/UML_sequence.md",
+  "dependencies": "docs/requirements.txt",
+  "architecture_design": "docs/architecture_design.md",
+  "language": "python",
+  "usage_examples": "examples",
+  "unit_tests": "unit_tests",
+  "acceptance_tests": "acceptance_tests",
+  "required_files": [
+    "src/readtime.py"
+  ],
+  "setup_shell_script": "setup_shell_script.sh",
+  "code_file_DAG": {
+    "src/readtime.py": []
+  },
+  "unit_test_script": "pytest --cov=. --cov-report=json:unit_test_cov.json --json-report --json-report-file=unit_test_report.json unit_tests",
+  "acceptance_test_script": "pytest --cov=. --cov-report=json:acceptance_test_cov.json --json-report --json-report-file=acceptance_test_report.json acceptance_tests"
+}

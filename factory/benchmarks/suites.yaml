@@ -144,6 +144,38 @@ suites:
         label: "Twin fidelity adapter"
         builtin: "twin_fidelity"
 
+  - id: "harkonnen_devbench"
+    title: "Harkonnen on DevBench"
+    subsystem: "factory"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      External full-software-lifecycle benchmark wiring for Harkonnen. This
+      suite is script-based so the repo can launch a local or hosted DevBench
+      adapter without baking benchmark-specific logic into the Rust runner.
+    baseline_reference: >-
+      Internal baseline: wire the adapter, publish the exact task mix and
+      command used, and report completion plus artifact quality through the
+      benchmark's own evaluator once the external harness is available.
+    required_env:
+      - "DEVBENCH_COMMAND"
+    setup_notes:
+      - "Set DEVBENCH_COMMAND to the exact command that runs the Harkonnen DevBench adapter."
+      - "If using a local checkout, point DEVBENCH_ROOT at the DevBench repository or adapter workspace."
+      - "A native bridge scaffold now lives at `scripts/devbench_harkonnen_adapter.py`; point DEVBENCH_COMMAND at that script with `--repo <devbench repo>` and `--task <task>` to generate a Harkonnen draft spec and adapter summary."
+      - "The wrapper exits with code 10 when DevBench is not configured so the suite can stay wired before the external harness is installed."
+      - "When the adapter expects repository docs or artifacts, point it at runs that include Flint-generated README/API outputs."
+    tags:
+      - "external"
+      - "phase3"
+      - "factory"
+      - "coding"
+      - "lifecycle"
+    steps:
+      - id: "devbench_adapter"
+        label: "DevBench adapter"
+        program: "./scripts/benchmark-devbench.sh"
+
   - id: "longmemeval_raw_llm"
     title: "Raw LLM Baseline on LongMemEval"
     subsystem: "baseline"

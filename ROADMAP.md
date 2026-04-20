@@ -1,7 +1,9 @@
 # Harkonnen Labs — Execution Roadmap
 
 **This is the canonical build order from 2026-04-17 forward.**
-Phases 1, 4, 4b, 5, v1 (A–D), and 2 are shipped. Phase 3 is the active build target.
+Phases 1, 4, 4b, 5, v1 (A-D), and 2 are shipped. Phase 3 remains the active
+build target, with live twin provisioning explicitly deferred unless a future
+product needs running service virtualization.
 
 ---
 
@@ -23,7 +25,7 @@ A structured gap analysis identified seven practical gaps. Gap-closure phases A�
 | Gap | Gap-closure status |
 | --- | --- |
 | Enforced authority and guardrail boundaries | **Open** — `check_lease` API exists but is never called pre-write; guardrails are advisory only |
-| Live world-state modeling | Partial — twin is a manifest, not provisioned infrastructure (Phase 3) |
+| Live world-state modeling | Deferred — twin is still a manifest; live provisioning is postponed until a product needs running service virtualization |
 | Closed-loop outcome verification | Partial — observation endpoint deferred to Phase E (TypeDB dependency) |
 | Structural multi-agent coordination | Mostly closed — blackboard, heartbeat, claim eviction are real |
 | Economic and cost awareness | Closed — A1 trace spine + cost events |
@@ -35,12 +37,12 @@ A structured gap analysis identified seven practical gaps. Gap-closure phases A�
 - `.harkonnen/gap-closure-progress.md` tracks strategic bridge work phases A–D (all shipped)
 - Phase v1 (below) is the structural gate before the factory can be called Tier 4
 - Phase E remains deferred on the TypeDB-backed state graph
-- Numbered execution phases (2–7) stay focused on factory capability: real test execution, live twins, memory infrastructure, TypeDB, causal corpus
+- Numbered execution phases (2-7) stay focused on factory capability: real test execution, run-quality benchmarks, lifecycle adapters, memory infrastructure, TypeDB, causal corpus
 - Operator Model Activation and External Integrations are parallel product tracks
 
 ## Why this order
 
-The factory has a complete foundation: core pipeline, PackChat control plane, layered Coobie memory, causal graph, Pearl hierarchy labeling, multi-hop retrieval, operator-reviewed consolidation Workbench, agent trace spine, optimization programs, and adversarial metric attacks. The remaining gaps before Tier 4 are concrete and bounded: guardrails are advisory instead of enforced, the memory invalidation persistence layer is incomplete, and there are no outbound integrations. Phase v1 closes those gaps. After that, Phase 2 makes Bramble's validation score meaningful and Phase 3 grounds Sable's twin.
+The factory has a complete foundation: core pipeline, PackChat control plane, layered Coobie memory, causal graph, Pearl hierarchy labeling, multi-hop retrieval, operator-reviewed consolidation Workbench, agent trace spine, optimization programs, and adversarial metric attacks. The remaining gaps before Tier 4 are concrete and bounded: guardrails are advisory instead of enforced, the memory invalidation persistence layer is incomplete, and there are no outbound integrations. Phase v1 closes those gaps. After that, Phase 2 makes Bramble's validation score meaningful and Phase 3 focuses on documentation quality, spec-grounded evaluation, and lifecycle benchmark readiness. Live twin work remains available to revisit later if a product truly needs it.
 
 Benchmarking remains a parallel track. Each phase ships with at least one measurable gate.
 The benchmark philosophy should remain explicitly agentic-engineering shaped:
@@ -152,48 +154,14 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 ---
 
-## Phase 3 — Ash Real Twin Provisioning
+## Phase 3 — Documentation, Evaluation, and Lifecycle Benchmarks
 
-**Unlocks:** Sable's scenario evaluation becomes grounded.
-Right now Sable judges against a twin that is a JSON manifest, not running infrastructure.
+**Operator note:** live twin provisioning is explicitly deferred for now. The
+existing manifest-based twin support and `twin_fidelity_score` remain as
+diagnostic telemetry, but Phase 3 completion no longer depends on Docker-backed
+service virtualization unless a future product actually needs it.
 
-### 3-A — Models and Spec extension
-
-- Add `TwinFailureMode` enum to `src/models.rs`: `AuthExpiry`, `RateLimit`, `ConnectionRefusal`
-- Add `TwinServiceSpec` struct to `src/models.rs`: `name: String`, `image: String`, `port: Option<u16>`, `env: BTreeMap<String, String>`, `failure_mode: Option<TwinFailureMode>`
-- Add `twin_services: Vec<TwinServiceSpec>` (serde default empty) to the `Spec` struct in `src/models.rs`
-- Add `compose_project: Option<String>` to `TwinEnvironment` so teardown can find the right stack by project name
-
-### 3-B — `ash_provision_twin` in `src/orchestrator.rs`
-
-Replaces the current `build_twin_environment` call in the twin phase.
-
-- If `spec.twin_services` is empty AND `spec.dependencies` is non-empty, derive `TwinServiceSpec` entries automatically by mapping known names (postgres, redis, mysql, mongo, rabbitmq, kafka, minio) to well-known images and default ports; unknown deps get `busybox:latest` as a placeholder
-- Generate `docker-compose.yml` in `run_dir/` — one service per spec, applying `failure_mode` env vars: `AuthExpiry → MOCK_AUTH_EXPIRED=true`, `RateLimit → MOCK_RATE_LIMIT=10`, `ConnectionRefusal` → service omitted from compose entirely
-- Run `docker compose -p <project> -f <compose_file> up -d` (fall back gracefully to simulated mode if docker is unavailable — check `setup.machine.fingerprint.docker`)
-- Poll readiness: retry `docker compose -p <project> ps` up to 10 times with 1-second intervals; mark each service "running" or "failed"
-- Get port bindings: `docker compose -p <project> port <service> <internal_port>` for each service; write `twin_env.json` to run_dir: `{ "services": { "postgres": "127.0.0.1:54321", ... } }`
-- Build and return a `TwinEnvironment` where each service's `status` is `"running"`, `"failed"`, or `"simulated"` (if docker unavailable)
-
-### 3-C — `ash_teardown_twin` in `src/orchestrator.rs`
-
-- Called after the Sable/hidden-scenarios phase completes (currently line ~3200 in orchestrator)
-- Runs `docker compose -p <project> down --remove-orphans`
-- Logs teardown result to the run event log; does not fail the run if teardown errors
-
-### 3-D — Wire provisioning into the run lifecycle
-
-- Replace `let twin = self.build_twin_environment(run_id, spec_obj);` with `let (twin, compose_project) = self.ash_provision_twin(run_id, spec_obj, &run_dir).await?;`
-- Store `compose_project` in the blackboard so teardown can find it
-- Add teardown call after the hidden-scenarios phase completes
-- Pass `twin_env.json` path to Sable's scenario evaluation context so scenarios can reference real port bindings
-
-### 3-E — Update `twin_fidelity_score` in `src/coobie.rs`
-
-- Change the fidelity computation (currently line ~1221) to count services where `status == "running"` rather than just counting total services
-- Formula: `running_count / total_declared` — gracefully handles zero total (returns 0.1 as before)
-
-### 3-F — Flint documentation phase
+### 3-A — Flint documentation phase
 
 - After `self.package_artifacts(run_id)` in the Flint phase, call a new `flint_generate_docs` method
 - `flint_generate_docs` reads the spec and Mason's implementation artifacts from the run dir, calls the Flint LLM agent to generate a `README.md` and optionally an `API.md`
@@ -201,7 +169,7 @@ Replaces the current `build_twin_environment` call in the twin phase.
 - Adds `docs/README.md` to `blackboard.artifact_refs`
 - Required for DevBench — must land in Phase 3
 
-### 3-G — `src/spec_adherence.rs` — LLM-as-judge benchmark
+### 3-B — `src/spec_adherence.rs` — LLM-as-judge benchmark
 
 New builtin benchmark module (follows the same pattern as `cladder.rs`).
 
@@ -212,7 +180,7 @@ New builtin benchmark module (follows the same pattern as `cladder.rs`).
 - Builtin name: `"spec_adherence"`
 - Also supports a `without_scout` mode to measure what Scout's formalization step contributes
 
-### 3-H — `src/scenario_delta.rs` — Hidden Scenario Delta benchmark
+### 3-C — `src/scenario_delta.rs` — Hidden Scenario Delta benchmark
 
 New builtin benchmark module — Harkonnen-native, no external dataset.
 
@@ -223,20 +191,36 @@ New builtin benchmark module — Harkonnen-native, no external dataset.
 - Builtin name: `"scenario_delta"`
 - Env: `SCENARIO_DELTA_LIMIT` (max runs to include), `SCENARIO_DELTA_OUTPUT`
 
-### 3-I — `suites.yaml` entries
+### 3-D — `src/twin_fidelity.rs` — Optional twin telemetry benchmark
+
+- Keep `twin_fidelity_score` honest by counting only services whose status is `"running"`
+- Retain a Harkonnen-native summary suite for historical comparison and future revisit
+- Do not treat this as a Phase 3 blocker while twin provisioning is deferred
+
+### 3-E — `suites.yaml` entries
 
 - `harkonnen_spec_adherence` — Spec Adherence Rate (harkonnen-native, builtin: `spec_adherence`)
 - `harkonnen_scenario_delta` — Hidden Scenario Delta (harkonnen-native, builtin: `scenario_delta`)
-- `harkonnen_twin_fidelity` — Twin Fidelity (harkonnen-native: queries last N runs for `twin_fidelity_score` distribution, builtin: `scenario_delta` or new `twin_fidelity` builtin)
+- `harkonnen_twin_fidelity` — Twin Fidelity telemetry (harkonnen-native, builtin: `twin_fidelity`)
+- `harkonnen_devbench` — DevBench wrapper suite (script-based external adapter)
+
+### 3-F — DevBench adapter wiring
+
+- Add `scripts/benchmark-devbench.sh` following the same skip-and-delegate pattern as the existing SWE-bench and tau2 wrappers
+- `DEVBENCH_COMMAND` supplies the exact local or hosted command that runs Harkonnen on DevBench
+- Optional `DEVBENCH_ROOT` points at the benchmark checkout or adapter workspace
+- The wrapper exits with skip code `10` when DevBench is not configured so Phase 3 can be wired before the full external harness is installed
 
 **Benchmark gate:**
 
-- At least one run with `twin_fidelity_score > 0.5` from real Docker containers
 - `spec_adherence` first run published — completeness and precision against local run corpus
 - `scenario_delta` first run published — visible vs hidden pass rate gap across recent runs
-- `DevBench` adapter wired (script-based, not builtin — deferred to after Flint docs land)
+- `DevBench` adapter wired (script-based, not builtin)
 
-**Done when:** A spec with `twin_services` actually starts Docker containers; `twin_env.json` contains real port bindings; Sable receives those bindings; `twin_fidelity_score` reflects real container health; Flint produces a doc artifact per run; and `spec_adherence` and `scenario_delta` have first-run baselines.
+**Done when:** Flint produces a doc artifact per run, `spec_adherence` and
+`scenario_delta` have first-run baselines, and the DevBench adapter is wired so
+local or hosted runs can be launched through the benchmark manifest. Live twin
+provisioning is intentionally out of scope until a product needs it.
 
 ---
 
@@ -781,7 +765,7 @@ Benchmarks should advance in lockstep with implementation phases. When a phase s
 | --- | --- |
 | v1 | Decision audit completeness, memory supersession accuracy, WrongAnswer classification rate |
 | Phase 2 | SWE-bench Verified readiness, LiveCodeBench, Aider Polyglot |
-| Phase 3 | twin fidelity, hidden scenario delta, spec adherence rate, DevBench, coordination-compression / downstream-validation time |
+| Phase 3 | spec adherence rate, hidden scenario delta, DevBench, coordination-compression / downstream-validation time, optional twin telemetry |
 | Phase 4b | StreamingQA belief-update accuracy |
 | Phase 5b | FRAMES re-run (Qdrant), LongMemEval / LoCoMo regression check |
 | Phase 6 | GAIA Level 3, AgentBench |

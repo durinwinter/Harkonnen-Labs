@@ -412,8 +412,10 @@ security_expectations: [auth, secrets, isolation]
 All agents and contributors must check it before starting new work.
 Phases 1, 4, 4b, and 5 are already shipped.
 The active numbered build phases are Phase 2 (Bramble real test execution) and
-Phase 3 (Ash live twin provisioning), with Operator Model Activation running as a
-parallel product/control-plane track. Long-term roadmap work remains Phase 5b
+Phase 3 (Flint docs, spec-grounded evaluation, and DevBench readiness, with
+live twin provisioning deferred unless a future product needs it), with
+Operator Model Activation running as a parallel product/control-plane track.
+Long-term roadmap work remains Phase 5b
 (memory infrastructure), Phase 6 (TypeDB semantic layer), and Phase 7
 (causal attribution corpus + E-CARE).
 
@@ -465,7 +467,7 @@ parallel product/control-plane track. Long-term roadmap work remains Phase 5b
 ### Planned (next build layer)
 
 - **Phase 2** — Bramble real test execution from spec-driven `test_commands`; Mason online-judge feedback loop (`FailureKind::WrongAnswer`); LiveCodeBench and Aider Polyglot adapters
-- **Phase 3** — Ash live twin provisioning against running Docker stubs; Flint documentation phase; spec adherence rate and hidden scenario delta internal benchmarks; DevBench adapter
+- **Phase 3** — Flint documentation phase; spec adherence rate and hidden scenario delta internal benchmarks; DevBench adapter; twin provisioning remains deferred unless a future product needs running service virtualization
 - **Operator Model full five-layer interview** — extend the v1-D MVP (two layers shipped) to cover dependencies, institutional knowledge, and friction; generate full artifact set
 - **Phase 5b** — Memory infrastructure: Qdrant semantic layer, OCR ingest, and `src/memory.rs` refactor into a proper module tree
 - **Phase 6** — TypeDB 3.x semantic graph layer (see MASTER_SPEC.md Part 4); GAIA Level 3 and AgentBench adapters

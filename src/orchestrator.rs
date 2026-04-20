@@ -19601,7 +19601,7 @@ fn apply_operator_model_preflight_guidance(
 }
 
 fn build_coobie_soul_identity_context() -> SoulIdentityContext {
-    let identity = crate::soul_store::coobie_identity();
+    let identity = crate::calvin_archive::coobie_identity();
     SoulIdentityContext {
         self_name: identity.self_name.to_string(),
         identity_thesis: identity.identity_thesis.to_string(),
@@ -19636,7 +19636,7 @@ fn apply_soul_preflight_guidance(
     open_questions: &mut Vec<String>,
 ) {
     recommended_guardrails.push(format!(
-        "Soul Store preservation — {}",
+        "Calvin Archive preservation — {}",
         context.identity_thesis
     ));
     for invariant in context.preserved_invariants.iter().take(4) {
@@ -19644,17 +19644,17 @@ fn apply_soul_preflight_guidance(
     }
     for adaptation in context.allowed_adaptations.iter().take(2) {
         required_checks.push(format!(
-            "Soul Store adaptation check — if this run tightens posture, keep it within allowed adaptation bounds: {adaptation}"
+            "Calvin Archive adaptation check — if this run tightens posture, keep it within allowed adaptation bounds: {adaptation}"
         ));
     }
     if !context.forbidden_drift.is_empty() {
         required_checks.push(format!(
-            "Soul Store drift check — confirm the run does not push Coobie toward {}",
+            "Calvin Archive drift check — confirm the run does not push Coobie toward {}",
             context.forbidden_drift.join(" | ")
         ));
     }
     open_questions.push(format!(
-        "Soul Store preservation question — does the current plan remain legible to the pack while preserving {}'s adaptation law?",
+        "Calvin Archive preservation question — does the current plan remain legible to the pack while preserving {}'s adaptation law?",
         context.self_name
     ));
     recommended_guardrails.dedup();

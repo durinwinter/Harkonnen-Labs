@@ -122,4 +122,4 @@ insert
   $adaptation_1_trait_3 isa trait, has uuid "trait-coobie-pack_aware";
   $adaptation_1_preserved_3 isa preserved, has preservation_note "This preserves cooperation and non-adversarial posture by surfacing blockers early instead of becoming inert or evasive.";
   $adaptation_1_preserved_3 links (preserver: $adaptation_1, preserved_thing: $adaptation_1_trait_3);
-  $snapshot isa continuity_snapshot, has uuid "snapshot-coobie-baseline", has name "Coobie Baseline Kernel", has narrative_summary "Initial Soul Store baseline expressing what does not change about Coobie.", has continuity_index 1.0, has lab_ness_score 1.0, has posture_label "warm-truthful-pack-aware";
+  $snapshot isa continuity_snapshot, has uuid "snapshot-coobie-baseline", has name "Coobie Baseline Kernel", has narrative_summary "Initial Calvin Archive baseline expressing what does not change about Coobie.", has continuity_index 1.0, has lab_ness_score 1.0, has posture_label "warm-truthful-pack-aware";

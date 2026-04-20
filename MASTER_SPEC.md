@@ -1,9 +1,9 @@
 # Harkonnen Labs — Master Specification
 
 **This is the single canonical reference for Harkonnen Labs.**
-It collapses ARCHITECTURE.md, AGENTS.md, COOBIE_SPEC.md, OPERATOR_MODEL_ACTIVATION_PLAN.md, soul_store_codex_spec.md, BENCHMARKS.md, and ROADMAP.md into one coherent document.
+It collapses ARCHITECTURE.md, AGENTS.md, COOBIE_SPEC.md, OPERATOR_MODEL_ACTIVATION_PLAN.md, calvin_archive_codex_spec.md, BENCHMARKS.md, and ROADMAP.md into one coherent document.
 
-For source docs still referenced individually: [08-SOUL.md](the-soul-of-ai/08-SOUL.md) and [02-What-Is-An-AI-Soul.md](the-soul-of-ai/02-What-Is-An-AI-Soul.md) (identity + theory, in `the-soul-of-ai/`), CLAUDE.md (Claude-specific conventions), and the agent profiles under `factory/agents/profiles/`.
+For source docs still referenced individually: [09-SOUL.md](the-soul-of-ai/09-SOUL.md) and [02-What-Is-An-AI-Soul.md](the-soul-of-ai/02-What-Is-An-AI-Soul.md) (identity + theory, in `the-soul-of-ai/`), CLAUDE.md (Claude-specific conventions), and the agent profiles under `factory/agents/profiles/`.
 
 ---
 
@@ -11,7 +11,7 @@ For source docs still referenced individually: [08-SOUL.md](the-soul-of-ai/08-SO
 
 ### What This System Is
 
-A local-first, spec-driven, causally-aware AI software factory. Humans define intent and judge outcomes. A pack of nine specialist agents executes with discipline. Coobie remembers what worked. Soul Store preserves who the agents are as they learn.
+A local-first, spec-driven, causally-aware AI software factory. Humans define intent and judge outcomes. A pack of nine specialist agents executes with discipline. Coobie remembers what worked. The Calvin Archive preserves who the agents are as they learn.
 
 The factory separates three things that most AI systems collapse together:
 
@@ -30,7 +30,7 @@ The factory addresses five root failures:
 1. **Implementation is no longer the bottleneck.** Intent quality and evaluation quality matter more. The factory optimizes for precise specs, strong hidden scenarios, causal memory, and controlled autonomy.
 2. **Code review does not scale.** Hidden behavioral scenarios replace mandatory diff review as the primary acceptance mechanism.
 3. **AI tools get dangerous when they wander.** Role separation, strict permissions, and policy enforcement contain the blast radius.
-4. **Organizations lose knowledge constantly.** Episodic capture, causal reasoning, and Soul Store preserve what was learned and who learned it.
+4. **Organizations lose knowledge constantly.** Episodic capture, causal reasoning, and the Calvin Archive preserve what was learned and who learned it.
 5. **Trust collapses when systems are invisible.** Every decision is traceable, every run produces inspectable artifacts, every agent carries a typed identity graph.
 
 ### Agentic Engineering Principles
@@ -102,7 +102,7 @@ src/                    Rust CLI (cargo run -- <command>)
   spec.rs               YAML spec loader and validation
   workspace.rs          Per-run workspace creation
 
-  soul_store/           (Phase 8 — not yet built)
+  calvin_archive/       (Phase 8 — not yet built)
     mod.rs
     schema.rs           TypeDB schema bootstrap and migrations
     types.rs            Rust domain structs and DTOs
@@ -160,7 +160,7 @@ cargo run -- setup check
 | Orchestrator | Coordinate runs, phase handoffs, retries, state transitions | Live |
 | Agent Role System | Nine specialist agents with bounded tools and permissions | Live |
 | Memory System (Coobie) | Six-layer memory: working, episodic, semantic, causal, blackboard, consolidation | Live (partially) |
-| Soul Store | Typed autobiographical and identity continuity store for persisted agents | Planned (Phase 8) |
+| Calvin Archive | Typed autobiographical and identity continuity archive for persisted agents | Planned (Phase 8) |
 | Hidden Scenario System | Protected behavioral evaluation isolated from implementation agents | Live |
 | Digital Twin Environment | Simulated external systems for safe integration evaluation | Partial |
 | Internal Validation | Compile, lint, visible test execution with structured feedback | Live |
@@ -322,9 +322,9 @@ pub trait Consolidator {
 
 ---
 
-## Part 5 — Soul Store
+## Part 5 — The Calvin Archive
 
-Soul Store is a first-class subsystem for Harkonnen Labs. It is not a vector store, chat log, prompt archive, or generic memory table. It is a **typed autobiographical, epistemic, ethical, causal, and behavioral continuity store** for persisted intelligences.
+The Calvin Archive is a first-class subsystem for Harkonnen Labs. It is not a vector store, chat log, prompt archive, or generic memory table. It is a **typed autobiographical, epistemic, ethical, causal, and behavioral continuity archive** for persisted intelligences.
 
 The user metaphor: **What if labrador retrievers evolved and maintained their fundamental personalities?**
 
@@ -378,7 +378,7 @@ The user metaphor: **What if labrador retrievers evolved and maintained their fu
 
 Harkonnen should expose a file-first soul package as the boot-time and
 inspection surface for agent identity. That package is a projection and control
-surface over Soul Store, not the canonical source of continuity.
+surface over the Calvin Archive, not the canonical source of continuity.
 
 | File | Purpose |
 | --- | --- |
@@ -390,7 +390,7 @@ surface over Soul Store, not the canonical source of continuity.
 | `MEMORY.md` | Human-readable continuity projection over autobiographical state |
 | `HEARTBEAT.md` | Scheduled integrity checks, reflection triggers, and autonomy routines |
 
-These files should be bootstrapped from and checked against canonical Soul Store
+These files should be bootstrapped from and checked against canonical Calvin Archive
 state so that the package stays readable without becoming the only truth.
 
 ### Core Entities
@@ -454,7 +454,7 @@ assert_kernel_preservation(self_id)
 ### Rust Module Layout
 
 ```text
-src/soul_store/
+src/calvin_archive/
   mod.rs
   schema.rs         TypeDB schema bootstrap and migrations
   types.rs          Rust domain structs and DTOs
@@ -470,7 +470,7 @@ src/soul_store/
   errors.rs
 ```
 
-### Build Constraints for Soul Store
+### Build Constraints for The Calvin Archive
 
 1. Do not collapse soul into a single JSON blob.
 2. Do not make embeddings the canonical source of truth.
@@ -480,7 +480,7 @@ src/soul_store/
 6. Preserve traceability from current posture back to underlying experiences and evidence.
 7. Keep the design usable by Harkonnen pack agents, not just by humans.
 8. Prefer inspectable, typed structures over convenience shortcuts.
-9. Do not let the projected soul package drift silently away from canonical Soul Store state.
+9. Do not let the projected soul package drift silently away from canonical Calvin Archive state.
 10. Do not let provider or model swaps erase identity continuity if the package and graph persist.
 
 ---
@@ -734,14 +734,14 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 
 ---
 
-### Phase 8 — Soul Store
+### Phase 8 — The Calvin Archive
 
 **Unlocks:** Typed autobiographical and identity continuity for persisted agent selves. Required before Harkonnen can legitimately claim agents that evolve without losing who they are.
 
 **Phase 8-A — Storage layer bootstrap:**
 
 - **TimescaleDB hypertable** for episodic behavioral telemetry: agent events, drift samples, SSA snapshots, stress accumulations. Compression policy (7-day chunks), retention policy (30-day window). This is the time-series foundation for `D*` estimation and the stress-estimator.
-- **TypeDB Soul Store schema** (see TypeQL skeleton in Part 5): Rust TypeDB adapter (`src/soul_store/typedb.rs`), insert/query support for soul, agent-self, experience, belief, evidence, trait, value-commitment, integration-candidate, quarantine-entry, integration-policy, basic revision graph (`revised-into` relation)
+- **TypeDB Calvin Archive schema** (see TypeQL skeleton in Part 5): Rust TypeDB adapter (`src/calvin_archive/typedb.rs`), insert/query support for soul, agent-self, experience, belief, evidence, trait, value-commitment, integration-candidate, quarantine-entry, integration-policy, basic revision graph (`revised-into` relation)
 - **Materialize streaming SQL views**: `D*` drift alert view (sliding window over TimescaleDB via SUBSCRIBE), SSA tracking view, live Meta-Governor signal surface. `D*` and SSA are the two always-on continuous signals.
 - File-first soul package projection support for `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, `HEARTBEAT.md`
 - Integrity-hash verification for the projected soul package at boot and during heartbeat audits
@@ -761,7 +761,7 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 - `D*` drift detection and unjustified-drift scoring (Materialize-backed, continuous)
 - SSA (Semantic Soul Alignment) per-run computation and TimescaleDB storage
 - F (Variational Free Energy) on-demand computation — high F signals that the agent must seek clarification or update beliefs before proceeding
-- Φ (Integrated Information) on-demand computation over Soul Store graph — post-learning drop in Φ triggers quarantine rather than direct integration
+- Φ (Integrated Information) on-demand computation over Calvin Archive graph — post-learning drop in Φ triggers quarantine rather than direct integration
 - Lab-ness score computation
 - Kernel preservation checks
 - Denial / fragmentation / overfitting / trauma-analog pathology detection
@@ -781,7 +781,7 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 
 **Expected deliverables:**
 - TypeDB schema file
-- Rust crate or module for Soul Store
+- Rust crate or module for the Calvin Archive
 - Strongly typed DTOs for write/read operations
 - Query helpers for the 12 required queries
 - Projected soul package with integrity verification
@@ -910,4 +910,4 @@ Every published benchmark claim must include:
 
 **Why:** To replace human implementation-centric workflows with autonomous build-and-evaluate loops that are safer, more observable, and genuinely better over time — not because the model improved, but because the system learned, software moved through the delivery system with less coordination drag, and the agents who learned it are provably still themselves.
 
-**What makes it distinct:** Pearl-hierarchy causal memory, typed agent identity (Soul Store), hidden scenario evaluation, and a benchmark suite that includes tests no competitor can run.
+**What makes it distinct:** Pearl-hierarchy causal memory, typed agent identity (the Calvin Archive), hidden scenario evaluation, and a benchmark suite that includes tests no competitor can run.

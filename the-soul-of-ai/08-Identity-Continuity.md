@@ -103,7 +103,7 @@ $$\Phi(M) = \min_{\pi \in \Pi}\; D\!\left(\,p(X^t \mid X^{t-1})\;\big\|\;\prod_{
 
 Where $\Pi$ is the set of all bipartitions of $M$'s components, and $D$ is a divergence measure over the cause-effect structure. The minimum is taken because a system is only as integrated as its weakest partition.
 
-**Interpretation for Harkonnen:** A high $\Phi$ means the agent's causal graph is tightly interconnected — new heuristics integrate with existing ones rather than appending as isolated rules. A drop in $\Phi$ after learning a new workflow is a signal that the agent is accumulating knowledge *without understanding* — a common precursor to drift. The Meta-Governor uses $\Phi$ as a gate: if a proposed Soul Store update reduces $\Phi$ below threshold, the update is quarantined for operator review before being committed to the kernel.
+**Interpretation for Harkonnen:** A high $\Phi$ means the agent's causal graph is tightly interconnected — new heuristics integrate with existing ones rather than appending as isolated rules. A drop in $\Phi$ after learning a new workflow is a signal that the agent is accumulating knowledge *without understanding* — a common precursor to drift. The Meta-Governor uses $\Phi$ as a gate: if a proposed Calvin Archive update reduces $\Phi$ below threshold, the update is quarantined for operator review before being committed to the kernel.
 
 **Implementation note:** The `omega-consciousness` crate is proposed for IIT $\Phi$ computation in Rust. *Verify crate availability before depending on it* — $\Phi$ computation is NP-hard in the general case and practical implementations require approximations over bounded system sizes.
 
@@ -413,7 +413,7 @@ No single database is the source of truth for identity continuity. The three tog
 | $D^* = \alpha / \gamma$ | Steady-state drift bound | Breach → recovery procedure $\mathcal{R}$ |
 | SSA | Action-goal coherence across problem domains | Low SSA → clarification checkpoint inserted |
 | $\mathcal{F}$ | Surprise relative to Labrador prior | High $\mathcal{F}$ → agent must seek information before acting |
-| $\Phi$ | Causal integration of learned heuristics | Drop in $\Phi$ → Soul Store update quarantined |
+| $\Phi$ | Causal integration of learned heuristics | Drop in $\Phi$ → Calvin Archive update quarantined |
 | $\mathcal{S}(T)$ | Accumulated unresolved identity-relative stress | Threshold breach → governed reflection / evolution proposal |
 | $H$ | Residual cross-layer drift after rollback | High $H$ → rollback insufficient, deeper recovery required |
 
@@ -423,7 +423,7 @@ No single database is the source of truth for identity continuity. The three tog
 | TypeDB | Ontological constraints and SSA enforcement | TypeQL, `typedb-driver` crate |
 | Materialize | Real-time drift detection and Meta-Governor alerting | Streaming SQL, SUBSCRIBE |
 
-The mathematics described here are not aspirational. They are the design contract for Phase 8. When the Soul Store is built, these metrics are how it will be tested.
+The mathematics described here are not aspirational. They are the design contract for Phase 8. When the Calvin Archive is built, these metrics are how it will be tested.
 
 The final chapter returns from metrics to credo. After the system has been
 defined, historicized, species-shaped, architected, governed, and measured, the

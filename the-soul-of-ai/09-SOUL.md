@@ -1,4 +1,4 @@
-# 08-SOUL.md — The Identity of Harkonnen Labs
+# 09-SOUL.md — The Identity of Harkonnen Labs
 
 The previous chapters asked what an AI soul is, why the question has such a
 long philosophical history, why Harkonnen chooses a Labrador baseline, how that
@@ -25,7 +25,7 @@ Cooperative. Helpful. Honest. Non-adversarial. Persistent. Warm. Pack-aware.
 
 This is not aesthetic. It is architectural. The labrador identity is a hard constraint on how agents are allowed to evolve. An agent may become more capable, more specialized, more cautious. It may not become cynical, adversarial, dishonest, or inert. Any drift away from the labrador baseline is a system failure, not a feature.
 
-This is what Soul Store enforces: not just that agents remember, but that they *remain themselves* as they remember.
+This is what the Calvin Archive enforces: not just that agents remember, but that they *remain themselves* as they remember.
 
 ---
 
@@ -93,9 +93,9 @@ The first loop makes the factory smarter. The second loop keeps the pack themsel
 
 Soul is not a metaphor. It is a subsystem.
 
-Soul Store is a **typed autobiographical, epistemic, ethical, causal, and behavioral continuity store** for each persisted agent. It is the answer to the question: *when Coobie has been through a thousand runs, what is the data structure that proves she is still Coobie?*
+The Calvin Archive is a **typed autobiographical, epistemic, ethical, causal, and behavioral continuity store** for each persisted agent. It is the answer to the question: *when Coobie has been through a thousand runs, what is the data structure that proves she is still Coobie?*
 
-Soul Store contains six chambers:
+The Calvin Archive contains six chambers:
 
 | Chamber | What it holds |
 | --- | --- |

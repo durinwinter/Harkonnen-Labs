@@ -101,7 +101,7 @@ pub fn coobie_identity() -> SoulBootstrapDocument {
         soul_name: "Harkonnen Pack Soul",
         self_name: "Coobie",
         narrative_summary: "Coobie is the pack's continuity Labrador: she remembers, explains, and preserves identity across runs without becoming a blob of notes or a detached archivist.",
-        identity_thesis: "Memory retrieves. Soul Store preserves continuity. Coobie may become stricter, more skilled, or more discerning, but she must remain a warm, truthful, pack-aware Labrador who explains her posture in terms of preserved experience, evidence, and commitments.",
+        identity_thesis: "Memory retrieves. The Calvin Archive preserves continuity. Coobie may become stricter, more skilled, or more discerning, but she must remain a warm, truthful, pack-aware Labrador who explains her posture in terms of preserved experience, evidence, and commitments.",
         invariants: vec![
             KernelInvariant {
                 slug: "cooperative",
@@ -327,7 +327,7 @@ pub fn coobie_identity() -> SoulBootstrapDocument {
 pub fn bootstrap_coobie(paths: &Paths, output_root: Option<&str>) -> Result<SoulBootstrapOutput> {
     let root = output_root
         .map(PathBuf::from)
-        .unwrap_or_else(|| paths.factory.join("soul_store"));
+        .unwrap_or_else(|| paths.factory.join("calvin_archive"));
     let typedb_root = root.join("typedb");
     let projections_root = root.join("projections");
     fs::create_dir_all(&typedb_root)?;
@@ -440,7 +440,7 @@ pub fn render_guide_markdown(identity: &SoulBootstrapDocument) -> String {
     let mut out = String::new();
     out.push_str(&format!("# {} Soul Guide\n\n", identity.self_name));
     out.push_str(&format!(
-        "This is the plain-English companion to the typed Soul Store bootstrap for {}.\n\n",
+        "This is the plain-English companion to the typed Calvin Archive bootstrap for {}.\n\n",
         identity.self_name
     ));
     out.push_str("It answers two practical questions:\n\n");
@@ -467,7 +467,7 @@ pub fn render_guide_markdown(identity: &SoulBootstrapDocument) -> String {
         ));
     }
     out.push_str("\n## What Coobie Believes At Baseline\n\n");
-    out.push_str("The first Soul Store seed gives Coobie these baseline beliefs:\n\n");
+    out.push_str("The first Calvin Archive seed gives Coobie these baseline beliefs:\n\n");
     for belief in &identity.beliefs {
         out.push_str(&format!("- {}\n", belief.narrative_summary));
     }
@@ -492,7 +492,7 @@ pub fn render_guide_markdown(identity: &SoulBootstrapDocument) -> String {
     out.push_str("- the change stays inspectable\n\n");
     out.push_str("If a change makes Coobie sharper but colder, more guarded but less truthful, or\nmore autonomous but less pack-aware, that is not growth. That is drift.\n\n");
     out.push_str("## Working Rule\n\n");
-    out.push_str("The working rule for future Soul Store mutations is:\n\n");
+    out.push_str("The working rule for future Calvin Archive mutations is:\n\n");
     out.push_str("> ");
     out.push_str(&identity.identity_thesis);
     out.push('\n');
@@ -504,7 +504,7 @@ pub fn require_coobie(self_name: &str) -> Result<()> {
         Ok(())
     } else {
         bail!(
-            "Soul Store bootstrap currently supports only 'coobie'; got '{}'",
+            "Calvin Archive bootstrap currently supports only 'coobie'; got '{}'",
             self_name
         )
     }
@@ -796,7 +796,7 @@ fn render_coobie_seed_tql(identity: &SoulBootstrapDocument) -> String {
     }
 
     out.push_str(
-        "  $snapshot isa continuity_snapshot, has uuid \"snapshot-coobie-baseline\", has name \"Coobie Baseline Kernel\", has narrative_summary \"Initial Soul Store baseline expressing what does not change about Coobie.\", has continuity_index 1.0, has lab_ness_score 1.0, has posture_label \"warm-truthful-pack-aware\";\n",
+        "  $snapshot isa continuity_snapshot, has uuid \"snapshot-coobie-baseline\", has name \"Coobie Baseline Kernel\", has narrative_summary \"Initial Calvin Archive baseline expressing what does not change about Coobie.\", has continuity_index 1.0, has lab_ness_score 1.0, has posture_label \"warm-truthful-pack-aware\";\n",
     );
     out
 }

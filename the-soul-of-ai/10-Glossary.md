@@ -77,7 +77,7 @@ specialized meaning that is not standard industry usage.
 
 | Term | Meaning in Harkonnen |
 | --- | --- |
-| **Coobie** | The memory and continuity pup. Coobie manages episodic capture, causal reasoning, Palace patrols, preflight guidance, consolidation, and eventually Soul Store. |
+| **Coobie** | The memory and continuity pup. Coobie manages episodic capture, causal reasoning, Palace patrols, preflight guidance, consolidation, and eventually the Calvin Archive. |
 | **Commissioning brief** | A generated operator-context artifact that Scout and Coobie use before spec drafting and run preflight. |
 | **Compound scent** | The den-level signal produced when multiple related causes reinforce one another in Coobie Palace. |
 | **Continuity snapshot** | A derived snapshot used to compare identity state across time, revisions, or rollback events. |
@@ -105,9 +105,9 @@ specialized meaning that is not standard industry usage.
 | **Required checks** | The run-specific validation, caution, and guardrail instructions that Coobie injects into a briefing before execution begins. |
 | **Sable ground truth** | The Harkonnen principle that Sable's hidden scenario outcomes outrank visible test success when judging real correctness. |
 | **Scent** | The weighted signal associated with a Den or memory pattern in Coobie Palace. |
-| **Six chambers** | Harkonnen's conceptual partition of Soul Store into Mythos, Episteme, Ethos, Pathos, Logos, and Praxis. |
+| **Six chambers** | Harkonnen's conceptual partition of the Calvin Archive into Mythos, Episteme, Ethos, Pathos, Logos, and Praxis. |
 | **Soul package** | Harkonnen's projected boot-time identity surface consisting of files like `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`. |
-| **Soul Store** | Harkonnen's planned typed continuity subsystem for autobiographical, epistemic, ethical, causal, and behavioral persistence. |
+| **Calvin Archive** | Harkonnen's typed continuity subsystem for autobiographical, epistemic, ethical, causal, and behavioral persistence, named after Susan Calvin's robopsychological orientation toward artificial minds under law. |
 | **Stress estimator** | In Harkonnen's continuity model, the accumulated signal of unresolved identity-relative strain across a time window. |
 | **Three timescales of becoming** | Harkonnen's governance framing for fast belief updates, medium schema/value revision, and slow policy revision. |
 | **Unjustified drift** | A Harkonnen continuity metric idea: drift that occurs without enough evidence or warrant to justify the change. |

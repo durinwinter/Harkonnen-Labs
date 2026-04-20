@@ -153,7 +153,7 @@ Agentic engineering therefore needs memory that can be:
 - invalidated when contradicted
 
 Harkonnen extends this further: memory alone is not enough. Coobie preserves
-causal continuity, and Soul Store preserves identity continuity.
+causal continuity, and the Calvin Archive preserves identity continuity.
 
 ### 5. Observability is first-class
 
@@ -239,7 +239,7 @@ Harkonnen adds a harder question:
 
 > if an agent learns over time, what proves it is still itself?
 
-That is the role of Soul Store. The system is not complete if it learns but
+That is the role of the Calvin Archive. The system is not complete if it learns but
 cannot preserve the continuity of the learner.
 
 ### Hidden evaluation over review ritual

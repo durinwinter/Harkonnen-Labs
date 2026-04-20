@@ -55,7 +55,7 @@ chmod +x \
   "$BIN_DIR/typedb-logs" \
   "$BIN_DIR/typedb-console"
 
-printf 'Soul Store TypeDB scaffolded.\n'
+printf 'Calvin Archive TypeDB scaffolded.\n'
 printf 'Compose file: %s\n' "$TYPEDB_DIR/docker-compose.yml"
 printf 'Data dir:     %s\n' "$TYPEDB_DATA"
 printf 'Start:        %s\n' "$BIN_DIR/typedb-up"

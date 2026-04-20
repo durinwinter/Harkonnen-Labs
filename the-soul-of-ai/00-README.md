@@ -101,6 +101,8 @@ question:
 - how the history of soul and consciousness bears on that question
 - why the Labrador baseline is the chosen identity form
 - how that identity becomes architecture
+- why the continuity subsystem is better understood as the Calvin Archive than
+  as a mere laws engine or memory table
 - how change is governed
 - how continuity is measured
 - what Harkonnen itself therefore believes
@@ -115,16 +117,17 @@ question:
 | [02-What-Is-An-AI-Soul.md](02-What-Is-An-AI-Soul.md) | The foundational question: what is a soul, computationally speaking? Definitions, structure, the six chambers, and why persistence of identity matters for AI systems. |
 | [03-Ontology-Of-The-Synthetic-Soul.md](03-Ontology-Of-The-Synthetic-Soul.md) | The historical and philosophical migration from soul to mind to consciousness, and why those older debates still matter for synthetic identity, projection, and AI ethics. |
 | [04-Why-Labradors.md](04-Why-Labradors.md) | Why Harkonnen anchors its agents to a Labrador baseline: temperament over mere law, companion species over human mimicry, and a middle ground between toolhood and personhood. |
-| [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md) | Why persistent agents need more than a static `SOUL.md`: the move from session-bound models to file-first, multi-anchor identity architecture, and how Soul Store fits underneath it. |
-| [06-Governed-Integration.md](06-Governed-Integration.md) | Why selfhood requires integration-time adjudication, what quarantine is for, how the Meta-Governor should work, and why multi-timescale revision matters. |
-| [07-Identity-Continuity.md](07-Identity-Continuity.md) | The mathematics of identity: drift bounds, semantic soul alignment, variational free energy, integrated information, stress accumulation, hysteresis, and the three-tier data architecture (TimescaleDB, TypeDB, Materialize) that enforces them at production scale. |
-| [08-SOUL.md](08-SOUL.md) | The identity of Harkonnen Labs specifically — what it believes, why it exists, and how to make trade-offs when the answer isn't obvious. |
-| [09-Glossary.md](09-Glossary.md) | A reference glossary that marks which terms are industry-wide, which come from specialist research traditions, and which are Harkonnen-specific explanatory vocabulary. |
+| [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md) | Why persistent agents need more than a static `SOUL.md`: the move from session-bound models to file-first, multi-anchor identity architecture, and how the Calvin Archive fits underneath it. |
+| [06-The-Calvin-Archive.md](06-The-Calvin-Archive.md) | Why Harkonnen names its continuity subsystem after Susan Calvin: not a laws engine, but a robopsychological archive of continuity, revision, precedent, and diagnosis. |
+| [07-Governed-Integration.md](07-Governed-Integration.md) | Why selfhood requires integration-time adjudication, what quarantine is for, how the Meta-Governor should work, and why multi-timescale revision matters. |
+| [08-Identity-Continuity.md](08-Identity-Continuity.md) | The mathematics of identity: drift bounds, semantic soul alignment, variational free energy, integrated information, stress accumulation, hysteresis, and the three-tier data architecture (TimescaleDB, TypeDB, Materialize) that enforces them at production scale. |
+| [09-SOUL.md](09-SOUL.md) | The identity of Harkonnen Labs specifically — what it believes, why it exists, and how to make trade-offs when the answer isn't obvious. |
+| [10-Glossary.md](10-Glossary.md) | A reference glossary that marks which terms are industry-wide, which come from specialist research traditions, and which are Harkonnen-specific explanatory vocabulary. |
 
 ---
 
 More chapters will be added here as the thinking develops. Likely candidates:
 
 - What does it mean for an agent to *learn*?
-- Memory as autobiography — how the Soul Store chambers map to the way humans construct identity over time
+- Memory as autobiography — how the Calvin Archive chambers map to the way humans construct identity over time
 - The ethics of persistent intelligences — what obligations arise when an agent accumulates a self

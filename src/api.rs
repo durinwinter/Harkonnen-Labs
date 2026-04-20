@@ -36,7 +36,7 @@ use crate::{
     pidgin::{self, PidginTranslation},
     reporting,
     setup::command_available,
-    soul_store::SoulBootstrapDocument,
+    calvin_archive::SoulBootstrapDocument,
     tesseract,
 };
 
@@ -858,10 +858,10 @@ async fn get_run(Path(id): Path<String>, State(app): State<AppContext>) -> impl 
 }
 
 async fn get_soul_kernel(Path(id): Path<String>) -> impl IntoResponse {
-    if !crate::soul_store::supported_self(&id) {
+    if !crate::calvin_archive::supported_self(&id) {
         return (StatusCode::NOT_FOUND, "soul baseline not found").into_response();
     }
-    let kernel = crate::soul_store::coobie_identity();
+    let kernel = crate::calvin_archive::coobie_identity();
     (
         StatusCode::OK,
         Json(SoulKernelResponse {
@@ -873,10 +873,10 @@ async fn get_soul_kernel(Path(id): Path<String>) -> impl IntoResponse {
 }
 
 async fn get_soul_guide(Path(id): Path<String>) -> impl IntoResponse {
-    if !crate::soul_store::supported_self(&id) {
+    if !crate::calvin_archive::supported_self(&id) {
         return (StatusCode::NOT_FOUND, "soul guide not found").into_response();
     }
-    let markdown = crate::soul_store::render_guide_markdown(&crate::soul_store::coobie_identity());
+    let markdown = crate::calvin_archive::render_guide_markdown(&crate::calvin_archive::coobie_identity());
     (
         StatusCode::OK,
         [(

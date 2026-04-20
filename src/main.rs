@@ -25,7 +25,7 @@ mod policy;
 mod reporting;
 mod scenarios;
 mod setup;
-mod soul_store;
+mod calvin_archive;
 mod spec;
 mod streamingqa;
 mod tesseract;

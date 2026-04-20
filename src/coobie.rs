@@ -711,7 +711,7 @@ pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
         .soul_identity_context
         .as_ref()
         .map(render_soul_identity_context)
-        .unwrap_or_else(|| "- No Soul Store identity context was attached to this run yet.".to_string());
+        .unwrap_or_else(|| "- No Calvin Archive identity context was attached to this run yet.".to_string());
 
     format!(
         "# Coobie Preflight Response

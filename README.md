@@ -133,7 +133,7 @@ PackChat shifts the factory from pure autonomous orchestration to **supervised a
 * **Filesystem** → specs, artifacts, evidence, Coobie memory (`factory/memory/*.md`)
 * **fastembed / OpenAI-compatible embeddings + SQLite vector store** → hybrid semantic + keyword retrieval (live)
 * **(Planned / Optional) TypeDB 3.x service** → durable semantic graph + typed relational queries, not the hot-path store
-* **(Phase 8) Three-tier identity stack** — TimescaleDB hypertables (behavioral telemetry, stress accumulation), TypeDB (Soul Store ontology, six chambers), Materialize streaming SQL (real-time `D*` drift monitoring via SUBSCRIBE). See [the-soul-of-ai/07-Identity-Continuity.md](the-soul-of-ai/07-Identity-Continuity.md) for the full data architecture.
+* **(Phase 8) Three-tier identity stack** — TimescaleDB hypertables (behavioral telemetry, stress accumulation), TypeDB (Calvin Archive ontology, six chambers), Materialize streaming SQL (real-time `D*` drift monitoring via SUBSCRIBE). See [the-soul-of-ai/08-Identity-Continuity.md](the-soul-of-ai/08-Identity-Continuity.md) for the full data architecture.
 * **(Future) Causal graph / causaloids** → executable causal reasoning via DeepCausality
 
 ---
@@ -460,9 +460,9 @@ Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and v1 (
 | Qdrant + OCR memory infrastructure | Phase 5b |
 | TypeDB 3.x semantic graph layer | Phase 6 |
 | E-CARE + causal attribution corpus | Phase 7 |
-| Soul Store (typed autobiographical + epistemic persistence for agents) | Phase 8 |
+| Calvin Archive (typed autobiographical + epistemic persistence for agents) | Phase 8 |
 
-See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase build order. See [MASTER_SPEC.md](MASTER_SPEC.md) for the canonical architecture, agent design, and Soul Store specification.
+See [ROADMAP.md](ROADMAP.md) for the full phase-by-phase build order. See [MASTER_SPEC.md](MASTER_SPEC.md) for the canonical architecture, agent design, and Calvin Archive specification.
 
 ---
 
@@ -483,5 +483,5 @@ Mid-term:
 Long-term:
 
 * **Phase 7** — E-CARE, causal attribution corpus, and stronger publishable causal benchmark claims
-* **Phase 8 — Soul Store** — typed autobiographical, epistemic, ethical, and behavioral continuity store for persisted agent identities. Six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis) backed by TypeDB, with TimescaleDB for behavioral telemetry and Materialize for real-time `D*` drift monitoring. Four formal identity metrics: `D*` (Drift Bound), SSA (Semantic Soul Alignment), F (Variational Free Energy), Φ (Integrated Information). See [MASTER_SPEC.md](MASTER_SPEC.md) Part 5, [the-soul-of-ai/07-Identity-Continuity.md](the-soul-of-ai/07-Identity-Continuity.md), and [the-soul-of-ai/06-Governed-Integration.md](the-soul-of-ai/06-Governed-Integration.md) for the full design.
-* **Self-improving software factory** — each run makes the next run better, operator models stamp every commissioned repo, and Soul Store gives each Labrador a persistent identity that evolves without drifting
+* **Phase 8 — The Calvin Archive** — typed autobiographical, epistemic, ethical, and behavioral continuity archive for persisted agent identities. Six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis) backed by TypeDB, with TimescaleDB for behavioral telemetry and Materialize for real-time `D*` drift monitoring. Four formal identity metrics: `D*` (Drift Bound), SSA (Semantic Soul Alignment), F (Variational Free Energy), Φ (Integrated Information). See [MASTER_SPEC.md](MASTER_SPEC.md) Part 5, [the-soul-of-ai/08-Identity-Continuity.md](the-soul-of-ai/08-Identity-Continuity.md), [the-soul-of-ai/07-Governed-Integration.md](the-soul-of-ai/07-Governed-Integration.md), and [the-soul-of-ai/06-The-Calvin-Archive.md](the-soul-of-ai/06-The-Calvin-Archive.md) for the full design.
+* **Self-improving software factory** — each run makes the next run better, operator models stamp every commissioned repo, and the Calvin Archive gives each Labrador a persistent identity that evolves without drifting

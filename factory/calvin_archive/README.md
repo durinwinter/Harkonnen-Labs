@@ -1,6 +1,6 @@
-# Soul Store Bootstrap
+# Calvin Archive Bootstrap
 
-This directory is the first bootstrap of Soul Store as a first-class subsystem.
+This directory is the first bootstrap of the Calvin Archive as a first-class subsystem.
 
 It is intentionally narrow:
 
@@ -11,7 +11,7 @@ It is intentionally narrow:
 ## Files
 
 - `typedb/schema.tql`
-  Minimal TypeDB 3.x schema for Soul Store bootstrap.
+  Minimal TypeDB 3.x schema for Calvin Archive bootstrap.
 - `typedb/coobie_kernel_seed.tql`
   Seed data for Coobie's invariant soul kernel.
 - `projections/coobie_identity_kernel.json`
@@ -27,14 +27,14 @@ Run:
 cargo run -- soul bootstrap
 ```
 
-That command refreshes the schema, seed, and JSON projection from the typed Rust source in `src/soul_store/`.
+That command refreshes the schema, seed, and JSON projection from the typed Rust source in `src/calvin_archive/`.
 
 ## Boot A Local TypeDB
 
 A Docker-based bootstrap scaffold is available at:
 
 ```sh
-./scripts/bootstrap-soul-store-typedb.sh
+./scripts/bootstrap-calvin-archive-typedb.sh
 ```
 
 That script writes a local TypeDB compose stack and helper wrappers in the same style as the Coobie memory stack bootstrap.

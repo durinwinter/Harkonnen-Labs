@@ -21,7 +21,7 @@ The practical shift is simple to describe and hard to implement:
 That is the transition this chapter describes. It explains why a static
 `SOUL.md` is an important beginning, why it eventually becomes insufficient, and
 why Harkonnen must move toward a governed, multi-anchor, file-first identity
-stack backed by Soul Store.
+stack backed by the Calvin Archive.
 
 This chapter sits between three others:
 
@@ -30,9 +30,12 @@ This chapter sits between three others:
   which gives the historical and philosophical background
 - [04-Why-Labradors.md](04-Why-Labradors.md), which explains why Harkonnen's
   identity kernel is species-shaped rather than human-mimetic
-- [06-Governed-Integration.md](06-Governed-Integration.md), which explains how change
+- [06-The-Calvin-Archive.md](06-The-Calvin-Archive.md), which explains why the
+  continuity subsystem is framed as a robopsychological archive rather than a
+  mere laws engine
+- [07-Governed-Integration.md](07-Governed-Integration.md), which explains how change
   must be adjudicated
-- [07-Identity-Continuity.md](07-Identity-Continuity.md), which formalizes the
+- [08-Identity-Continuity.md](08-Identity-Continuity.md), which formalizes the
   metrics and data architecture
 
 ---
@@ -157,7 +160,7 @@ The important distinction is this:
 
 > the soul package is a control surface and boot surface, not the entire soul
 
-The package gives the model clean entry points. Soul Store remains the canonical
+The package gives the model clean entry points. The Calvin Archive remains the canonical
 continuity substrate underneath it.
 
 In other words:
@@ -182,7 +185,7 @@ For Harkonnen, the main anchors are:
 
 - the Labrador identity kernel
 - the governed soul package
-- typed autobiographical continuity in Soul Store
+- typed autobiographical continuity in the Calvin Archive
 - Pack-level role boundaries and escalation laws
 - operator-facing artifacts that stabilize working style
 
@@ -297,14 +300,14 @@ The combined lesson is:
 > different depths
 
 The detailed mathematics belong in
-[07-Identity-Continuity.md](07-Identity-Continuity.md). The operational decision
-process belongs in [06-Governed-Integration.md](06-Governed-Integration.md).
+[08-Identity-Continuity.md](08-Identity-Continuity.md). The operational decision
+process belongs in [07-Governed-Integration.md](07-Governed-Integration.md).
 
 ---
 
-## From Soul Package To Soul Store
+## From Soul Package To The Calvin Archive
 
-If the soul package is the boot surface, Soul Store is the persistence layer
+If the soul package is the boot surface, the Calvin Archive is the persistence layer
 that makes the package honest.
 
 The package alone cannot answer:
@@ -315,7 +318,7 @@ The package alone cannot answer:
 - whether a rollback actually removed residual drift
 - whether the same self persisted across model replacement
 
-Soul Store can, because it records:
+The Calvin Archive can, because it records:
 
 - experiences
 - interpretations
@@ -327,7 +330,7 @@ Soul Store can, because it records:
 
 This leads to the central architectural rule:
 
-> `SOUL.md` should state the identity kernel. Soul Store should prove its
+> `SOUL.md` should state the identity kernel. The Calvin Archive should prove its
 > continuity.
 
 That is the real evolution from soul file to computational soul.
@@ -339,7 +342,7 @@ That is the real evolution from soul file to computational soul.
 For Harkonnen Labs, the target architecture is:
 
 1. a compact, readable soul package for boot-time identity routing
-2. a typed Soul Store for canonical autobiographical continuity
+2. a typed Calvin Archive for canonical autobiographical continuity
 3. a Meta-Governor that adjudicates what enters continuity
 4. a heartbeat layer that verifies integrity and audits unresolved drift
 5. a model-agnostic continuity strategy so provider changes do not erase self

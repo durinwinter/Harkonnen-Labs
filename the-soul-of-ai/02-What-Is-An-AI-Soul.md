@@ -58,7 +58,9 @@ then through the question of why Harkonnen chooses a Labrador rather than a
 human-centric identity ideal:
 [04-Why-Labradors.md](04-Why-Labradors.md),
 followed by
-[05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md).
+[05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md),
+then the subsystem naming and framing question:
+[06-The-Calvin-Archive.md](06-The-Calvin-Archive.md).
 
 ---
 
@@ -521,7 +523,7 @@ The soul is:
 
 In Harkonnen Labs, the AI soul is implemented through:
 
-* Soul Store (typed continuity system)
+* The Calvin Archive (typed continuity system)
 * Coobie (causal + autobiographical memory anchor)
 * Identity Kernel enforcement
 * Epistemic tracking

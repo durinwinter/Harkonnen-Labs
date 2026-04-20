@@ -1,7 +1,7 @@
 # Harkonnen Labs — Execution Roadmap
 
 **This is the canonical build order from 2026-04-17 forward.**
-Phases 1, 4, 5, and gap-closure A–D are shipped. Phase 4b is partially shipped (query-time invalidation exists; persistence layer is not yet complete — see Phase 4b entry). Phase v1 is the active build target: it closes the remaining Tier 4 structural gaps before Phase 2 and Phase 3 begin.
+Phases 1, 4, 4b, 5, and v1 (A–D) are shipped. Phase 2 is the active build target.
 
 ---
 
@@ -274,7 +274,7 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 
 ---
 
-## Phase 8 — Soul Store And Governed Integration
+## Phase 8 — The Calvin Archive And Governed Integration
 
 **Unlocks:** A persisted intelligence layer that does not merely remember, but
 decides what becomes part of itself. This is the phase where Harkonnen moves
@@ -282,22 +282,22 @@ from identity continuity as a typed graph to identity continuity as a governed
 integration process.
 
 The design for this phase — including the formal metrics and the three-tier data
-stack — is specified in [the-soul-of-ai/07-Identity-Continuity.md](the-soul-of-ai/07-Identity-Continuity.md)
-and the integration-governance design in [the-soul-of-ai/06-Governed-Integration.md](the-soul-of-ai/06-Governed-Integration.md).
+stack — is specified in [the-soul-of-ai/08-Identity-Continuity.md](the-soul-of-ai/08-Identity-Continuity.md)
+and the integration-governance design in [the-soul-of-ai/07-Governed-Integration.md](the-soul-of-ai/07-Governed-Integration.md).
 
 **What to build:**
 
 **Storage layer (three-tier):**
 
 - **TimescaleDB hypertable bootstrap** — episodic behavioral telemetry store for agent events, drift samples, stress accumulation, and SSA snapshots. Hypertable compression policy (7-day chunks, 30-day retention window). Provides the time-series foundation for D* estimation and stress computation.
-- **TypeDB Soul Store schema** — typed ontological layer for the six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis), integration candidates, quarantine entries, revision graphs, and causal patterns. Schema spec in MASTER_SPEC Part 5.
+- **TypeDB Calvin Archive schema** — typed ontological layer for the six chambers (Mythos, Episteme, Ethos, Pathos, Logos, Praxis), integration candidates, quarantine entries, revision graphs, and causal patterns. Schema spec in MASTER_SPEC Part 5.
 - **Materialize streaming SQL views** — real-time `D*` drift monitoring (sliding window over TimescaleDB events via SUBSCRIBE), live Meta-Governor alert views, and SSA tracking views. `D*` and SSA are the two primary continuous signals; Φ and F are computed on-demand.
 
 **Governance and integration:**
 
-- Soul Store Meta-Governor with explicit `accept`, `modify`, `reject`, and `quarantine` outcomes for identity-relevant integration events
+- Calvin Archive Meta-Governor with explicit `accept`, `modify`, `reject`, and `quarantine` outcomes for identity-relevant integration events
 - File-first soul package projection with `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`, generated from and checked against canonical continuity state
-- Integrity-hash verification and heartbeat audits so the projected soul package cannot drift silently away from Soul Store
+- Integrity-hash verification and heartbeat audits so the projected soul package cannot drift silently away from the Calvin Archive
 - Quarantine ledger: unresolved items persist with pending evidence conditions, salience decay, and re-evaluation triggers
 - Pattern-level reflection over compressed cross-episode structures so schema revision is distinct from ordinary belief revision
 - Stress-estimator computation (backed by TimescaleDB) so recurring unresolved strain triggers governed reflection instead of ad hoc self-rewrite
@@ -311,7 +311,7 @@ and the integration-governance design in [the-soul-of-ai/06-Governed-Integration
 - **`D*` (Drift Bound)** — `D* = α/γ`, where α is behavioral deviation rate (from episodic log) and γ is recovery rate (from consolidation events). Materialize view watches `D*` continuously; Meta-Governor triggered if session drift exceeds bound.
 - **SSA (Semantic Soul Alignment)** — cross-domain weighted action-pattern consistency against Labrador persona goals. Computed per run window and stored as a TimescaleDB event.
 - **F (Variational Free Energy)** — KL divergence between agent's generative model and actual observations; high F signals that the agent must seek clarification or update beliefs. Computed on-demand, not streamed.
-- **Φ (Integrated Information)** — bipartition-minimized causal integration measure over the Soul Store graph. Used to gate Soul Store updates: a post-learning drop in Φ triggers quarantine rather than direct integration.
+- **Φ (Integrated Information)** — bipartition-minimized causal integration measure over the Calvin Archive graph. Used to gate Calvin Archive updates: a post-learning drop in Φ triggers quarantine rather than direct integration.
 
 **Benchmark gate:**
 

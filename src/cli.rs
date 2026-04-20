@@ -751,9 +751,9 @@ pub async fn handle_setup(command: SetupCommands, paths: &Paths) -> Result<()> {
 pub async fn handle_soul(command: SoulCommands, paths: &Paths) -> Result<()> {
     match command {
         SoulCommands::Bootstrap(args) => {
-            crate::soul_store::require_coobie(&args.self_name)?;
-            let output = crate::soul_store::bootstrap_coobie(paths, args.output_root.as_deref())?;
-            println!("Soul Store root: {}", output.root.display());
+            crate::calvin_archive::require_coobie(&args.self_name)?;
+            let output = crate::calvin_archive::bootstrap_coobie(paths, args.output_root.as_deref())?;
+            println!("Calvin Archive root: {}", output.root.display());
             println!("TypeDB schema: {}", output.schema_path.display());
             println!("TypeDB seed: {}", output.seed_path.display());
             println!(
@@ -761,15 +761,15 @@ pub async fn handle_soul(command: SoulCommands, paths: &Paths) -> Result<()> {
                 output.identity_json_path.display()
             );
             println!("Soul guide: {}", output.guide_path.display());
-            println!("TypeDB scaffold script: scripts/bootstrap-soul-store-typedb.sh");
+            println!("TypeDB scaffold script: scripts/bootstrap-calvin-archive-typedb.sh");
         }
         SoulCommands::Show(args) => {
-            crate::soul_store::require_coobie(&args.self_name)?;
-            let identity = crate::soul_store::coobie_identity();
+            crate::calvin_archive::require_coobie(&args.self_name)?;
+            let identity = crate::calvin_archive::coobie_identity();
             if args.json {
                 println!("{}", serde_json::to_string_pretty(&identity)?);
             } else {
-                println!("{}", crate::soul_store::render_identity_markdown(&identity));
+                println!("{}", crate::calvin_archive::render_identity_markdown(&identity));
             }
         }
     }

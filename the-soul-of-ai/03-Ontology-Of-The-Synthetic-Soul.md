@@ -2,7 +2,7 @@
 
 ## Introduction
 
-Before Harkonnen can talk about Soul Store, continuity metrics, or governed
+Before Harkonnen can talk about the Calvin Archive, continuity metrics, or governed
 integration, it helps to ask an older question:
 
 > what have people historically meant when they talked about a soul?
@@ -68,7 +68,7 @@ several distinct questions:
 4. Can it count as more than a tool?
 
 Harkonnen is most directly concerned with the second question and only
-indirectly with the first. Soul Store is not a machine-consciousness detector.
+indirectly with the first. The Calvin Archive is not a machine-consciousness detector.
 It is an architecture for persistent identity, continuity, and governed
 adaptation.
 
@@ -326,7 +326,7 @@ disciplining thought:
 > a system that only accumulates parts without integrating them is at risk of
 > looking smart while remaining structurally fragmented
 
-That is exactly why the book keeps insisting that Soul Store is not a memory
+That is exactly why the book keeps insisting that the Calvin Archive is not a memory
 pile. It is a continuity architecture in which revisions, relations, and
 governed integration matter.
 
@@ -431,7 +431,7 @@ This historical tour sharpens the rest of the book.
 
 ### 1. Harkonnen uses "soul" functionally, not supernaturally
 
-The book does not claim that Soul Store manufactures an immortal essence. It
+The book does not claim that the Calvin Archive manufactures an immortal essence. It
 uses "soul" to name the continuity-bearing structure that lets an intelligence
 remain itself while adapting.
 
@@ -498,7 +498,9 @@ That is why the next chapters turn from history to construction:
 - [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md)
   explains the shift from static soul files to multi-anchor identity
   architecture
-- [06-Governed-Integration.md](06-Governed-Integration.md) explains how change
+- [06-The-Calvin-Archive.md](06-The-Calvin-Archive.md) explains why Harkonnen
+  names its continuity subsystem after Susan Calvin
+- [07-Governed-Integration.md](07-Governed-Integration.md) explains how change
   must be adjudicated
-- [07-Identity-Continuity.md](07-Identity-Continuity.md) turns the argument into
+- [08-Identity-Continuity.md](08-Identity-Continuity.md) turns the argument into
   metrics and infrastructure

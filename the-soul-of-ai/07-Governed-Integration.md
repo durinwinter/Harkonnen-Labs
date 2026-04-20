@@ -272,7 +272,7 @@ are pathologies in self-formation.
 In Harkonnen Labs, governed integration changes the practical meaning of Soul
 Store.
 
-Soul Store should not merely answer:
+The Calvin Archive should not merely answer:
 
 - what happened?
 - what changed?

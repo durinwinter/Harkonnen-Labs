@@ -1,3 +1,4 @@
+mod aider_polyglot;
 mod agents;
 mod api;
 mod benchmark;
@@ -15,6 +16,7 @@ mod frames;
 mod helmet;
 mod llm;
 mod locomo;
+mod livecodebench;
 mod longmemeval;
 mod memory;
 mod models;

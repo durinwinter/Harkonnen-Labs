@@ -7,7 +7,7 @@ use std::path::{Path, PathBuf};
 use std::time::Instant;
 use tokio::process::Command;
 
-use crate::{cladder, config::Paths, frames, helmet, locomo, longmemeval, streamingqa};
+use crate::{aider_polyglot, cladder, config::Paths, frames, helmet, livecodebench, locomo, longmemeval, streamingqa};
 
 const SKIP_EXIT_CODE: i32 = 10;
 const OUTPUT_LIMIT: usize = 8_000;
@@ -796,6 +796,42 @@ async fn run_builtin_step(
                 )
             }
             helmet::HelmetSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "aider_polyglot" => match aider_polyglot::run_with_overrides(paths, &step.env).await? {
+            aider_polyglot::PolyglotSuiteOutcome::Completed(output) => {
+                let status = aider_polyglot::status_for_output(&output);
+                let reason = aider_polyglot::reason_for_output(&output);
+                (
+                    status,
+                    aider_polyglot::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            aider_polyglot::PolyglotSuiteOutcome::Skipped(reason) => (
+                BenchmarkStatus::Skipped,
+                String::new(),
+                String::new(),
+                Some(reason),
+            ),
+        },
+        "livecodebench" => match livecodebench::run_with_overrides(paths, &step.env).await? {
+            livecodebench::LcbSuiteOutcome::Completed(output) => {
+                let status = livecodebench::status_for_output(&output);
+                let reason = livecodebench::reason_for_output(&output);
+                (
+                    status,
+                    livecodebench::render_step_stdout(&output),
+                    String::new(),
+                    reason,
+                )
+            }
+            livecodebench::LcbSuiteOutcome::Skipped(reason) => (
                 BenchmarkStatus::Skipped,
                 String::new(),
                 String::new(),

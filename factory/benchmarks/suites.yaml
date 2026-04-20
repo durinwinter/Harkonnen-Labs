@@ -306,6 +306,131 @@ suites:
         label: "tau2-bench adapter"
         program: "./scripts/benchmark-tau2.sh"
 
+  - id: "mason_aider_polyglot"
+    title: "Mason on Aider Polyglot"
+    subsystem: "code_loop"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Multi-language code-editing benchmark for Mason using exercises sourced from
+      exercism.io. Rather than generating code from scratch, Mason receives a stub
+      implementation and must fill it in to pass pre-written tests. Exercises span
+      Python, Go, JavaScript, Rust, Ruby, and C++.
+    benchmark_url: "https://aider.chat/docs/benchmarks.html"
+    leaderboard_url: "https://aider.chat/docs/leaderboards/"
+    baseline_reference: >-
+      Report pass rate overall and by language. Compare against the Aider leaderboard
+      published score for the same underlying model to show what Mason's agent framing adds.
+    setup_notes:
+      - "Assemble a JSONL exercise file from exercism.io or the aider-bench corpus and set POLYGLOT_DATASET to that path."
+      - "A smoke fixture lives at factory/benchmarks/fixtures/aider-polyglot-smoke.jsonl for local validation."
+      - "The test command for each exercise is embedded in the dataset — the required language runtimes (python3, go, node, cargo, etc.) must be available on PATH."
+      - "Optional envs: POLYGLOT_LIMIT (smoke run size), POLYGLOT_OUTPUT (artifact dir), POLYGLOT_MIN_PASS_RATE (pass threshold), POLYGLOT_TIMEOUT_SECS (per-exercise timeout, default 30s)."
+    tags:
+      - "external"
+      - "mason"
+      - "coding"
+      - "multi-language"
+      - "polyglot"
+    steps:
+      - id: "aider_polyglot_adapter"
+        label: "Aider Polyglot adapter (harkonnen mode)"
+        builtin: "aider_polyglot"
+
+  - id: "mason_aider_polyglot_direct"
+    title: "Raw LLM Baseline on Aider Polyglot"
+    subsystem: "baseline"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Direct model-only Aider Polyglot baseline using the active provider without
+      Mason agent framing or Harkonnen orchestration. Enables a fair comparison to
+      the published Aider leaderboard (which also uses raw model calls).
+    benchmark_url: "https://aider.chat/docs/benchmarks.html"
+    leaderboard_url: "https://aider.chat/docs/leaderboards/"
+    baseline_reference: >-
+      Use this as the comparison line against the Aider published leaderboard.
+      Same exercises, same language split, raw model output.
+    setup_notes:
+      - "Set POLYGLOT_DATASET to the local JSONL exercise file."
+      - "Optionally set POLYGLOT_DIRECT_PROVIDER to target a specific named setup provider."
+    tags:
+      - "external"
+      - "baseline"
+      - "mason"
+      - "coding"
+      - "multi-language"
+      - "polyglot"
+    steps:
+      - id: "aider_polyglot_direct_adapter"
+        label: "Aider Polyglot raw-model adapter"
+        builtin: "aider_polyglot"
+        env:
+          POLYGLOT_MODE: "direct"
+
+  - id: "mason_livecodebench"
+    title: "Mason on LiveCodeBench"
+    subsystem: "code_loop"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Competitive-programming pass@1 benchmark for Mason's code generation.
+      Problems are sourced from LeetCode, AtCoder, and Codeforces after a
+      release cutoff, making the benchmark resistant to training-data contamination.
+      The adapter generates a Python solution per problem and executes it against
+      the problem's public test cases.
+    benchmark_url: "https://livecodebench.github.io/"
+    leaderboard_url: "https://livecodebench.github.io/leaderboard.html"
+    baseline_reference: >-
+      Report pass@1 overall and broken down by difficulty (easy/medium/hard) and
+      platform (leetcode/atcoder/codeforces). Compare against published frontier
+      model scores on the same problem set where available.
+    setup_notes:
+      - "Download the LiveCodeBench code_generation_lite dataset from HuggingFace and export as JSONL."
+      - "Set LCB_DATASET to the local JSONL file path, or place a smoke fixture at factory/benchmarks/fixtures/livecodebench.jsonl."
+      - "python3 must be available on PATH for test case execution."
+      - "Optional envs: LCB_LIMIT (smoke run size), LCB_OUTPUT (artifact dir), LCB_MIN_PASS_RATE (pass threshold), LCB_TIMEOUT_SECS (per-test timeout)."
+    tags:
+      - "external"
+      - "mason"
+      - "piper"
+      - "coding"
+      - "competitive"
+    steps:
+      - id: "livecodebench_adapter"
+        label: "LiveCodeBench adapter (harkonnen mode)"
+        builtin: "livecodebench"
+
+  - id: "mason_livecodebench_direct"
+    title: "Raw LLM Baseline on LiveCodeBench"
+    subsystem: "baseline"
+    category: "software_engineering"
+    tier: "target"
+    description: >-
+      Direct model-only LiveCodeBench baseline using the active provider without
+      Mason agent framing or Harkonnen orchestration.
+    benchmark_url: "https://livecodebench.github.io/"
+    leaderboard_url: "https://livecodebench.github.io/leaderboard.html"
+    baseline_reference: >-
+      Use this as the raw-model baseline so reporting can show what Mason's
+      agent framing adds over the same underlying provider on competitive coding.
+    setup_notes:
+      - "Set LCB_DATASET to the local JSONL file path."
+      - "python3 must be available on PATH."
+      - "Optionally set LCB_DIRECT_PROVIDER to target a specific named setup provider."
+    tags:
+      - "external"
+      - "baseline"
+      - "mason"
+      - "coding"
+      - "competitive"
+    steps:
+      - id: "livecodebench_direct_adapter"
+        label: "LiveCodeBench raw-model adapter"
+        builtin: "livecodebench"
+        env:
+          LCB_MODE: "direct"
+
   - id: "mason_swebench_verified"
     title: "Mason/Piper/Bramble on SWE-bench Verified"
     subsystem: "code_loop"

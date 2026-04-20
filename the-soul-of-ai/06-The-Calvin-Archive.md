@@ -23,9 +23,8 @@ stronger sense of:
 
 That is what the Calvin Archive is.
 
-This chapter is therefore not mainly about winning an argument over naming. It
-is about explaining the role the archive plays in the overall architecture of
-Harkonnen Labs, and why it must exist underneath the visible `SOUL.md` layer.
+This chapter explains the role the archive plays in the overall architecture of
+Harkonnen Labs, and why it must exist beneath the visible `SOUL.md` layer.
 
 ---
 

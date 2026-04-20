@@ -2,7 +2,7 @@
 
 ## Preface
 
-This chapter bridges theory and implementation. It takes the questions raised in *What Is an AI Soul?* — what is identity, what is continuity, what does it mean for an agent to remain *itself* while learning — and translates them into computable metrics and a concrete data architecture.
+This chapter bridges theory and implementation. It takes the questions raised in *What Is An AI Soul?* — what is identity, what is continuity, what does it mean for an agent to remain *itself* while learning — and translates them into computable metrics and a concrete data architecture.
 
 It also follows the architectural transition laid out in
 [05-Artificial-Identity-Architecture.md](05-Artificial-Identity-Architecture.md):

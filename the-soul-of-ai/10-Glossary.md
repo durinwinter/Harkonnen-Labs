@@ -79,6 +79,7 @@ specialized meaning that is not standard industry usage.
 | --- | --- |
 | **Coobie** | The memory and continuity pup. Coobie manages episodic capture, causal reasoning, Palace patrols, preflight guidance, consolidation, and eventually the Calvin Archive. |
 | **Commissioning brief** | A generated operator-context artifact that Scout and Coobie use before spec drafting and run preflight. |
+| **Calvin Archive** | Harkonnen's typed continuity subsystem for autobiographical, epistemic, ethical, causal, and behavioral persistence, named after Susan Calvin's robopsychological orientation toward artificial minds under law. |
 | **Compound scent** | The den-level signal produced when multiple related causes reinforce one another in Coobie Palace. |
 | **Continuity snapshot** | A derived snapshot used to compare identity state across time, revisions, or rollback events. |
 | **Den** | A named region inside Coobie Palace that groups related failure causes or memory patterns. |
@@ -107,7 +108,6 @@ specialized meaning that is not standard industry usage.
 | **Scent** | The weighted signal associated with a Den or memory pattern in Coobie Palace. |
 | **Six chambers** | Harkonnen's conceptual partition of the Calvin Archive into Mythos, Episteme, Ethos, Pathos, Logos, and Praxis. |
 | **Soul package** | Harkonnen's projected boot-time identity surface consisting of files like `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`. |
-| **Calvin Archive** | Harkonnen's typed continuity subsystem for autobiographical, epistemic, ethical, causal, and behavioral persistence, named after Susan Calvin's robopsychological orientation toward artificial minds under law. |
 | **Stress estimator** | In Harkonnen's continuity model, the accumulated signal of unresolved identity-relative strain across a time window. |
 | **Three timescales of becoming** | Harkonnen's governance framing for fast belief updates, medium schema/value revision, and slow policy revision. |
 | **Unjustified drift** | A Harkonnen continuity metric idea: drift that occurs without enough evidence or warrant to justify the change. |

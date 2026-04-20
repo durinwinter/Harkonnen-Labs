@@ -1161,7 +1161,22 @@ fn configure_provider_prompt(name: &str, slot: &mut Option<ProviderConfig>) -> R
     )?;
     provider.enabled = has_access;
     if has_access {
+        let credential_kind_default = provider
+            .credential_kind
+            .clone()
+            .unwrap_or_else(|| default_credential_kind(name).to_string());
+        let credential_kind = prompt_choice(
+            &format!("Credential type for {name}"),
+            credential_kind_options(name),
+            &credential_kind_default,
+        )?;
+        provider.credential_kind = Some(credential_kind.clone());
+
         provider.model = prompt_text(&format!("Model for {name}"), &provider.model)?;
+        provider.api_key_env = prompt_text(
+            &format!("Credential env var for {name}"),
+            &provider.api_key_env,
+        )?;
         let usage_default = provider
             .usage_rights
             .clone()
@@ -1179,10 +1194,10 @@ fn configure_provider_prompt(name: &str, slot: &mut Option<ProviderConfig>) -> R
             &format!("Preferred surface for {name}"),
             &surface_default,
         )?);
-        if matches!(provider.provider_type.as_str(), "openai" | "codex") {
+        if should_prompt_base_url(name, &provider, &credential_kind) {
             let base_url_default = provider.base_url.clone().unwrap_or_default();
             let base_url = prompt_text(
-                &format!("OpenAI-compatible base URL for {name} (blank for default OpenAI API)"),
+                &format!("Base URL for {name} (blank for the provider's public API)"),
                 &base_url_default,
             )?;
             provider.base_url = if base_url.trim().is_empty() {
@@ -1190,10 +1205,47 @@ fn configure_provider_prompt(name: &str, slot: &mut Option<ProviderConfig>) -> R
             } else {
                 Some(base_url)
             };
+        } else {
+            provider.base_url = None;
         }
     }
     *slot = Some(provider);
     Ok(())
+}
+
+fn default_credential_kind(name: &str) -> &'static str {
+    match name {
+        "codex" => "standard-api-key",
+        _ => "standard-api-key",
+    }
+}
+
+fn credential_kind_options(name: &str) -> &'static [&'static str] {
+    match name {
+        "codex" => &[
+            "standard-api-key",
+            "enterprise-api-key",
+            "openai-compatible",
+            "gateway-token",
+        ],
+        _ => &[
+            "standard-api-key",
+            "enterprise-api-key",
+            "gateway-token",
+        ],
+    }
+}
+
+fn should_prompt_base_url(name: &str, provider: &ProviderConfig, credential_kind: &str) -> bool {
+    if provider.base_url.is_some() {
+        return true;
+    }
+
+    match credential_kind {
+        "enterprise-api-key" | "gateway-token" => true,
+        "openai-compatible" => true,
+        _ => matches!(name, "codex"),
+    }
 }
 
 fn normalize_provider_defaults(config: &mut SetupConfig) -> Result<()> {
@@ -1744,6 +1796,9 @@ fn print_agent_routing(paths: &Paths, setup: &SetupConfig) -> Result<()> {
 
 fn provider_notes(config: &ProviderConfig) -> String {
     let mut notes = Vec::new();
+    if let Some(credential_kind) = &config.credential_kind {
+        notes.push(format!("credential: {credential_kind}"));
+    }
     if let Some(surface) = &config.surface {
         notes.push(format!("surface: {surface}"));
     }
@@ -1770,6 +1825,17 @@ fn prompt_text(label: &str, default: &str) -> Result<String> {
         Ok(default.to_string())
     } else {
         Ok(trimmed.to_string())
+    }
+}
+
+fn prompt_choice(label: &str, options: &[&str], default: &str) -> Result<String> {
+    loop {
+        let joined = options.join(", ");
+        let chosen = prompt_text(&format!("{label} ({joined})"), default)?;
+        if options.iter().any(|option| *option == chosen) {
+            return Ok(chosen);
+        }
+        println!("Please choose one of: {joined}");
     }
 }
 

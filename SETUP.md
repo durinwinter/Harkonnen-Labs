@@ -25,6 +25,7 @@ Then it will:
 - fingerprint the host platform and toolchain
 - suggest a base template such as `home-linux` or `work-windows`
 - ask which providers the user can actually access on that machine
+- ask what kind of credential each provider uses, which env var it should read from, and whether it goes through a custom gateway or base URL
 - choose a default engine
 - reroute Labrador agents away from unavailable providers
 - ask which MCP capabilities should come along for the ride

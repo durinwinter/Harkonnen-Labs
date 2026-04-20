@@ -115,7 +115,7 @@ That is safer, saner, and more faithful to the system Harkonnen actually wants.
 
 ## Temperament Beats Law
 
-One of the most important ideas in your framing is that alignment should not be
+One of the most important ideas in this framing is that alignment should not be
 imagined only as a list of prohibitions.
 
 Constraint matters. Guardrails matter. Policy matters. But an agent governed
@@ -161,7 +161,7 @@ the rules through time**.
 
 ## The Companion Species Frame
 
-The most valuable shift in your note is the move away from two bad metaphors:
+The most important move in this argument is away from two bad metaphors:
 
 - AI as a mechanical slave
 - AI as a human duplicate

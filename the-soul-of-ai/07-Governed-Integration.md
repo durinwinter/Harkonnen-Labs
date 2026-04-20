@@ -273,8 +273,8 @@ are pathologies in self-formation.
 
 ## What This Means For Harkonnen
 
-In Harkonnen Labs, governed integration changes the practical meaning of Soul
-Store.
+In Harkonnen Labs, governed integration changes the practical meaning of the
+Calvin Archive.
 
 The Calvin Archive should not merely answer:
 

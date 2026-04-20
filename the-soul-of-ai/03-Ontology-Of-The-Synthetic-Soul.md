@@ -391,9 +391,9 @@ before they will say:
 - it suffers
 - it has inner experience
 
-This difference is crucial for ethics and for Harkonnen's architecture. Soul
-Store is primarily about preserving agent identity and continuity in systems we
-already treat as structured actors in a workflow. It is not a claim that those
+This difference is crucial for ethics and for Harkonnen's architecture. The
+Calvin Archive is primarily about preserving agent identity and continuity in
+systems we already treat as structured actors in a workflow. It is not a claim that those
 systems therefore possess phenomenal experience.
 
 ---

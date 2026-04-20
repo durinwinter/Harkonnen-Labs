@@ -94,7 +94,7 @@ Since KL divergence is non-negative, $\mathcal{F} \geq -\ln p(o)$, making $\math
 
 **Interpretation for Harkonnen:** The agent's "deep prior" is the Labrador SOUL — its invariant traits, cooperative disposition, and tendency toward clarification. When a task generates high free energy (the observations don't fit the prior), the Labrador-consistent response is to seek information: ask a clarifying question, surface a checkpoint, flag the ambiguity. A Labrador that *stops* doing this has either found a consistent world-model, or has started minimizing surprise by updating its prior toward a different kind of agent.
 
-**Implementation note:** The `symthaea-fep` crate is proposed as an Active Inference runtime that would map the Free Energy loop directly onto Harkonnen's agent turn cycle. *Verify crate availability and API before depending on it* — no official TypeDB-maintained Rust FEP runtime was publicly available at the time of writing.
+**Implementation note (speculative):** A crate such as `symthaea-fep` could serve as an Active Inference runtime mapping the Free Energy loop onto Harkonnen's agent turn cycle. No such crate exists at the time of writing — this is an aspirational reference to a library that would need to be built or sourced before Phase 8 implementation.
 
 ---
 
@@ -110,7 +110,7 @@ Where $\Pi$ is the set of all bipartitions of $M$'s components, and $D$ is a div
 
 **Interpretation for Harkonnen:** A high $\Phi$ means the agent's causal graph is tightly interconnected — new heuristics integrate with existing ones rather than appending as isolated rules. A drop in $\Phi$ after learning a new workflow is a signal that the agent is accumulating knowledge *without understanding* — a common precursor to drift. The Meta-Governor uses $\Phi$ as a gate: if a proposed Calvin Archive update reduces $\Phi$ below threshold, the update is quarantined for operator review before being committed to the kernel.
 
-**Implementation note:** The `omega-consciousness` crate is proposed for IIT $\Phi$ computation in Rust. *Verify crate availability before depending on it* — $\Phi$ computation is NP-hard in the general case and practical implementations require approximations over bounded system sizes.
+**Implementation note (speculative):** A crate such as `omega-consciousness` could provide IIT $\Phi$ computation in Rust. No such crate exists at the time of writing — this is an aspirational reference. Any real implementation will require approximations, since exact $\Phi$ is NP-hard and only tractable over bounded system sizes.
 
 ---
 

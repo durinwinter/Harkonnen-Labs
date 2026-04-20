@@ -24,7 +24,7 @@ It explains enough about agentic software engineering to situate Harkonnen's
 design choices, but it does not try to catalog every framework, taxonomy, or
 vendor pattern in the broader ecosystem.
 
-It is a shift in what layer of the software process is being optimized.
+Agentic engineering is a shift in what layer of the software process is being optimized.
 
 Traditional AI coding tools mostly accelerate a bounded interaction between one
 human and one model inside a local task loop. They can explain code, draft code,

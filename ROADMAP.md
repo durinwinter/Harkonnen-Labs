@@ -1,15 +1,17 @@
 # Harkonnen Labs — Execution Roadmap
 
-**This is the canonical build order from 2026-04-17 forward.**
-Phases 1, 4, 4b, 5, v1 (A-D), and 2 are shipped. Phase 3 remains the active
-build target, with live twin provisioning explicitly deferred unless a future
-product needs running service virtualization.
+**Primary goal: Calvin Archive as the backing for Coobie's memory.**
+The fastest reasonable path: Phase v1 (structural gaps) → Phase 2 (testable harness)
+→ Phase 5-C (context gating, no new infra) → Phase 5b (Qdrant, memory refactor)
+→ Phase 6 (TypeDB) → Phase 7 (causal corpus) → Phase 8 (Calvin Archive).
+Phase 3 (docs, DevBench, benchmark suites) follows the archive path rather than
+interrupting it. Live twin provisioning is permanently deferred unless a product
+explicitly requires running service virtualization. Phase 2's real test execution
+IS the testable harness.
 
 ---
 
 ## Maturity Ladder
-
-This roadmap is the canonical build sequence from today's factory state to true Phase 4 agentic intelligence and beyond.
 
 | Maturity phase | Meaning | Harkonnen status |
 | --- | --- | --- |
@@ -25,7 +27,7 @@ A structured gap analysis identified seven practical gaps. Gap-closure phases A�
 | Gap | Gap-closure status |
 | --- | --- |
 | Enforced authority and guardrail boundaries | **Open** — `check_lease` API exists but is never called pre-write; guardrails are advisory only |
-| Live world-state modeling | Deferred — twin is still a manifest; live provisioning is postponed until a product needs running service virtualization |
+| Live world-state modeling | Deferred — twin is still a manifest; live provisioning is permanently deferred unless a product needs it |
 | Closed-loop outcome verification | Partial — observation endpoint deferred to Phase E (TypeDB dependency) |
 | Structural multi-agent coordination | Mostly closed — blackboard, heartbeat, claim eviction are real |
 | Economic and cost awareness | Closed — A1 trace spine + cost events |
@@ -36,25 +38,42 @@ A structured gap analysis identified seven practical gaps. Gap-closure phases A�
 
 - `.harkonnen/gap-closure-progress.md` tracks strategic bridge work phases A–D (all shipped)
 - Phase v1 (below) is the structural gate before the factory can be called Tier 4
-- Phase E remains deferred on the TypeDB-backed state graph
-- Numbered execution phases (2-7) stay focused on factory capability: real test execution, run-quality benchmarks, lifecycle adapters, memory infrastructure, TypeDB, causal corpus
-- Operator Model Activation and External Integrations are parallel product tracks
+- After v1, the roadmap drives straight toward the Calvin Archive (Phases 5-C → 5b → 6 → 7 → 8)
+- Phase 3 benchmarks and docs follow the archive path
+- Operator Model and External Integrations are parallel product tracks
+
+---
+
+## Twin Policy
+
+**Bramble's real test execution (Phase 2) is the testable harness.** There is no mandatory dependency on Docker-backed service virtualization anywhere in this roadmap. "Digital twin" in this system means the manifest-based twin fidelity score used for diagnostic telemetry — it does not mean a running containerized replica of the target service. `twin_fidelity_score` remains available as optional telemetry. Phase 3-D exists only as a maintenance note for that signal; it is not a Phase 3 completion gate.
+
+If a specific product built on Harkonnen requires live service virtualization for its own testing needs, that capability can be revisited then with that product's requirements as the driver. It does not belong in the core factory sequence.
+
+---
 
 ## Why this order
 
-The factory has a complete foundation: core pipeline, PackChat control plane, layered Coobie memory, causal graph, Pearl hierarchy labeling, multi-hop retrieval, operator-reviewed consolidation Workbench, agent trace spine, optimization programs, and adversarial metric attacks. The remaining gaps before Tier 4 are concrete and bounded: guardrails are advisory instead of enforced, the memory invalidation persistence layer is incomplete, and there are no outbound integrations. Phase v1 closes those gaps. After that, Phase 2 makes Bramble's validation score meaningful and Phase 3 focuses on documentation quality, spec-grounded evaluation, and lifecycle benchmark readiness. Live twin work remains available to revisit later if a product truly needs it.
+The factory needs a clear line to the Calvin Archive. That line runs through:
 
-Benchmarking remains a parallel track. Each phase ships with at least one measurable gate.
-The benchmark philosophy should remain explicitly agentic-engineering shaped:
-measure how quickly and safely software moves through the delivery system, not
-just how quickly code is emitted. That means coordination compression, downstream
-validation speed, and time-to-root-cause matter alongside code-level success.
+1. **v1** — closes structural gaps that make the foundation advisory rather than enforced: guardrails, memory invalidation persistence, failure classification, operator model MVP.
+2. **Phase 2** — Bramble real test execution. This is the testable harness. `validation_passed` means nothing until it reflects real test output rather than stubs. The fix loop's wrong-answer path depends on real exit codes. Everything downstream depends on this being grounded.
+3. **Phase 5-C** — per-phase context gating requires no new infrastructure. It can be done while the codebase is still pre-refactor. The Sable isolation constraint is a correctness issue that gets harder to retrofit as the memory module grows.
+4. **Phase 5b** — Qdrant, OCR, and the memory module refactor prepare the semantic layer for TypeDB. TypeDB pattern queries are only as good as the retrieval they sit on top of. The module refactor also needs to happen before Phase 5-C's `BriefingScope` work lands in a coherent location.
+5. **Phase 6** — TypeDB is the Calvin Archive's prerequisite. No TypeDB, no typed chamber schema, no cross-run causal queries.
+6. **Phase 7** — build the causal attribution corpus while the TypeDB layer is fresh. This populates the archive with real, labeled evidence before the governance layer opens.
+7. **Phase 8** — the Calvin Archive: persisted identity, governed integration, D*/SSA streaming. This is the destination.
+8. **Phase 3** — documentation, DevBench, benchmark suites. Important for external claims and usability but not on the Calvin Archive critical path. Ships after the archive is live so benchmarks run against the real system.
+
+Parallel tracks (External Integrations, Operator Model, Hosted/Team, Calvin Archive Visualizer) advance independently of the above sequence and do not block it.
+
+Benchmark wiring advances in lockstep with implementation phases. Each phase ships with at least one measurable gate. The benchmark philosophy remains explicitly agentic-engineering shaped: measure how quickly and safely software moves through the delivery system, not just how quickly code is emitted.
 
 ---
 
 ## Phase v1 — Tier 4 Finalization
 
-**This is the active build target.** Closes the remaining structural gaps that prevent Harkonnen from being called a genuine Tier 4 agentic workflow. Phases 2 and 3 begin after this phase is done.
+**This is the active build target.** Closes the remaining structural gaps that prevent Harkonnen from being called a genuine Tier 4 agentic workflow.
 
 ### v1-A — Guardrail Enforcement (hard blocker for Tier 4)
 
@@ -73,7 +92,7 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 ### v1-B — Memory Invalidation Persistence (Phase 4b completion)
 
-**Why:** The ROADMAP header previously claimed Phase 4b was shipped. A source audit found that invalidation is computed at query time only — there is no `memory_updates` table, no `invalidated_by` column on memory records, and no `GET /api/memory/updates` endpoint. The StreamingQA adapter cannot score belief-update accuracy against a persistence layer that does not exist.
+**Why:** The invalidation layer is computed at query time only — there is no `memory_updates` table, no `invalidated_by` column on memory records, and no `GET /api/memory/updates` endpoint. The StreamingQA adapter cannot score belief-update accuracy against a persistence layer that does not exist.
 
 **What to build:**
 
@@ -82,14 +101,15 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 - Coobie ingest pipeline: before writing a new memory entry, check for semantic near-duplicates with conflicting claims via cosine similarity on the embedding store. If found above threshold, write a supersession record and set `invalidated_by` on the old entry.
 - `GET /api/memory/updates` endpoint returning supersession history
 - Memory Board UI panel: distinguish invalidated entries from current entries; allow operator to confirm or reject a supersession
+- **StreamingQA native adapter** — streams fact-update events to Coobie's memory, then queries whether the updated belief is correctly recalled. Scores belief-update accuracy separately from static recall.
 
-**Done when:** Ingesting a new fact that contradicts an older one persists a supersession record, the old entry is flagged in the DB, and `GET /api/memory/updates` returns the history. StreamingQA can then score belief-update accuracy against real persistence.
+**Done when:** Ingesting a new fact that contradicts an older one persists a supersession record, the old entry is flagged in the DB, `GET /api/memory/updates` returns the history, and StreamingQA has a baseline score.
 
 ---
 
 ### v1-C — FailureKind Classification
 
-**Why:** Mason's fix loop handles all failures identically. A wrong-answer failure (test ran, output was wrong) requires a different fix prompt than a compile error (code never ran). The ROADMAP Phase 2 spec calls this out as `FailureKind::WrongAnswer` but it was never implemented as an enum variant.
+**Why:** Mason's fix loop handles all failures identically. A wrong-answer failure (test ran, output was wrong) requires a different fix prompt than a compile error (code never ran).
 
 **What to build:**
 
@@ -104,7 +124,7 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 ### v1-D — Operator Model Minimum Viable
 
-**Why:** The five-layer interview tables exist in the DB but have no logic. Scout's intent generation and Coobie's preflight have no connection to operator context. Without this, every new spec starts from scratch regardless of how well Coobie knows the operator's patterns.
+**Why:** Scout's intent generation and Coobie's preflight have no connection to operator context. Without this, every new spec starts from scratch regardless of how well Coobie knows the operator's patterns.
 
 **What to build (two-layer MVP, not the full five-layer spec):**
 
@@ -122,6 +142,7 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 - Decision audit log surfaced in Pack Board per run
 - Memory supersession events returned by `GET /api/memory/updates`
+- StreamingQA first run published — belief-update accuracy
 - At least one run showing `failure_kind: WrongAnswer` in the validation summary
 - At least one run where Scout's intent package references operator model context
 
@@ -129,8 +150,7 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 ## Phase 2 — Bramble Real Test Execution
 
-**Unlocks:** Coobie's `validation_passed` score becomes meaningful.
-`TEST_BLIND_SPOT` and `PACK_BREAKDOWN` causal signals currently score against stubs.
+**This is the testable harness.** Until this ships, `validation_passed` reflects scenario results and stubs rather than real test output. Every downstream quality signal (Coobie's `test_coverage_score`, Phase 3 benchmarks, the fix loop's wrong-answer path) depends on real exit codes coming from real test commands.
 
 **What to build:**
 
@@ -139,7 +159,7 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 - `ValidationSummary` populated from real exit codes and parsed test output, not from scenario results or stubs
 - Bramble's phase attribution records `validation_passed: true/false` from actual runs
 - Feed result back as `test_coverage_score` into the Coobie episode at ingest time
-- **Mason online-judge feedback loop** — `FailureKind::WrongAnswer` (wired in Phase v1-C) feeds into Mason's fix loop with a diff-focused prompt. Phase 2 formalises the loop end-to-end: parse stdout diff output from competitive programming judges as a first-class failure signal.
+- **Mason online-judge feedback loop** — `FailureKind::WrongAnswer` (wired in v1-C) feeds into Mason's fix loop with a diff-focused prompt. Phase 2 formalises the loop end-to-end: parse stdout diff output from competitive programming judges as a first-class failure signal.
 - **LiveCodeBench adapter** — wrapper command that pulls recent problems, runs Mason/Piper, and emits pass/fail per problem into the benchmark runner.
 - **Aider Polyglot adapter** — maps Aider's multi-language benchmark format to Harkonnen specs; no structural changes needed.
 
@@ -154,131 +174,16 @@ validation speed, and time-to-root-cause matter alongside code-level success.
 
 ---
 
-## Phase 3 — Documentation, Evaluation, and Lifecycle Benchmarks
-
-**Operator note:** live twin provisioning is explicitly deferred for now. The
-existing manifest-based twin support and `twin_fidelity_score` remain as
-diagnostic telemetry, but Phase 3 completion no longer depends on Docker-backed
-service virtualization unless a future product actually needs it.
-
-### 3-A — Flint documentation phase
-
-- After `self.package_artifacts(run_id)` in the Flint phase, call a new `flint_generate_docs` method
-- `flint_generate_docs` reads the spec and Mason's implementation artifacts from the run dir, calls the Flint LLM agent to generate a `README.md` and optionally an `API.md`
-- Writes output to `artifacts/docs/<run_id>/README.md` and `artifacts/docs/<run_id>/API.md`
-- Adds `docs/README.md` to `blackboard.artifact_refs`
-- Required for DevBench — must land in Phase 3
-
-### 3-B — `src/spec_adherence.rs` — LLM-as-judge benchmark
-
-New builtin benchmark module (follows the same pattern as `cladder.rs`).
-
-- Loads a JSONL file where each line is `{ "run_id": "...", "spec_path": "...", "output_path": "..." }`, OR if no dataset is provided, queries the local SQLite DB for the last N completed runs
-- For each entry: reads the spec's `acceptance_criteria` list and Mason's primary output artifact, asks an LLM judge to score each criterion as met/partial/unmet
-- Metrics: `completeness` (fraction of criteria met or partial), `precision` (fraction fully met)
-- Env: `SPEC_ADHERENCE_DATASET`, `SPEC_ADHERENCE_LIMIT`, `SPEC_ADHERENCE_OUTPUT`, `SPEC_ADHERENCE_MIN_COMPLETENESS`
-- Builtin name: `"spec_adherence"`
-- Also supports a `without_scout` mode to measure what Scout's formalization step contributes
-
-### 3-C — `src/scenario_delta.rs` — Hidden Scenario Delta benchmark
-
-New builtin benchmark module — Harkonnen-native, no external dataset.
-
-- Queries `coobie_episode_scores` in the local SQLite DB for runs where both `validation_passed` and `scenario_passed` are recorded
-- Computes: `visible_pass_rate` (fraction where `validation_passed = 1`), `hidden_pass_rate` (fraction where `scenario_passed = 1`), `delta = visible_pass_rate - hidden_pass_rate`
-- A large positive delta means Bramble passes things that Sable catches — proves the hidden scenario value
-- Writes `scenario_delta_report.md` and `scenario_delta_summary.json` to artifact dir
-- Builtin name: `"scenario_delta"`
-- Env: `SCENARIO_DELTA_LIMIT` (max runs to include), `SCENARIO_DELTA_OUTPUT`
-
-### 3-D — `src/twin_fidelity.rs` — Optional twin telemetry benchmark
-
-- Keep `twin_fidelity_score` honest by counting only services whose status is `"running"`
-- Retain a Harkonnen-native summary suite for historical comparison and future revisit
-- Do not treat this as a Phase 3 blocker while twin provisioning is deferred
-
-### 3-E — `suites.yaml` entries
-
-- `harkonnen_spec_adherence` — Spec Adherence Rate (harkonnen-native, builtin: `spec_adherence`)
-- `harkonnen_scenario_delta` — Hidden Scenario Delta (harkonnen-native, builtin: `scenario_delta`)
-- `harkonnen_twin_fidelity` — Twin Fidelity telemetry (harkonnen-native, builtin: `twin_fidelity`)
-- `harkonnen_devbench` — DevBench wrapper suite (script-based external adapter)
-
-### 3-F — DevBench adapter wiring
-
-- Add `scripts/benchmark-devbench.sh` following the same skip-and-delegate pattern as the existing SWE-bench and tau2 wrappers
-- `DEVBENCH_COMMAND` supplies the exact local or hosted command that runs Harkonnen on DevBench
-- Optional `DEVBENCH_ROOT` points at the benchmark checkout or adapter workspace
-- The wrapper exits with skip code `10` when DevBench is not configured so Phase 3 can be wired before the full external harness is installed
-
-**Benchmark gate:**
-
-- `spec_adherence` first run published — completeness and precision against local run corpus
-- `scenario_delta` first run published — visible vs hidden pass rate gap across recent runs
-- `DevBench` adapter wired (script-based, not builtin)
-
-**Done when:** Flint produces a doc artifact per run, `spec_adherence` and
-`scenario_delta` have first-run baselines, and the DevBench adapter is wired so
-local or hosted runs can be launched through the benchmark manifest. Live twin
-provisioning is intentionally out of scope until a product needs it.
-
----
-
-## Phase 4b — Memory Invalidation and Fact-Update Tracking
-
-**Status: Partially shipped.** Query-time invalidation reasons exist and are surfaced in retrieval hits. The persistence layer (supersession records, `memory_updates` table, `GET /api/memory/updates`) is being completed in Phase v1-B above. This entry is the benchmark and maintenance reference point once v1-B lands.
-
-**What was built in Phase 1 (query-time only):**
-
-- `invalidation_reasons` field on `MemoryRetrievalHit` — computed at retrieval time from `superseded_by` / `challenged_by` provenance fields
-- `memory_invalidation_reasons()` helper in orchestrator surfaces reasons per hit
-
-**What v1-B completes (persistence layer):**
-
-- `memory_updates` table in SQLite: `(update_id, old_memory_id, new_memory_id, reason, created_at)`
-- `invalidated_by` on memory records, set at ingest time when a near-duplicate conflict is detected
-- `GET /api/memory/updates` endpoint
-- Memory Board UI panel: invalidated entries distinguished from current entries
-- **StreamingQA native adapter** — streams fact-update events to Coobie's memory, then queries whether the updated belief is correctly recalled. Scores belief-update accuracy separately from static recall.
-
-**Benchmark gate:**
-
-- `StreamingQA` first run published — belief-update accuracy, no competitor publishes this
-- re-run `LongMemEval` to confirm invalidation tracking does not regress static recall
-
-**Done when:** Ingesting a new fact that contradicts an older one marks the old fact as invalidated in the DB, the operator can review the supersession, and StreamingQA has a baseline score.
-
----
-
-## Phase 5b — Memory Infrastructure (Qdrant + OCR)
-
-**Unlocks:** Semantic recall at scale and document ingest completeness. The SQLite vector store is sufficient for current run volume, but it becomes the bottleneck as the memory corpus grows.
-
-**What to build:**
-
-- **Qdrant integration** — add `src/coobie/qdrant.rs` implementing the semantic index over extracted text and memory summaries. Payload metadata: `org`, `role`, `product`, `spec_id`, `run_id`, `agent`, `memory_type`, `tags`, `created_at`. Qdrant replaces the SQLite vector store for long-term semantic memory (keep SQLite as the short-term and episodic store). Bootstrap script at `scripts/bootstrap-coobie-memory-stack.sh` already exists.
-- **OCR pipeline** — add Tesseract-backed OCR for scanned PDFs and images. Current extractors handle text-forward formats but cannot read scanned documents. Wire through the existing `memory ingest` path: detect image-only PDFs, invoke `tesseract`, write extracted text sidecar alongside the imported asset.
-- **Memory module refactor** — split the growing `src/memory.rs` into the module tree described in COOBIE_SPEC: `src/memory/mod.rs`, `working.rs`, `episodic.rs`, `semantic.rs`, `causal.rs`, `consolidation.rs`, `blackboard.rs`, `retrieval.rs`, `extraction.rs`. No behavior change; this is a maintainability gate before the codebase grows further.
-
-**Benchmark gate:**
-
-- re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
-- `LongMemEval` and `LoCoMo` re-run to confirm semantic recall quality does not regress
-
-**Done when:** Qdrant is serving semantic queries for long-term memory, OCR-scanned PDFs can be ingested, and `src/memory.rs` is split into the COOBIE_SPEC module tree.
-
----
-
 ## Phase 5-C — Per-Phase Context Gating for Coobie Briefings
 
 **Why:** Every agent currently receives the same Coobie preflight briefing regardless of role or phase. Scout, Mason, and Sable have fundamentally different information needs: Scout needs spec history and prior ambiguities; Mason needs failure patterns and workspace guardrails; Sable needs scenario patterns and what Mason changed. Giving each agent the full undifferentiated corpus wastes context window and, more importantly, risks priming agents with information they should not see at their phase — most critically, Sable should not see Mason's implementation reasoning before scoring hidden scenarios.
 
-This is a retrieval-shaping capability, not a storage change. It does not require TypeDB or Qdrant. It builds naturally on the memory module refactor in Phase 5b.
+This is a retrieval-shaping capability, not a storage change. It does not require TypeDB or Qdrant. It is placed here — before the memory module refactor — because the `BriefingScope` enum and filter logic can land in `src/coobie.rs` now and move cleanly into `src/memory/briefing.rs` during Phase 5b's refactor.
 
 **What to build:**
 
-- `BriefingScope` enum in `src/memory/briefing.rs` (or `src/coobie.rs`): `ScoutPreflight`, `MasonPreflight`, `PiperPreflight`, `SablePreflight`, `CoobbieConsolidation`, `OperatorQuery`. Each variant carries a `phase_id` and a `role` tag.
-- Scope-keyed retrieval filter: each scope defines a `allow_categories` list (e.g. Scout: `spec_history, prior_ambiguities, operator_model`; Mason: `failure_patterns, fix_patterns, workspace_guardrails, causal_links`; Sable: `scenario_patterns, hidden_scenario_outcomes` — explicitly excludes Mason implementation notes).
+- `BriefingScope` enum in `src/coobie.rs` (migrates to `src/memory/briefing.rs` in Phase 5b): `ScoutPreflight`, `MasonPreflight`, `PiperPreflight`, `SablePreflight`, `CoobiConsolidation`, `OperatorQuery`. Each variant carries a `phase_id` and a `role` tag.
+- Scope-keyed retrieval filter: each scope defines an `allow_categories` list (e.g. Scout: `spec_history, prior_ambiguities, operator_model`; Mason: `failure_patterns, fix_patterns, workspace_guardrails, causal_links`; Sable: `scenario_patterns, hidden_scenario_outcomes` — explicitly excludes Mason implementation notes).
 - `build_scoped_briefing(scope: BriefingScope, run_id, spec_id) -> BriefingPackage` replaces the current single-path `build_preflight_briefing`. Internally calls the same multi-hop retrieval chain but filters retrieved hits against the scope's `allow_categories` before assembling the briefing text.
 - Wire in orchestrator: pass the correct `BriefingScope` at each phase entry point (Scout, Mason, Sable are the critical three; others can default to `OperatorQuery` for now).
 - Coobie episode record: add `briefing_scope` field so causal analysis can distinguish whether a lesson was visible at the relevant phase or not.
@@ -289,9 +194,29 @@ This is a retrieval-shaping capability, not a storage change. It does not requir
 
 ---
 
-## Phase 6 — TypeDB Semantic Layer (Layer C)
+## Phase 5b — Memory Infrastructure (Qdrant + OCR)
 
-**Unlocks:** Typed causal queries that vector similarity cannot answer. "Find all runs where TWIN_GAP caused a failure that was fixed by an intervention that held for ≥ 3 runs" requires a graph, not a similarity score.
+**Unlocks:** Semantic recall at scale and document ingest completeness. The SQLite vector store is sufficient for current run volume, but it becomes the bottleneck as the memory corpus grows. This phase also creates the clean module structure that TypeDB's semantic layer will build on in Phase 6.
+
+**What to build:**
+
+- **Qdrant integration** — add `src/coobie/qdrant.rs` implementing the semantic index over extracted text and memory summaries. Payload metadata: `org`, `role`, `product`, `spec_id`, `run_id`, `agent`, `memory_type`, `tags`, `created_at`. Qdrant replaces the SQLite vector store for long-term semantic memory (keep SQLite as the short-term and episodic store). Bootstrap script at `scripts/bootstrap-coobie-memory-stack.sh` already exists.
+- **OCR pipeline** — add Tesseract-backed OCR for scanned PDFs and images. Current extractors handle text-forward formats but cannot read scanned documents. Wire through the existing `memory ingest` path: detect image-only PDFs, invoke `tesseract`, write extracted text sidecar alongside the imported asset.
+- **Memory module refactor** — split the growing `src/memory.rs` into the module tree described in COOBIE_SPEC: `src/memory/mod.rs`, `working.rs`, `episodic.rs`, `semantic.rs`, `causal.rs`, `consolidation.rs`, `blackboard.rs`, `retrieval.rs`, `extraction.rs`. Migrate Phase 5-C's `BriefingScope` into `src/memory/briefing.rs` during this refactor. No behavior change otherwise; this is a maintainability gate before TypeDB lands.
+
+**Benchmark gate:**
+
+- re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
+- `LongMemEval` and `LoCoMo` re-run to confirm semantic recall quality does not regress
+- re-run `StreamingQA` to confirm belief-update accuracy does not regress after the module refactor
+
+**Done when:** Qdrant is serving semantic queries for long-term memory, OCR-scanned PDFs can be ingested, and `src/memory.rs` is split into the COOBIE_SPEC module tree with `BriefingScope` in its final home.
+
+---
+
+## Phase 6 — TypeDB Semantic Layer
+
+**Unlocks:** Typed causal queries that vector similarity cannot answer. "Find all runs where TWIN_GAP caused a failure that was fixed by an intervention that held for ≥ 3 runs" requires a graph, not a similarity score. This is also the direct prerequisite for the Calvin Archive's chamber schema.
 
 TypeDB 3.x changes the implementation assumptions: the old JVM burden objection is gone because TypeDB's core is now Rust. It is still an external service with real operational cost, so it stays later in the sequence and should not replace SQLite as the hot path. When this phase opens, use the Rust-based TypeDB 3.x line in a container-first deployment and avoid the legacy Java server/distribution entirely.
 
@@ -320,13 +245,13 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 
 ## Phase 7 — Causal Attribution Corpus and E-CARE
 
-**Unlocks:** The strongest publishable internal benchmark claims. The causal attribution corpus and E-CARE adapter are both spec'd in Phase 5 but can be built incrementally and do not depend on TypeDB.
+**Unlocks:** The strongest publishable internal benchmark claims, and a populated evidence base for the Calvin Archive. Building the corpus here — immediately after TypeDB is live — means the archive opens with real labeled data rather than starting cold.
 
 **What to build:**
 
 - **Causal attribution accuracy corpus** — 30–50 labeled runs with seeded failures (wrong API version, missing env var, breaking schema change, etc.). Each entry has a spec, a seeded failure, a ground-truth cause label, and the Coobie `diagnose` output. Score top-1 and top-3 accuracy. Start with 10 entries for a first baseline. Lives in `factory/benchmarks/causal-attribution/`.
 - **E-CARE native adapter** — maps Coobie's `diagnose` output to E-CARE's evaluation format and scores whether generated causal explanations are judged natural-language coherent. Run after consolidation so promoted lessons can inform subsequent diagnose output.
-- Publish before/after comparisons for causal attribution accuracy: pre-Phase 4 (pure semantic recall) versus post-Phase 4 (causal graph-augmented).
+- Publish before/after comparisons for causal attribution accuracy: pre-Phase 4 (pure semantic recall) versus post-Phase 6 (TypeDB causal graph-augmented).
 
 **Benchmark gate:**
 
@@ -387,6 +312,72 @@ and the integration-governance design in [the-soul-of-ai/07-Governed-Integration
 - Φ post-learning drop detection wired (quarantine trigger, not yet a published score)
 
 **Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; D* and SSA are instrumented and streaming; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; and policy-level revision is slower, more conservative, and explicitly reviewable.
+
+---
+
+## Phase 3 — Documentation, Evaluation, and Lifecycle Benchmarks
+
+**Sequenced after Phase 8** so benchmarks run against the complete system rather than a pre-archive baseline. The DevBench adapter and spec adherence scores are most meaningful once the factory's full memory and governance stack is live. Phase 3 items with no archive dependency (Flint docs, 3-B, 3-C) can begin earlier if capacity allows, but Phase 3 is not a gate on the Calvin Archive path.
+
+**Twin policy note:** Live twin provisioning is not a Phase 3 completion gate. Phase 3-D (twin fidelity benchmark) is optional diagnostic telemetry only — see Twin Policy above.
+
+### 3-A — Flint documentation phase
+
+- After `self.package_artifacts(run_id)` in the Flint phase, call a new `flint_generate_docs` method
+- `flint_generate_docs` reads the spec and Mason's implementation artifacts from the run dir, calls the Flint LLM agent to generate a `README.md` and optionally an `API.md`
+- Writes output to `artifacts/docs/<run_id>/README.md` and `artifacts/docs/<run_id>/API.md`
+- Adds `docs/README.md` to `blackboard.artifact_refs`
+- Required for DevBench — must land before the DevBench gate
+
+### 3-B — `src/spec_adherence.rs` — LLM-as-judge benchmark
+
+New builtin benchmark module (follows the same pattern as `cladder.rs`).
+
+- Loads a JSONL file where each line is `{ "run_id": "...", "spec_path": "...", "output_path": "..." }`, OR if no dataset is provided, queries the local SQLite DB for the last N completed runs
+- For each entry: reads the spec's `acceptance_criteria` list and Mason's primary output artifact, asks an LLM judge to score each criterion as met/partial/unmet
+- Metrics: `completeness` (fraction of criteria met or partial), `precision` (fraction fully met)
+- Env: `SPEC_ADHERENCE_DATASET`, `SPEC_ADHERENCE_LIMIT`, `SPEC_ADHERENCE_OUTPUT`, `SPEC_ADHERENCE_MIN_COMPLETENESS`
+- Builtin name: `"spec_adherence"`
+- Also supports a `without_scout` mode to measure what Scout's formalization step contributes
+
+### 3-C — `src/scenario_delta.rs` — Hidden Scenario Delta benchmark
+
+New builtin benchmark module — Harkonnen-native, no external dataset.
+
+- Queries `coobie_episode_scores` in the local SQLite DB for runs where both `validation_passed` and `scenario_passed` are recorded
+- Computes: `visible_pass_rate` (fraction where `validation_passed = 1`), `hidden_pass_rate` (fraction where `scenario_passed = 1`), `delta = visible_pass_rate - hidden_pass_rate`
+- A large positive delta means Bramble passes things that Sable catches — proves the hidden scenario value
+- Writes `scenario_delta_report.md` and `scenario_delta_summary.json` to artifact dir
+- Builtin name: `"scenario_delta"`
+- Env: `SCENARIO_DELTA_LIMIT` (max runs to include), `SCENARIO_DELTA_OUTPUT`
+
+### 3-D — `src/twin_fidelity.rs` — Optional twin telemetry benchmark
+
+- Keep `twin_fidelity_score` honest by counting only services whose status is `"running"`
+- Retain a Harkonnen-native summary suite for historical comparison and future revisit
+- **Not a Phase 3 blocker.** Live twin provisioning is deferred per Twin Policy above.
+
+### 3-E — `suites.yaml` entries
+
+- `harkonnen_spec_adherence` — Spec Adherence Rate (harkonnen-native, builtin: `spec_adherence`)
+- `harkonnen_scenario_delta` — Hidden Scenario Delta (harkonnen-native, builtin: `scenario_delta`)
+- `harkonnen_twin_fidelity` — Twin Fidelity telemetry (harkonnen-native, builtin: `twin_fidelity`)
+- `harkonnen_devbench` — DevBench wrapper suite (script-based external adapter)
+
+### 3-F — DevBench adapter wiring
+
+- Add `scripts/benchmark-devbench.sh` following the same skip-and-delegate pattern as the existing SWE-bench and tau2 wrappers
+- `DEVBENCH_COMMAND` supplies the exact local or hosted command that runs Harkonnen on DevBench
+- Optional `DEVBENCH_ROOT` points at the benchmark checkout or adapter workspace
+- The wrapper exits with skip code `10` when DevBench is not configured so Phase 3 can be wired before the full external harness is installed
+
+**Benchmark gate:**
+
+- `spec_adherence` first run published — completeness and precision against local run corpus
+- `scenario_delta` first run published — visible vs hidden pass rate gap across recent runs
+- `DevBench` adapter wired (script-based, not builtin)
+
+**Done when:** Flint produces a doc artifact per run, `spec_adherence` and `scenario_delta` have first-run baselines, and the DevBench adapter is wired so local or hosted runs can be launched through the benchmark manifest.
 
 ---
 
@@ -464,8 +455,6 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 
 ### EI-2 — Outbound Webhook Notifications
 
-**Why:** A webhook system is the foundation for all other integrations (Slack, Discord, GitHub). Everything downstream subscribes to the same event stream.
-
 - `webhooks` table: `(webhook_id, url, secret, events: JSON array, created_at, enabled)`
 - `POST /api/webhooks`, `GET /api/webhooks`, `DELETE /api/webhooks/:id`
 - Events emitted: `run.started`, `run.completed`, `run.failed`, `checkpoint.created`, `checkpoint.resolved`, `metric_attack.detected`, `consolidation.ready`
@@ -474,8 +463,6 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 - Retry with exponential backoff on 5xx or connection failure (up to 3 attempts)
 
 ### EI-3 — Slack Integration
-
-**Why:** Operators spend time in Slack. Run outcomes, checkpoints, and Coobie insights need to surface where the operator already is, not require switching to the Pack Board.
 
 **Outbound (Slack notifies operator):**
 
@@ -495,8 +482,6 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 
 ### EI-4 — Discord Integration
 
-**Why:** Discord is common in solo operator and small-team contexts (and is where local AI communities live). The surface area is simpler than Slack and the bot API is lower-friction to self-host.
-
 **Outbound:**
 
 - Webhook embeds for `run.completed`, `checkpoint.created`, `run.failed` — same content as Slack but using Discord embed format (color-coded by outcome)
@@ -512,8 +497,6 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 **Config:** `[integrations.discord]` in setup TOML. Bot token and guild/channel IDs.
 
 ### EI-5 — GitHub Integration
-
-**Why:** Mason already creates branches (`mason/<spec-id>-<run-id>`). The natural next step is auto-creating a PR from that branch, posting results as a PR comment, and allowing a GitHub webhook to trigger a spec run on push or PR open.
 
 **Outbound:**
 
@@ -531,16 +514,12 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 
 ### EI-6 — Run Scheduling
 
-**Why:** Regression suites, memory benchmarks, and recurring spec sweeps should not require manual triggering.
-
 - `scheduled_runs` table: `(schedule_id, spec_id, cron_expression, enabled, last_run_at, next_run_at)`
 - `POST /api/schedules`, `GET /api/schedules`, `PUT /api/schedules/:id`, `DELETE /api/schedules/:id`
 - Cron evaluator runs on a background tokio task; fires `POST /api/runs` when the schedule triggers
 - Pack Board schedule manager panel: add/edit/disable schedules, see last run outcome
 
 ### EI-7 — Cost Budget Enforcement
-
-**Why:** A misconfigured spec or an infinite fix loop can consume unbounded tokens. There is currently no hard stop mechanism.
 
 - `max_cost_usd: Option<f64>` on `RunRequest` and in spec YAML
 - After each LLM call, `get_run_cost_summary` checks accumulated cost against the budget. If exceeded: abort the current phase gracefully, write a `budget_exceeded` blocker to the blackboard, send a `run.failed` event with reason `budget_exceeded`
@@ -549,12 +528,10 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 
 ### EI-8 — Health and Operational Endpoints
 
-**Why:** Basic operational hygiene for any hosted or multi-machine deployment.
-
 **Shipped (2026-04-20):**
 
 - `GET /health` — probes DB (`SELECT 1`) and `memory/index.json`; returns `{ status, version, uptime_secs, db_ok, memory_index_ok }`. Responds `503` if DB probe fails. `AppContext.started_at` tracks server boot time.
-- `GET /api/status` — returns `{ active_runs, agent_claim_count, memory_entry_count, last_benchmark_run }`. All queries fail-soft. `last_benchmark_run` returns `null` until the `benchmark_runs` table exists (wired for Phase 2+). Authentication deferred to EI-1.
+- `GET /api/status` — returns `{ active_runs, agent_claim_count, memory_entry_count, last_benchmark_run }`. All queries fail-soft. Authentication deferred to EI-1.
 
 **Remaining:**
 
@@ -574,20 +551,10 @@ without hard-coding any one vendor or employer.
 The architecture is: Harkonnen exposes itself **as an MCP server** first. That
 lets Claude Desktop, Claude Code, VS Code, workflow tools, and any other
 MCP-capable client consume factory operations through one protocol instead of
-bespoke per-client integrations. For clients that cannot yet consume MCP
-directly, Harkonnen can expose a narrower connector or OpenAPI surface on top.
-
-This is independent of the consumer EI track. EI-1 (auth) should land first
-because every hosted or shared surface needs it.
-
----
+bespoke per-client integrations. EI-1 (auth) should land first because every
+hosted or shared surface needs it.
 
 ### ENT-1 — Harkonnen as an MCP Server
-
-**Why first:** MCP is the integration primitive. Once Harkonnen exposes itself
-as an MCP server, Claude Desktop, Claude Code, VS Code, workflow tools, and any
-other MCP-capable client can consume factory operations without bespoke
-connectors. This is the foundation for ENT-2 onward.
 
 **What to build:**
 
@@ -608,7 +575,7 @@ connectors. This is the foundation for ENT-2 onward.
 - **Prompts** (parameterized prompt templates for external clients):
   - `briefing_for_spec(spec_id)` — pre-built Coobie briefing prompt
   - `diagnose_run(run_id)` — causal diagnosis prompt for a completed run
-- MCP server transport registered in setup TOML under `[mcp.self]` — enables it when the flag is set:
+- MCP server transport registered in setup TOML under `[mcp.self]`:
 
 ```toml
 [mcp.self]
@@ -620,177 +587,72 @@ auth_required = true       # reuses EI-1 API key
 
 - CLI command `harkonnen mcp serve` starts the MCP server as a standalone process alongside the main server
 
-**Done when:** Claude Desktop, Claude Code, or VS Code can list factory runs,
-trigger a run, and ask Coobie a question via MCP tool calls. An SSE-capable
-hosted client can discover the same server and invoke the same tools.
-
----
+**Done when:** Claude Desktop, Claude Code, or VS Code can list factory runs, trigger a run, and ask Coobie a question via MCP tool calls.
 
 ### ENT-2 — External Connector Surface
 
-**Why:** Some external tools can call OpenAPI connectors or workflow actions
-but cannot yet consume MCP directly. A thin connector layer backed by the
-Harkonnen REST API provides the same operational capability without forcing
-bespoke logic into the core factory.
+- `factory/connectors/harkonnen-openapi.json` — OpenAPI 3.0 spec covering the key Harkonnen endpoints
+- `factory/connectors/manifest.yaml` — connector manifest with display names, descriptions, and action categories
+- `factory/connectors/workflow-templates/` — starter workflow templates: `run-spec.yaml`, `ask-coobie.yaml`, `checkpoint-review.yaml`
+- Authentication: OAuth2 client credentials flow using the generic OIDC path from ENT-3
+- Documentation at `factory/connectors/README.md`
 
-**What to build:**
-
-- `factory/connectors/harkonnen-openapi.json` — OpenAPI 3.0 spec covering the key Harkonnen endpoints: `POST /api/runs`, `GET /api/runs/:id`, `GET /api/runs/:id/traces`, `GET /api/runs/:id/decisions`, `POST /api/chat/threads/:id/messages`, `POST /api/coordination/checkpoints/:id/reply`
-- `factory/connectors/manifest.yaml` — connector manifest with display names, descriptions, and action categories for external workflow tools
-- `factory/connectors/workflow-templates/` — starter workflow templates:
-  - `run-spec.yaml` — triggers a factory run from a natural-language request, polls status, posts outcome
-  - `ask-coobie.yaml` — routes a question to Coobie and surfaces the answer with run context
-  - `checkpoint-review.yaml` — presents pending checkpoints and handles approve/reject inline in the conversation
-- Authentication: OAuth2 client credentials flow using the generic OIDC path from ENT-3. The connector authenticates as a service principal, not as the individual user.
-- Documentation at `factory/connectors/README.md`: step-by-step setup for importing the connector into an external workflow or agent platform.
-
-**Done when:** An external workflow client can trigger a Harkonnen run, ask
-Coobie a question, and approve a checkpoint from a chat or automation surface
-without touching the Pack Board.
-
----
+**Done when:** An external workflow client can trigger a Harkonnen run, ask Coobie a question, and approve a checkpoint without touching the Pack Board.
 
 ### ENT-3 — OIDC Authentication
 
-**Why:** API keys are convenient for local development, but shared and hosted
-deployments need a standard identity plane. A generic OIDC/JWT path keeps the
-core server vendor-neutral while still supporting hosted clients, bots, and
-workflow tools.
+- OAuth2/OIDC JWT validation middleware in `src/api.rs` — alongside the existing API key path
+- `[auth.oidc]` section in setup TOML with `issuer`, `client_id`, `audience`
+- JWT validation: fetch JWKS from the configured issuer, validate signature, `aud`, `iss`, and expiry
+- Role claims: `Harkonnen.Operator` (full access), `Harkonnen.Viewer` (read-only), `Harkonnen.Agent` (service principal)
+- `GET /api/auth/me` — returns the authenticated identity and resolved role
 
-**What to build:**
-
-- OAuth2/OIDC JWT validation middleware in `src/api.rs` — alongside the existing API key path. Either an API key **or** a valid OIDC JWT is accepted on protected routes.
-- `[auth.oidc]` section in setup TOML:
-
-```toml
-[auth.oidc]
-enabled = true
-issuer = "OIDC_ISSUER_URL"
-client_id = "OIDC_CLIENT_ID"
-audience  = "harkonnen-factory"
-```
-
-- JWT validation: fetch JWKS from the configured issuer, validate signature, `aud`, `iss`, and expiry. Use the `jsonwebtoken` crate.
-- Role claims: map OIDC app roles or scopes to Harkonnen roles — `Harkonnen.Operator` (full access), `Harkonnen.Viewer` (read-only), `Harkonnen.Agent` (service principal / automation)
-- `GET /api/auth/me` — returns the authenticated identity and resolved role for debugging
-
-**Done when:** An external connector authenticating as an OIDC service
-principal can call the Harkonnen API without an API key, and a viewer-role
-principal cannot trigger runs or approve checkpoints.
-
----
+**Done when:** An external connector authenticating as an OIDC service principal can call the Harkonnen API without an API key, and a viewer-role principal cannot trigger runs or approve checkpoints.
 
 ### ENT-4 — Knowledge Base Ingest
 
-**Why:** The value of Coobie's memory is proportional to what's in it. In many
-real deployments, the authoritative knowledge lives in shared drives, wikis,
-document libraries, or hosted knowledge systems rather than in files you can
-paste into the terminal. Connectors make that knowledge available to Coobie
-without manual re-entry.
-
-**What to build:**
-
-- `src/integrations/knowledge.rs` — generic knowledge-source client layer with provider adapters for document systems and hosted search APIs
-- CLI commands such as:
-  - `harkonnen memory ingest --source docs --collection <collection-id>`
-  - `harkonnen memory ingest --source wiki --space <space-id>`
-  - `harkonnen memory ingest --source search --query "<search terms>"`
+- `src/integrations/knowledge.rs` — generic knowledge-source client layer with provider adapters
+- CLI: `harkonnen memory ingest --source docs --collection <id>`, `--source wiki --space <id>`, `--source search --query "<terms>"`
 - Incremental sync state table so repeated runs fetch only changed or added documents
-- `[integrations.knowledge]` section in setup TOML:
+- `[integrations.knowledge]` section in setup TOML
 
-```toml
-[integrations.knowledge]
-enabled = true
-provider = "generic"
-client_id = "KNOWLEDGE_CLIENT_ID"
-client_secret_env = "KNOWLEDGE_CLIENT_SECRET"
-```
-
-- Bidirectional write-back (deferred to v2): after consolidation promotes a lesson, optionally write a summary back to a designated knowledge sink as a structured item. Operators can review and approve write-back separately from promoting within Harkonnen.
-
-**Done when:** Running a knowledge-source ingest adds shared documents into
-Coobie's retrievable memory, and subsequent runs against related specs can cite
-those documents in the briefing.
-
----
+**Done when:** Running a knowledge-source ingest adds shared documents into Coobie's retrievable memory, and subsequent runs against related specs can cite those documents in the briefing.
 
 ### ENT-5 — ChatOps Integration
 
-**Why:** Many teams want checkpoint approvals, notifications, and lightweight
-questions to flow through chat surfaces rather than only through the Pack
-Board. The integration should support at least one rich-card surface and one
-plain webhook or bot surface.
+- Rich-card messages on run events (completed, failed, checkpoint, metric attack) to a configured chat surface
+- Checkpoint actionable card — operator clicks Approve/Reject directly in chat
+- Bot commands: `@Harkonnen run`, `@Harkonnen status`, `@Harkonnen ask`, `@Harkonnen checkpoints`
+- `[integrations.chatops]` in setup TOML with generic webhook + bot credential fields
 
-**Outbound (chat surface notifies operator):**
-
-- Rich-card message on `run.completed`: outcome badge, agent trace count, cost, decision count, Coobie's top advisory concern, Pack Board button.
-- Checkpoint notification as an actionable card or message component — the operator can click Approve or Reject directly in chat. The callback goes to `POST /api/coordination/checkpoints/:id/reply` using the ENT-3 principal.
-- `run.failed` card with Coobie's causal diagnosis summary and a "Diagnose in Coobie" deep link into PackChat.
-- `metric_attack.detected` card: exploit description, detection signal, suggested mitigation, link to `GET /api/runs/:id/metric-attacks`.
-
-**Inbound (bot commands):**
-
-- Bot or slash-command surface with commands such as:
-  - `@Harkonnen run <spec-id>` — triggers run, replies with run ID card
-  - `@Harkonnen status <run-id>` — current phase + last event
-  - `@Harkonnen ask <question>` — routes to Coobie, replies with the response as a card
-  - `@Harkonnen checkpoints` — lists open checkpoints for the current operator
-- Bot can be scoped to a specific room or channel or allowed more broadly.
-
-**Config:** `[integrations.chatops]` in setup TOML:
-
-```toml
-[integrations.chatops]
-enabled = true
-provider = "generic"
-incoming_webhook_url_env = "CHATOPS_WEBHOOK_URL"
-bot_app_id_env           = "CHATOPS_BOT_APP_ID"
-bot_app_password_env     = "CHATOPS_BOT_PASSWORD"
-checkpoint_callback_base = "https://harkonnen.example/api"
-```
-
-**Done when:** A completed run posts a rich message to the configured chat
-surface, a checkpoint can be approved from chat without opening the Pack Board,
-and `@Harkonnen ask` routes to Coobie.
-
----
+**Done when:** A completed run posts a rich message to the configured chat surface, a checkpoint can be approved from chat, and `@Harkonnen ask` routes to Coobie.
 
 ### ENT-6 — Clone-Local Profile And Hosted Deployment Hardening
 
-**Why:** Local machine profiles are useful operationally, but they are
-clone-local and should not become part of the canonical repo state. This phase
-hardens setup generation, self-hosted deployment config, and validation so
-public clones stay clean while still supporting richer local environments.
-
-**What to build:**
-
 - Keep generated machine profiles under `setups/machines/` and out of Git by default
 - Add optional `[auth.oidc]`, `[integrations.chatops]`, `[integrations.knowledge]`, and `[mcp.self]` blocks to generated profiles when the setup interview selects them
-- Add `[mcp.self]` support with `transport = "sse"` for hosted clients
 - `cargo run -- setup check` extended to validate selected integrations and MCP self-server startup for the active local profile
 
-**Done when:** Running `cargo run -- setup check` on a locally generated
-profile reports green for the selected integrations, and a second machine can
-be provisioned from the same public templates without inheriting private state.
+**Done when:** Running `cargo run -- setup check` on a locally generated profile reports green for the selected integrations, and a second machine can be provisioned from the same public templates without inheriting private state.
 
 ---
 
 ## Benchmark Track (cross-phase)
 
-Benchmarks should advance in lockstep with implementation phases. When a phase ships, at least one benchmark gate tied to it should ship too.
+Benchmarks advance in lockstep with implementation phases. Each phase ships with at least one measurable gate.
 
 ### Phase-aligned milestones summary
 
 | Phase | Key benchmarks unlocked |
 | --- | --- |
-| v1 | Decision audit completeness, memory supersession accuracy, WrongAnswer classification rate |
+| v1 | Decision audit completeness, memory supersession accuracy (StreamingQA), WrongAnswer classification rate |
 | Phase 2 | SWE-bench Verified readiness, LiveCodeBench, Aider Polyglot |
-| Phase 3 | spec adherence rate, hidden scenario delta, DevBench, coordination-compression / downstream-validation time, optional twin telemetry |
-| Phase 4b | StreamingQA belief-update accuracy |
+| Phase 5-C | Briefing scope log per run (correctness verification, not a scored benchmark) |
 | Phase 5b | FRAMES re-run (Qdrant), LongMemEval / LoCoMo regression check |
-| Phase 6 | GAIA Level 3, AgentBench |
-| Phase 7 | E-CARE, causal attribution accuracy |
-| Phase 8 | unjustified drift, quarantine resolution quality, schema revision stability, stress / hysteresis recovery quality |
+| Phase 6 | GAIA Level 3, AgentBench, TypeDB vs SQL causal recall comparison |
+| Phase 7 | E-CARE, causal attribution accuracy (top-1 / top-3) |
+| Phase 8 | D* drift score, SSA baseline, quarantine resolution quality, schema revision stability |
+| Phase 3 | Spec adherence rate, hidden scenario delta, DevBench |
 
 ### Always-on benchmarks
 
@@ -803,7 +665,7 @@ Benchmarks should advance in lockstep with implementation phases. When a phase s
 #### vs Mem0 / MindPalace / Zep
 
 - `FRAMES` — multi-hop factual recall; Mem0 publishes here. Native adapter live. Requires Phase 5b Qdrant for best results.
-- `StreamingQA` — belief-update accuracy; no competitor tracks this. Phase 4b.
+- `StreamingQA` — belief-update accuracy; no competitor tracks this. Phase v1-B.
 - `HELMET` — retrieval precision/recall. Native adapter live.
 - `LongMemEval` — long-term assistant memory. Native adapter live.
 - `LoCoMo QA` — long-horizon dialogue memory. Native adapter live.
@@ -897,6 +759,12 @@ Every reportable benchmark claim should include:
 - Native CLADDER adapter — Pearl hierarchy causal benchmark, paired Harkonnen vs raw-LLM mode
 - Native HELMET adapter — retrieval precision/recall benchmark
 
+**Phase 4b — Memory Invalidation (query-time layer, shipped; persistence layer completing in v1-B):**
+
+- `invalidation_reasons` field on `MemoryRetrievalHit` — computed at retrieval time from `superseded_by` / `challenged_by` provenance fields
+- `memory_invalidation_reasons()` helper in orchestrator surfaces reasons per hit
+- Persistence layer (`memory_updates` table, `invalidated_by` column, `GET /api/memory/updates`, Memory Board panel, StreamingQA adapter) completing in v1-B above
+
 **Phase 5 — Consolidation Workbench:**
 
 - `consolidation_candidates` table: `(candidate_id, run_id, kind, status, content_json, edited_json, confidence, label, created_at, reviewed_at)`
@@ -910,7 +778,7 @@ Every reportable benchmark claim should include:
 
 ## Tracking
 
-Each active implementation phase gets its own git branch: `phase/v1-guardrails`, `phase/2-bramble-tests`, `phase/3-ash-twins`, etc.
+Each active implementation phase gets its own git branch: `phase/v1-guardrails`, `phase/2-bramble-tests`, `phase/5c-briefing-scope`, etc.
 A phase is merged to `main` when its "Done when" condition is verifiably met.
 This file is updated when a phase ships — move it from the numbered list above into the "already done" section.
 

@@ -1,0 +1,25 @@
+name = "winccoa"
+tier = "domain"
+description = "WinCC OA SCADA: CTRL scripts, panels, datapoints, manager lifecycle, and live-system safety"
+tags = ["winccoa", "scada", "ctrl", "panels", "datapoints", "ot", "plc"]
+extra_permissions = []
+
+[[triggers]]
+kind = "file"
+value = "winccoa"
+
+[[triggers]]
+kind = "file"
+value = ".ctrl"
+
+[[triggers]]
+kind = "file"
+value = "panels"
+
+[[triggers]]
+kind = "env_var"
+value = "WINCCOA_ROOT"
+
+[[triggers]]
+kind = "env_var"
+value = "PVSS_II"

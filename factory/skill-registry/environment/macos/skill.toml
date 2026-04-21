@@ -1,0 +1,9 @@
+name = "macos"
+tier = "environment"
+description = "macOS shell idioms, Homebrew, launchd, and path conventions"
+tags = ["macos", "homebrew", "bash", "zsh", "launchd"]
+extra_permissions = ["Bash(brew *)", "Bash(launchctl *)"]
+
+[[triggers]]
+kind = "platform"
+value = "macos"

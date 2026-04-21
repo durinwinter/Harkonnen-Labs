@@ -1,0 +1,21 @@
+name = "azure-databricks"
+tier = "domain"
+description = "Databricks cluster lifecycle, Delta Lake, MLflow, Unity Catalog patterns"
+tags = ["databricks", "spark", "delta-lake", "mlflow", "azure", "pyspark"]
+extra_permissions = ["Bash(databricks *)", "WebFetch(docs.databricks.com)"]
+
+[[triggers]]
+kind = "file"
+value = "databricks.yml"
+
+[[triggers]]
+kind = "file"
+value = ".databricks"
+
+[[triggers]]
+kind = "env_var"
+value = "DATABRICKS_HOST"
+
+[[triggers]]
+kind = "env_var"
+value = "DATABRICKS_TOKEN"

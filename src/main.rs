@@ -31,6 +31,7 @@ mod scenario_delta;
 mod scenarios;
 mod setup;
 mod spec;
+mod skill_registry;
 mod spec_adherence;
 mod stamp;
 mod streamingqa;

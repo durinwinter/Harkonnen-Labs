@@ -1,0 +1,9 @@
+name = "python"
+tier = "project"
+description = "Python conventions: pyproject.toml, virtual environments, type hints, and testing with pytest"
+tags = ["python", "pip", "pytest", "mypy", "ruff", "uv", "poetry"]
+extra_permissions = ["Bash(python *)", "Bash(python3 *)", "Bash(pip *)", "Bash(uv *)", "Bash(pytest *)"]
+
+[[triggers]]
+kind = "file"
+value = "Python project"

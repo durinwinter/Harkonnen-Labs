@@ -1,0 +1,9 @@
+name = "windows"
+tier = "environment"
+description = "Windows shell idioms, PowerShell, winget, registry paths, and service management"
+tags = ["windows", "powershell", "cmd", "winget", "services"]
+extra_permissions = ["Bash(powershell *)", "Bash(Get-Service *)", "Bash(sc *)", "Bash(reg *)"]
+
+[[triggers]]
+kind = "platform"
+value = "windows"

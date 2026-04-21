@@ -1,0 +1,9 @@
+name = "docker"
+tier = "domain"
+description = "Docker and Compose: image builds, container lifecycle, networking, and volume management"
+tags = ["docker", "compose", "container", "dockerfile", "podman"]
+extra_permissions = ["Bash(docker *)", "Bash(docker-compose *)", "Bash(podman *)"]
+
+[[triggers]]
+kind = "file"
+value = "Docker Compose runtime"

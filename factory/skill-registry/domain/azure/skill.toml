@@ -1,0 +1,25 @@
+name = "azure"
+tier = "domain"
+description = "Azure cloud resources: ARM/Bicep, Azure CLI, subscriptions, RBAC, and service principals"
+tags = ["azure", "az", "bicep", "arm", "azure-cli", "rbac"]
+extra_permissions = ["Bash(az *)", "WebFetch(learn.microsoft.com)"]
+
+[[triggers]]
+kind = "file"
+value = "main.bicep"
+
+[[triggers]]
+kind = "file"
+value = "azuredeploy.json"
+
+[[triggers]]
+kind = "file"
+value = "azure-pipelines.yml"
+
+[[triggers]]
+kind = "env_var"
+value = "AZURE_SUBSCRIPTION_ID"
+
+[[triggers]]
+kind = "env_var"
+value = "AZURE_CLIENT_ID"

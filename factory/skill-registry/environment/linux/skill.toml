@@ -1,0 +1,9 @@
+name = "linux"
+tier = "environment"
+description = "Linux shell idioms, systemd, apt/dnf, file permissions, and path conventions"
+tags = ["linux", "bash", "systemd", "apt", "shell"]
+extra_permissions = ["Bash(systemctl *)", "Bash(journalctl *)"]
+
+[[triggers]]
+kind = "platform"
+value = "linux"

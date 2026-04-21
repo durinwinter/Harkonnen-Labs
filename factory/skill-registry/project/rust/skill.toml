@@ -1,0 +1,9 @@
+name = "rust"
+tier = "project"
+description = "Rust idioms: async/tokio, anyhow error handling, serde, clippy discipline, and cargo conventions"
+tags = ["rust", "cargo", "tokio", "serde", "anyhow", "clippy"]
+extra_permissions = ["Bash(cargo *)"]
+
+[[triggers]]
+kind = "file"
+value = "Rust workspace"

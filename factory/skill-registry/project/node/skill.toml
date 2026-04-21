@@ -1,0 +1,9 @@
+name = "node"
+tier = "project"
+description = "Node.js, npm/pnpm/yarn, TypeScript, and frontend build tooling conventions"
+tags = ["node", "npm", "typescript", "vite", "svelte", "react", "pnpm"]
+extra_permissions = ["Bash(npm *)", "Bash(pnpm *)", "Bash(yarn *)", "Bash(npx *)", "Bash(node *)"]
+
+[[triggers]]
+kind = "file"
+value = "Node/Svelte/Vite"

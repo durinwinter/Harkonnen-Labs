@@ -1,0 +1,13 @@
+name = "wsl"
+tier = "environment"
+description = "WSL2 path translation, Windows/Linux interop, and cross-environment file access"
+tags = ["wsl", "wsl2", "windows", "linux", "interop"]
+extra_permissions = ["Bash(wsl *)", "Bash(wslpath *)"]
+
+[[triggers]]
+kind = "env_var"
+value = "WSL_DISTRO_NAME"
+
+[[triggers]]
+kind = "env_var"
+value = "WSLENV"

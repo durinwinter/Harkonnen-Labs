@@ -1,0 +1,25 @@
+name = "sql"
+tier = "domain"
+description = "SQL database patterns: schema migrations, query safety, index design, and transaction hygiene"
+tags = ["sql", "postgres", "sqlite", "mysql", "mssql", "migrations"]
+extra_permissions = []
+
+[[triggers]]
+kind = "file"
+value = "migrations"
+
+[[triggers]]
+kind = "file"
+value = "schema.sql"
+
+[[triggers]]
+kind = "file"
+value = "diesel.toml"
+
+[[triggers]]
+kind = "file"
+value = "alembic.ini"
+
+[[triggers]]
+kind = "file"
+value = "flyway.conf"

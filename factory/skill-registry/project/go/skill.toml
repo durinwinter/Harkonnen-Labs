@@ -1,0 +1,9 @@
+name = "go"
+tier = "project"
+description = "Go module conventions, idiomatic error handling, goroutines, and go test patterns"
+tags = ["go", "golang", "modules", "goroutine", "go-test"]
+extra_permissions = ["Bash(go *)"]
+
+[[triggers]]
+kind = "file"
+value = "Go module"

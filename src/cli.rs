@@ -1168,7 +1168,7 @@ fn normalize_optional_slug(raw: &str) -> Option<String> {
     }
 }
 
-fn prompt_optional_text(label: &str, default: Option<&str>) -> Result<Option<String>> {
+pub(crate) fn prompt_optional_text(label: &str, default: Option<&str>) -> Result<Option<String>> {
     let default = default.unwrap_or("");
     let value = prompt_text(label, default)?;
     Ok(normalize_optional_slug(&value))
@@ -1950,7 +1950,7 @@ fn provider_notes(config: &ProviderConfig) -> String {
     }
 }
 
-fn prompt_text(label: &str, default: &str) -> Result<String> {
+pub(crate) fn prompt_text(label: &str, default: &str) -> Result<String> {
     print!("{} [{}]: ", label, default);
     io::stdout().flush()?;
     let mut input = String::new();
@@ -1963,7 +1963,7 @@ fn prompt_text(label: &str, default: &str) -> Result<String> {
     }
 }
 
-fn prompt_choice(label: &str, options: &[&str], default: &str) -> Result<String> {
+pub(crate) fn prompt_choice(label: &str, options: &[&str], default: &str) -> Result<String> {
     loop {
         let joined = options.join(", ");
         let chosen = prompt_text(&format!("{label} ({joined})"), default)?;
@@ -1974,7 +1974,7 @@ fn prompt_choice(label: &str, options: &[&str], default: &str) -> Result<String>
     }
 }
 
-fn prompt_bool(label: &str, default: bool) -> Result<bool> {
+pub(crate) fn prompt_bool(label: &str, default: bool) -> Result<bool> {
     let suffix = if default { "Y/n" } else { "y/N" };
     loop {
         print!("{} [{}]: ", label, suffix);
@@ -2157,6 +2157,8 @@ pub enum StampCommands {
     Update(StampUpdateArgs),
     /// Show stamp status for a managed repo.
     Status(StampStatusArgs),
+    /// Run the intake interview to deploy context-aware skills and seed the Calvin Archive.
+    Interview(StampInterviewArgs),
 }
 
 #[derive(Args, Debug)]
@@ -2181,12 +2183,27 @@ pub struct StampUpdateArgs {
     /// Replace CLAUDE.md with the current template.
     #[arg(long, default_value_t = false)]
     pub overwrite_claude_md: bool,
+    /// Re-run the full intake interview (requires prior `stamp interview`).
+    #[arg(long, default_value_t = false)]
+    pub re_interview: bool,
 }
 
 #[derive(Args, Debug)]
 pub struct StampStatusArgs {
     /// Path to the managed repo to inspect.
     pub repo_path: String,
+}
+
+#[derive(Args, Debug)]
+pub struct StampInterviewArgs {
+    /// Path to the managed repo to interview.
+    pub repo_path: String,
+    /// Harkonnen Labs root (defaults to current directory).
+    #[arg(long)]
+    pub harkonnen_root: Option<String>,
+    /// Re-run even if interview was already completed.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
 }
 
 pub async fn handle_stamp(command: StampCommands, paths: &Paths) -> Result<()> {
@@ -2209,12 +2226,26 @@ pub async fn handle_stamp(command: StampCommands, paths: &Paths) -> Result<()> {
         StampCommands::Update(args) => {
             let repo_path = PathBuf::from(&args.repo_path);
             let harkonnen_root = paths.root.clone();
-            crate::stamp::stamp_update(&repo_path, &harkonnen_root, args.overwrite_claude_md)
-                .await?;
+            crate::stamp::stamp_update(
+                &repo_path,
+                &harkonnen_root,
+                args.overwrite_claude_md,
+                args.re_interview,
+            )
+            .await?;
         }
         StampCommands::Status(args) => {
             let repo_path = PathBuf::from(&args.repo_path);
             crate::stamp::stamp_status(&repo_path).await?;
+        }
+        StampCommands::Interview(args) => {
+            let repo_path = PathBuf::from(&args.repo_path);
+            let harkonnen_root = args
+                .harkonnen_root
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| paths.root.clone());
+            crate::stamp::stamp_interview(&repo_path, &harkonnen_root, args.force).await?;
         }
     }
     Ok(())

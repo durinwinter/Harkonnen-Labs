@@ -115,6 +115,46 @@ export HARKONNEN_SETUP=setups/machines/builder-laptop-01-home.toml
 cargo run -- setup check
 ```
 
+## Local LM Studio + MCP path
+
+If this computer is using LM Studio as the backing OpenAI-compatible endpoint, the shortest operator path is:
+
+```bash
+export LM_STUDIO_API_KEY=lm-studio
+export HARKONNEN_SETUP=lm-studio-local
+cargo run -- setup check
+./scripts/launch-harkonnen-local.sh
+```
+
+That gives you the main Harkonnen API on `http://127.0.0.1:3000`.
+
+If you want an MCP client to launch and talk to Harkonnen directly, use the self-server command:
+
+```bash
+export LM_STUDIO_API_KEY=lm-studio
+export HARKONNEN_SETUP=lm-studio-local
+cargo run -- mcp serve
+```
+
+`lm-studio-local` now enables `[mcp.self]` with `transport = "stdio"`, which is the easiest local MCP integration pattern for tools that spawn a subprocess.
+
+Example MCP client block:
+
+```json
+{
+  "mcpServers": {
+    "harkonnen": {
+      "command": "cargo",
+      "args": ["run", "--", "mcp", "serve"],
+      "env": {
+        "HARKONNEN_SETUP": "lm-studio-local",
+        "LM_STUDIO_API_KEY": "lm-studio"
+      }
+    }
+  }
+}
+```
+
 PowerShell:
 
 ```powershell

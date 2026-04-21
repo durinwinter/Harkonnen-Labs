@@ -6,7 +6,7 @@ use crate::{
     coobie::CausalReport,
     models::{
         AgentExecution, BlackboardState, CoobieBriefing, CoobieEvidenceCitation,
-        HiddenScenarioSummary, LessonRecord, ProjectComponent, ProjectResumeRisk,
+        HiddenScenarioSummary, LessonRecord, ProjectComponent, ProjectResumeRisk, RunTimingReport,
         ScenarioBlueprint, TwinEnvironment, ValidationSummary,
     },
     orchestrator::AppContext,
@@ -171,6 +171,8 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
         read_optional_json(&run_dir.join("coobie_briefing.json")).await?;
     let causal_report: Option<CausalReport> =
         read_optional_json(&run_dir.join("causal_report.json")).await?;
+    let run_timing: Option<RunTimingReport> =
+        read_optional_json(&run_dir.join("run_timing.json")).await?;
     let coobie_preflight_response =
         read_optional_text(&run_dir.join("coobie_preflight_response.md")).await?;
     let coobie_report_response =
@@ -221,6 +223,32 @@ pub async fn build_report(app: &AppContext, run_id: &str) -> Result<String> {
                 event.created_at, event.phase, event.agent, event.status, event.message
             ));
         }
+    }
+
+    report.push_str("\nRun Timing\n----------\n");
+    if let Some(run_timing) = run_timing {
+        report.push_str(&format!("Total: {} ms\n", run_timing.total_duration_ms));
+        report.push_str(&format!("Memory: {} ms\n", run_timing.memory_duration_ms));
+        report.push_str(&format!("Intake: {} ms\n", run_timing.intake_duration_ms));
+        report.push_str(&format!(
+            "Implementation: {} ms\n",
+            run_timing.implementation_duration_ms
+        ));
+        report.push_str(&format!(
+            "Validation: {} ms\n",
+            run_timing.validation_duration_ms
+        ));
+        report.push_str(&format!("Other: {} ms\n", run_timing.other_duration_ms));
+        if !run_timing.phase_durations.is_empty() {
+            for phase in run_timing.phase_durations {
+                report.push_str(&format!(
+                    "- {}: {} ms across {} episode(s)\n",
+                    phase.phase, phase.duration_ms, phase.episode_count
+                ));
+            }
+        }
+    } else {
+        report.push_str("No run timing artifact written yet.\n");
     }
 
     report.push_str("\nAgents\n------\n");

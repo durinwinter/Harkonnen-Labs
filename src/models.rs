@@ -354,6 +354,35 @@ pub struct RunRecord {
     pub updated_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RunPhaseTiming {
+    pub phase: String,
+    #[serde(default)]
+    pub episode_count: usize,
+    #[serde(default)]
+    pub duration_ms: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct RunTimingReport {
+    pub run_id: String,
+    #[serde(default)]
+    pub total_duration_ms: u64,
+    #[serde(default)]
+    pub memory_duration_ms: u64,
+    #[serde(default)]
+    pub intake_duration_ms: u64,
+    #[serde(default)]
+    pub implementation_duration_ms: u64,
+    #[serde(default)]
+    pub validation_duration_ms: u64,
+    #[serde(default)]
+    pub other_duration_ms: u64,
+    #[serde(default)]
+    pub phase_durations: Vec<RunPhaseTiming>,
+    pub generated_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct RunEvent {
     pub event_id: i64,

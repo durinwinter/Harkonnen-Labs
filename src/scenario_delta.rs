@@ -81,8 +81,7 @@ pub async fn run_with_overrides(
     let rows = load_entries(&pool, config.limit).await?;
     if rows.is_empty() {
         return Ok(ScenarioDeltaSuiteOutcome::Skipped(
-            "No coobie_episode_scores rows available for scenario-delta benchmarking."
-                .to_string(),
+            "No coobie_episode_scores rows available for scenario-delta benchmarking.".to_string(),
         ));
     }
 
@@ -107,12 +106,14 @@ pub async fn run_with_overrides(
         .await
         .with_context(|| format!("writing {}", markdown_path.display()))?;
 
-    Ok(ScenarioDeltaSuiteOutcome::Completed(ScenarioDeltaRunOutput {
-        output_dir: config.output_dir,
-        summary_path,
-        markdown_path,
-        metrics,
-    }))
+    Ok(ScenarioDeltaSuiteOutcome::Completed(
+        ScenarioDeltaRunOutput {
+            output_dir: config.output_dir,
+            summary_path,
+            markdown_path,
+            metrics,
+        },
+    ))
 }
 
 pub fn status_for_output(_: &ScenarioDeltaRunOutput) -> BenchmarkStatus {
@@ -168,7 +169,10 @@ async fn load_entries(pool: &SqlitePool, limit: Option<usize>) -> Result<Vec<Sce
 
 fn compute_metrics(entries: &[ScenarioDeltaEntry]) -> ScenarioDeltaMetrics {
     let total_runs = entries.len();
-    let visible_passed_runs = entries.iter().filter(|entry| entry.validation_passed).count();
+    let visible_passed_runs = entries
+        .iter()
+        .filter(|entry| entry.validation_passed)
+        .count();
     let hidden_passed_runs = entries.iter().filter(|entry| entry.scenario_passed).count();
     let visible_only_failures = entries
         .iter()

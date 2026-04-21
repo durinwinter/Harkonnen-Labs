@@ -618,6 +618,9 @@ pub async fn handle_memory(command: MemoryCommands, app: AppContext) -> Result<(
             if let Some(asset_path) = result.asset_path {
                 println!("Stored source asset: {}", asset_path.display());
             }
+            if let Some(sidecar_path) = result.extracted_text_sidecar_path {
+                println!("Stored extracted text sidecar: {}", sidecar_path.display());
+            }
             println!("Extracted title: {}", result.title);
             println!("Extracted chars: {}", result.extracted_chars);
             println!("Memory root: {}", result.memory_root.display());

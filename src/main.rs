@@ -78,7 +78,7 @@ async fn main() -> Result<()> {
             cli::handle_setup(command, &paths).await?
         }
         Commands::Mcp { command } => {
-            let app = AppContext::bootstrap().await?;
+            let app = AppContext::bootstrap_for_mcp().await?;
             cli::handle_mcp(command, app).await?
         }
         Commands::Soul { command } => {

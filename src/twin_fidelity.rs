@@ -96,8 +96,7 @@ pub async fn run_with_overrides(
     let rows = load_entries(&pool, config.limit).await?;
     if rows.is_empty() {
         return Ok(TwinFidelitySuiteOutcome::Skipped(
-            "No coobie_episode_scores rows available for twin-fidelity benchmarking."
-                .to_string(),
+            "No coobie_episode_scores rows available for twin-fidelity benchmarking.".to_string(),
         ));
     }
 

@@ -159,16 +159,28 @@ pub struct BenchmarkRunOutput {
     pub report: BenchmarkRunReport,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct BenchmarkRunArtifactSummary {
+    pub report_id: String,
+    pub generated_at: DateTime<Utc>,
+    pub manifest_path: String,
+    pub json_path: String,
+    pub markdown_path: String,
+    pub selected_suites: Vec<String>,
+    pub summary: BenchmarkRunSummary,
+}
+
+pub fn artifact_dir(paths: &Paths) -> PathBuf {
+    paths.artifacts.join("benchmarks")
+}
+
 pub fn default_manifest_path(paths: &Paths) -> PathBuf {
     paths.factory.join("benchmarks").join("suites.yaml")
 }
 
 pub fn default_output_path(paths: &Paths) -> PathBuf {
     let stamp = Utc::now().format("%Y%m%dT%H%M%SZ");
-    paths
-        .artifacts
-        .join("benchmarks")
-        .join(format!("benchmark-run-{}.json", stamp))
+    artifact_dir(paths).join(format!("benchmark-run-{}.json", stamp))
 }
 
 pub fn load_manifest(path: &Path) -> Result<BenchmarkManifest> {
@@ -283,6 +295,17 @@ pub fn load_run_report(path: &Path) -> Result<BenchmarkRunReport> {
         .with_context(|| format!("reading benchmark run report {}", path.display()))?;
     serde_json::from_str(&raw)
         .with_context(|| format!("parsing benchmark run report {}", path.display()))
+}
+
+pub fn list_recent_run_reports(
+    paths: &Paths,
+    limit: usize,
+) -> Result<Vec<BenchmarkRunArtifactSummary>> {
+    list_recent_run_reports_in_dir(&artifact_dir(paths), limit)
+}
+
+pub fn resolve_run_report_path(paths: &Paths, report_id: Option<&str>) -> Result<PathBuf> {
+    resolve_run_report_path_in_dir(&artifact_dir(paths), report_id)
 }
 
 pub fn render_report_markdown(report: &BenchmarkRunReport) -> String {
@@ -982,15 +1005,100 @@ fn first_non_empty(preferred: &str, fallback: &str) -> Option<String> {
     None
 }
 
+fn list_recent_run_reports_in_dir(
+    dir: &Path,
+    limit: usize,
+) -> Result<Vec<BenchmarkRunArtifactSummary>> {
+    if limit == 0 || !dir.exists() {
+        return Ok(Vec::new());
+    }
+
+    let mut json_paths = std::fs::read_dir(dir)
+        .with_context(|| format!("reading benchmark artifact dir {}", dir.display()))?
+        .filter_map(|entry| entry.ok().map(|value| value.path()))
+        .filter(|path| is_benchmark_report_json_path(path))
+        .collect::<Vec<_>>();
+    json_paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+
+    json_paths
+        .into_iter()
+        .take(limit)
+        .map(|json_path| {
+            let report = load_run_report(&json_path)?;
+            let report_id = report_id_from_json_path(&json_path).with_context(|| {
+                format!("invalid benchmark report path {}", json_path.display())
+            })?;
+            Ok(BenchmarkRunArtifactSummary {
+                report_id,
+                generated_at: report.generated_at,
+                manifest_path: report.manifest_path,
+                json_path: json_path.display().to_string(),
+                markdown_path: json_path.with_extension("md").display().to_string(),
+                selected_suites: report.selected_suites,
+                summary: report.summary,
+            })
+        })
+        .collect()
+}
+
+fn resolve_run_report_path_in_dir(dir: &Path, report_id: Option<&str>) -> Result<PathBuf> {
+    if !dir.exists() {
+        bail!("benchmark artifact dir does not exist: {}", dir.display());
+    }
+
+    match report_id.map(str::trim).filter(|value| !value.is_empty()) {
+        None | Some("latest") => latest_run_report_path_in_dir(dir),
+        Some(value) => {
+            if value.contains('/') || value.contains('\\') {
+                bail!("benchmark report id must be a basename, not a path");
+            }
+            let stem = value.strip_suffix(".json").unwrap_or(value);
+            let path = dir.join(format!("{stem}.json"));
+            if !path.exists() {
+                bail!("benchmark report not found: {}", path.display());
+            }
+            Ok(path)
+        }
+    }
+}
+
+fn latest_run_report_path_in_dir(dir: &Path) -> Result<PathBuf> {
+    let mut json_paths = std::fs::read_dir(dir)
+        .with_context(|| format!("reading benchmark artifact dir {}", dir.display()))?
+        .filter_map(|entry| entry.ok().map(|value| value.path()))
+        .filter(|path| is_benchmark_report_json_path(path))
+        .collect::<Vec<_>>();
+    json_paths.sort_by(|left, right| right.file_name().cmp(&left.file_name()));
+    json_paths
+        .into_iter()
+        .next()
+        .with_context(|| format!("no benchmark run reports found in {}", dir.display()))
+}
+
+fn is_benchmark_report_json_path(path: &Path) -> bool {
+    path.is_file()
+        && path
+            .file_name()
+            .and_then(|value| value.to_str())
+            .map(|value| value.starts_with("benchmark-run-") && value.ends_with(".json"))
+            .unwrap_or(false)
+}
+
+fn report_id_from_json_path(path: &Path) -> Option<String> {
+    path.file_stem()
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_string())
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+    use std::fs;
 
-    #[test]
-    fn render_report_contains_suite_summary() {
-        let report = BenchmarkRunReport {
+    fn sample_report(generated_at: DateTime<Utc>) -> BenchmarkRunReport {
+        BenchmarkRunReport {
             version: 1,
-            generated_at: Utc::now(),
+            generated_at,
             manifest_path: "factory/benchmarks/suites.yaml".to_string(),
             repo_root: "/tmp/harkonnen".to_string(),
             selected_suites: vec!["local_regression".to_string()],
@@ -1018,11 +1126,82 @@ mod tests {
                 reason: None,
                 steps: Vec::new(),
             }],
-        };
+        }
+    }
+
+    fn write_report(dir: &Path, stem: &str, report: &BenchmarkRunReport) {
+        fs::create_dir_all(dir).unwrap();
+        let json = serde_json::to_string_pretty(report).unwrap();
+        fs::write(dir.join(format!("{stem}.json")), json).unwrap();
+        fs::write(dir.join(format!("{stem}.md")), "# benchmark report").unwrap();
+    }
+
+    #[test]
+    fn render_report_contains_suite_summary() {
+        let report = sample_report(Utc::now());
 
         let markdown = render_report_markdown(&report);
         assert!(markdown.contains("# Benchmark Report"));
         assert!(markdown.contains("local_regression"));
         assert!(markdown.contains("Local Regression Gate"));
+    }
+
+    #[test]
+    fn recent_run_reports_are_listed_newest_first() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "harkonnen-benchmark-test-{}",
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        write_report(
+            &temp_dir,
+            "benchmark-run-20260421T010000Z",
+            &sample_report(Utc::now()),
+        );
+        write_report(
+            &temp_dir,
+            "benchmark-run-20260421T020000Z",
+            &sample_report(Utc::now()),
+        );
+
+        let reports = list_recent_run_reports_in_dir(&temp_dir, 10).unwrap();
+        assert_eq!(reports.len(), 2);
+        assert_eq!(reports[0].report_id, "benchmark-run-20260421T020000Z");
+        assert_eq!(reports[1].report_id, "benchmark-run-20260421T010000Z");
+
+        fs::remove_dir_all(temp_dir).unwrap();
+    }
+
+    #[test]
+    fn resolve_run_report_path_supports_latest_and_named_ids() {
+        let temp_dir = std::env::temp_dir().join(format!(
+            "harkonnen-benchmark-resolve-{}",
+            Utc::now().timestamp_nanos_opt().unwrap()
+        ));
+        write_report(
+            &temp_dir,
+            "benchmark-run-20260421T030000Z",
+            &sample_report(Utc::now()),
+        );
+        write_report(
+            &temp_dir,
+            "benchmark-run-20260421T040000Z",
+            &sample_report(Utc::now()),
+        );
+
+        let latest = resolve_run_report_path_in_dir(&temp_dir, None).unwrap();
+        assert!(latest
+            .display()
+            .to_string()
+            .ends_with("benchmark-run-20260421T040000Z.json"));
+
+        let explicit =
+            resolve_run_report_path_in_dir(&temp_dir, Some("benchmark-run-20260421T030000Z"))
+                .unwrap();
+        assert!(explicit
+            .display()
+            .to_string()
+            .ends_with("benchmark-run-20260421T030000Z.json"));
+
+        fs::remove_dir_all(temp_dir).unwrap();
     }
 }

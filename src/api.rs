@@ -5285,10 +5285,7 @@ struct ServerStatusResponse {
 }
 
 async fn get_health(State(app): State<AppContext>) -> impl IntoResponse {
-    let db_ok = sqlx::query("SELECT 1")
-        .fetch_one(&app.pool)
-        .await
-        .is_ok();
+    let db_ok = sqlx::query("SELECT 1").fetch_one(&app.pool).await.is_ok();
 
     let memory_index_ok = app.paths.memory.join("index.json").exists();
 
@@ -5310,19 +5307,17 @@ async fn get_health(State(app): State<AppContext>) -> impl IntoResponse {
 }
 
 async fn get_server_status(State(app): State<AppContext>) -> impl IntoResponse {
-    let active_runs = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM runs WHERE status = 'running'",
-    )
-    .fetch_one(&app.pool)
-    .await
-    .unwrap_or(0) as usize;
+    let active_runs =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM runs WHERE status = 'running'")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap_or(0) as usize;
 
-    let agent_claim_count = sqlx::query_scalar::<_, i64>(
-        "SELECT COUNT(*) FROM assignments WHERE status = 'active'",
-    )
-    .fetch_one(&app.pool)
-    .await
-    .unwrap_or(0) as usize;
+    let agent_claim_count =
+        sqlx::query_scalar::<_, i64>("SELECT COUNT(*) FROM assignments WHERE status = 'active'")
+            .fetch_one(&app.pool)
+            .await
+            .unwrap_or(0) as usize;
 
     let memory_entry_count = app
         .memory_store

@@ -163,6 +163,7 @@ suites:
       - "Set DEVBENCH_COMMAND to the exact command that runs the Harkonnen DevBench adapter."
       - "If using a local checkout, point DEVBENCH_ROOT at the DevBench repository or adapter workspace."
       - "A native bridge scaffold now lives at `scripts/devbench_harkonnen_adapter.py`; point DEVBENCH_COMMAND at that script with `--repo <devbench repo>` and `--task <task>` to generate a Harkonnen draft spec and adapter summary."
+      - "For a simpler env-driven path, set `DEVBENCH_COMMAND=./scripts/run-devbench-harkonnen.sh` and provide `DEVBENCH_REPO`, `DEVBENCH_TASK`, and `HARKONNEN_SETUP` or `DEVBENCH_SETUP`."
       - "The wrapper exits with code 10 when DevBench is not configured so the suite can stay wired before the external harness is installed."
       - "When the adapter expects repository docs or artifacts, point it at runs that include Flint-generated README/API outputs."
     tags:

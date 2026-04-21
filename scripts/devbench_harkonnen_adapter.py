@@ -102,6 +102,8 @@ def parse_args() -> argparse.Namespace:
     parser.add_argument(
         "--launch",
         action="store_true",
+        default=os.environ.get("DEVBENCH_LAUNCH", "").strip().lower()
+        in {"1", "true", "yes", "on"},
         help="Execute --run-command after generating the spec.",
     )
     return parser.parse_args()
@@ -530,7 +532,10 @@ def dump_yaml(data: Any, indent: int = 0) -> str:
 
 def build_launch_command(args: argparse.Namespace, ctx: RepoContext) -> str:
     if not args.run_command:
-        return ""
+        if not args.launch:
+            return ""
+        validate_cmd, run_cmd = recommended_commands(ctx, args)
+        return f"{validate_cmd} && {run_cmd}"
     replacements = {
         "spec_path": str(ctx.spec_path),
         "repo_path": str(ctx.repo_path),
@@ -546,7 +551,7 @@ def recommended_commands(ctx: RepoContext, args: argparse.Namespace) -> list[str
     validate_cmd = f"cargo run -- spec validate {shlex.quote(str(ctx.spec_path))}"
     run_cmd = (
         f"cargo run -- run start {shlex.quote(str(ctx.spec_path))} "
-        f"--product {shlex.quote(ctx.project_name)}"
+        f"--product-path {shlex.quote(str(ctx.repo_path))}"
     )
     if args.setup:
         run_cmd = f"HARKONNEN_SETUP={shlex.quote(args.setup)} {run_cmd}"
@@ -613,6 +618,10 @@ def write_summary_markdown(summary: dict[str, Any]) -> str:
         result = summary.get("launch_result")
         if result:
             lines.append(f"- Exit code: `{result['exit_code']}`")
+            if result["exit_code"] == 0:
+                lines.append("- Launch status: `passed`")
+            else:
+                lines.append("- Launch status: `failed`")
 
     return "\n".join(lines) + "\n"
 
@@ -646,6 +655,7 @@ def main() -> int:
         "launch_executed": bool(args.launch and launch_command),
     }
 
+    launch_exit_code = 0
     if args.launch and launch_command:
         result = subprocess.run(
             launch_command,
@@ -659,6 +669,7 @@ def main() -> int:
             "stdout": result.stdout[-8000:],
             "stderr": result.stderr[-8000:],
         }
+        launch_exit_code = result.returncode
 
     summary_json = ctx.output_dir / "devbench_adapter_summary.json"
     summary_md = ctx.output_dir / "devbench_adapter_summary.md"
@@ -684,7 +695,11 @@ def main() -> int:
         for command in summary["recommended_commands"]:
             print(f"  {command}")
 
-    return 0 if not errors else 2
+    if errors:
+        return 2
+    if args.launch and launch_command and launch_exit_code != 0:
+        return launch_exit_code
+    return 0
 
 
 if __name__ == "__main__":

@@ -59,9 +59,7 @@ impl SpecAdherenceMode {
             .as_str()
         {
             "standard" | "default" => Ok(Self::Standard),
-            "without_scout" | "without-scout" | "no_scout" | "noscout" => {
-                Ok(Self::WithoutScout)
-            }
+            "without_scout" | "without-scout" | "no_scout" | "noscout" => Ok(Self::WithoutScout),
             other => bail!("unsupported SPEC_ADHERENCE_MODE: {}", other),
         }
     }
@@ -328,13 +326,7 @@ pub async fn run(paths: &Paths, config: &SpecAdherenceRunConfig) -> Result<SpecA
     };
 
     for entry in entries {
-        let outcome = evaluate_entry(
-            &mut judge_candidates,
-            &docs_root,
-            config.mode,
-            &entry,
-        )
-        .await;
+        let outcome = evaluate_entry(&mut judge_candidates, &docs_root, config.mode, &entry).await;
 
         match outcome {
             Ok(result) => {
@@ -502,10 +494,9 @@ async fn evaluate_entry(
                     envelope = Some(parsed);
                     break;
                 }
-                Err(error) => failures.push(format!(
-                    "{} parse failure: {}",
-                    candidate.label, error
-                )),
+                Err(error) => {
+                    failures.push(format!("{} parse failure: {}", candidate.label, error))
+                }
             },
             Err(error) => failures.push(format!("{} request failure: {}", candidate.label, error)),
         }
@@ -587,7 +578,10 @@ fn criteria_for_mode(spec_obj: &Spec, mode: SpecAdherenceMode) -> Vec<String> {
 fn derive_without_scout_criteria(spec_obj: &Spec) -> Vec<String> {
     let mut criteria = Vec::new();
     if !spec_obj.purpose.trim().is_empty() {
-        criteria.push(format!("Output advances the stated purpose: {}", spec_obj.purpose));
+        criteria.push(format!(
+            "Output advances the stated purpose: {}",
+            spec_obj.purpose
+        ));
     }
     for scope in spec_obj.scope.iter().take(6) {
         criteria.push(format!("Addresses scope item: {}", scope));
@@ -763,7 +757,8 @@ async fn load_recent_run_entries(
         if !spec_path.exists() {
             continue;
         }
-        if let Some((output_path, output_origin)) = choose_output_path(paths, pool, &run_id).await? {
+        if let Some((output_path, output_origin)) = choose_output_path(paths, pool, &run_id).await?
+        {
             entries.push(EvaluationEntry {
                 run_id: Some(run_id),
                 spec_path,
@@ -797,7 +792,10 @@ async fn choose_output_path(
         candidates.sort_by(|a, b| b.0.cmp(&a.0).then_with(|| a.1.cmp(&b.1)));
         for (_, relative, full_path) in candidates {
             if looks_like_text_artifact(&relative, &full_path) {
-                return Ok(Some((full_path, format!("implementation_changed_file:{relative}"))));
+                return Ok(Some((
+                    full_path,
+                    format!("implementation_changed_file:{relative}"),
+                )));
             }
         }
 

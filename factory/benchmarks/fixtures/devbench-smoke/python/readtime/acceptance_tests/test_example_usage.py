@@ -1,5 +1,8 @@
+import unittest
+
 from src.readtime import estimate
 
 
-def test_example_usage():
-    assert estimate("hello world") == 1
+class ExampleUsageTest(unittest.TestCase):
+    def test_example_usage(self) -> None:
+        self.assertEqual(estimate("hello world"), 1)

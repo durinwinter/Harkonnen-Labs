@@ -43,3 +43,8 @@ bramble = "codex"
 piper   = "codex"
 ash     = "codex"
 flint   = "codex"
+
+[mcp.self]
+enabled       = true
+transport     = "stdio"
+auth_required = false

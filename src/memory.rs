@@ -8,7 +8,7 @@ use std::time::SystemTime;
 use tokio::process::Command;
 use uuid::Uuid;
 
-use crate::setup::SetupConfig;
+use crate::setup::{command_available, SetupConfig};
 
 // ── Stored entry ──────────────────────────────────────────────────────────────
 
@@ -109,6 +109,7 @@ pub struct MemoryIngestOptions {
 pub struct MemoryIngestResult {
     pub note_path: PathBuf,
     pub asset_path: Option<PathBuf>,
+    pub extracted_text_sidecar_path: Option<PathBuf>,
     pub title: String,
     pub extracted_chars: usize,
     pub memory_root: PathBuf,
@@ -123,6 +124,29 @@ struct ExtractedMemorySource {
     media_kind: String,
     extension_tag: Option<String>,
     asset_source_path: Option<PathBuf>,
+    extraction_method: String,
+    ocr_applied: bool,
+}
+
+#[derive(Debug, Clone)]
+struct ExtractedTextPayload {
+    text: String,
+    extraction_method: String,
+    ocr_applied: bool,
+}
+
+impl ExtractedTextPayload {
+    fn new(
+        text: impl Into<String>,
+        extraction_method: impl Into<String>,
+        ocr_applied: bool,
+    ) -> Self {
+        Self {
+            text: text.into(),
+            extraction_method: extraction_method.into(),
+            ocr_applied,
+        }
+    }
 }
 
 // ── Store ─────────────────────────────────────────────────────────────────────
@@ -723,6 +747,25 @@ impl MemoryStore {
             None
         };
 
+        let extracted_text_sidecar = if let Some(imported_asset) = imported_asset.as_ref() {
+            if should_write_extracted_text_sidecar(&extracted) {
+                Some(
+                    write_extracted_text_sidecar(imported_asset, &extracted.text)
+                        .await
+                        .with_context(|| {
+                            format!(
+                                "writing extracted text sidecar for {}",
+                                imported_asset.display()
+                            )
+                        })?,
+                )
+            } else {
+                None
+            }
+        } else {
+            None
+        };
+
         let mut tags = vec!["ingested".to_string(), "document".to_string()];
         append_unique_tag(&mut tags, extracted.media_kind.clone());
         if let Some(extension_tag) = extracted.extension_tag.clone() {
@@ -743,6 +786,7 @@ impl MemoryStore {
         let note_body = render_ingested_memory_body(
             &extracted,
             imported_asset.as_ref(),
+            extracted_text_sidecar.as_ref(),
             options.notes.as_deref(),
         );
         let note_doc = render_memory_document(&tags, &summary, &note_body, &provenance);
@@ -755,6 +799,7 @@ impl MemoryStore {
         Ok(MemoryIngestResult {
             note_path,
             asset_path: imported_asset,
+            extracted_text_sidecar_path: extracted_text_sidecar,
             title: extracted.title,
             extracted_chars: extracted.text.chars().count(),
             memory_root: self.root.clone(),
@@ -850,19 +895,26 @@ fn default_ingest_summary(extracted: &ExtractedMemorySource) -> String {
 fn render_ingested_memory_body(
     extracted: &ExtractedMemorySource,
     imported_asset: Option<&PathBuf>,
+    extracted_text_sidecar: Option<&PathBuf>,
     notes: Option<&str>,
 ) -> String {
     let highlights = summarize_extracted_text(&extracted.text, 12);
     let rel_asset = imported_asset
         .map(|path| path.display().to_string())
         .unwrap_or_else(|| "not stored".to_string());
+    let rel_sidecar = extracted_text_sidecar
+        .map(|path| path.display().to_string())
+        .unwrap_or_else(|| "not stored".to_string());
     let extracted_text = truncate_for_memory(&extracted.text, 120_000);
     format!(
-        "# Ingested Knowledge\n\n- Title: {}\n- Source kind: {}\n- Source locator: {}\n- Imported asset: {}\n- Ingested at: {}\n- Extracted chars: {}\n\n## Notes\n{}\n\n## Distilled Highlights\n{}\n\n## Extracted Text\n{}\n",
+        "# Ingested Knowledge\n\n- Title: {}\n- Source kind: {}\n- Source locator: {}\n- Imported asset: {}\n- Extracted text sidecar: {}\n- Extraction method: {}\n- OCR applied: {}\n- Ingested at: {}\n- Extracted chars: {}\n\n## Notes\n{}\n\n## Distilled Highlights\n{}\n\n## Extracted Text\n{}\n",
         extracted.title,
         extracted.source_kind,
         extracted.source_locator,
         rel_asset,
+        rel_sidecar,
+        extracted.extraction_method,
+        if extracted.ocr_applied { "yes" } else { "no" },
         Utc::now().to_rfc3339(),
         extracted.text.chars().count(),
         notes
@@ -993,6 +1045,12 @@ async fn extract_memory_source_from_url(source: &str) -> Result<ExtractedMemoryS
             "txt".to_string()
         }),
         asset_source_path: None,
+        extraction_method: if is_html {
+            "http_html_to_text".to_string()
+        } else {
+            "http_text".to_string()
+        },
+        ocr_applied: false,
     })
 }
 
@@ -1032,27 +1090,28 @@ async fn extract_memory_source_from_file(source: &Path) -> Result<ExtractedMemor
         .to_lowercase();
     let title = derive_title_from_path(&canonical);
     let media_kind = detect_media_kind(&canonical).to_string();
-    let raw_text = match ext.as_str() {
+    let extracted_payload = match ext.as_str() {
         "txt" | "md" | "csv" | "json" | "toml" | "yaml" | "yml" | "log" => {
-            tokio::fs::read_to_string(&canonical).await?
+            ExtractedTextPayload::new(tokio::fs::read_to_string(&canonical).await?, "read_to_string", false)
         }
         "html" | "htm" | "xml" => {
             let raw = tokio::fs::read_to_string(&canonical).await?;
-            html_to_text(&raw)
+            ExtractedTextPayload::new(html_to_text(&raw), "html_to_text", false)
         }
         "pdf" => extract_pdf_text(&canonical).await?,
+        "png" | "jpg" | "jpeg" | "gif" | "webp" => extract_image_text_with_ocr(&canonical).await?,
         "docx" => extract_docx_text(&canonical).await?,
         "pptx" => extract_pptx_text(&canonical).await?,
         "doc" | "ppt" | "odt" | "odp" => extract_with_libreoffice(&canonical).await?,
         _ => match tokio::fs::read_to_string(&canonical).await {
-            Ok(text) => text,
+            Ok(text) => ExtractedTextPayload::new(text, "read_to_string", false),
             Err(_) => bail!(
                 "unsupported ingest format for {}. Use memory import for raw asset storage or convert it to txt/pdf/docx/pptx/html first",
                 canonical.display()
             ),
         },
     };
-    let text = normalize_ingested_text(&raw_text);
+    let text = normalize_ingested_text(&extracted_payload.text);
     if text.trim().is_empty() {
         bail!("no extractable text found in {}", canonical.display());
     }
@@ -1064,10 +1123,41 @@ async fn extract_memory_source_from_file(source: &Path) -> Result<ExtractedMemor
         media_kind,
         extension_tag: if ext.is_empty() { None } else { Some(ext) },
         asset_source_path: Some(canonical),
+        extraction_method: extracted_payload.extraction_method,
+        ocr_applied: extracted_payload.ocr_applied,
     })
 }
 
-async fn extract_pdf_text(source: &Path) -> Result<String> {
+async fn extract_pdf_text(source: &Path) -> Result<ExtractedTextPayload> {
+    if let Some(text) = try_extract_pdf_text_native(source).await? {
+        return Ok(ExtractedTextPayload::new(text, "pdftotext", false));
+    }
+
+    if let Some(text) =
+        try_extract_text_via_external_command(source, "HARKONNEN_MEMORY_PDF_EXTRACT_COMMAND")
+            .await?
+    {
+        return Ok(ExtractedTextPayload::new(
+            text,
+            "external_pdf_extractor",
+            false,
+        ));
+    }
+
+    if let Some(text) = try_extract_pdf_text_with_ocr(source).await? {
+        return Ok(ExtractedTextPayload::new(text, "ocr_pdf", true));
+    }
+
+    bail!(
+        "no extractable text found in {}. Install pdftotext, configure HARKONNEN_MEMORY_PDF_EXTRACT_COMMAND, or install pdftoppm+tesseract for OCR fallback",
+        source.display()
+    );
+}
+
+async fn try_extract_pdf_text_native(source: &Path) -> Result<Option<String>> {
+    if !command_available("pdftotext") {
+        return Ok(None);
+    }
     let output = Command::new("pdftotext")
         .arg("-layout")
         .arg(source)
@@ -1076,21 +1166,34 @@ async fn extract_pdf_text(source: &Path) -> Result<String> {
         .await
         .with_context(|| format!("running pdftotext for {}", source.display()))?;
     if !output.status.success() {
-        bail!(
+        tracing::warn!(
             "pdftotext failed for {}: {}",
             source.display(),
             String::from_utf8_lossy(&output.stderr).trim()
         );
+        return Ok(None);
     }
-    Ok(String::from_utf8_lossy(&output.stdout).to_string())
+    let text = normalize_ingested_text(&String::from_utf8_lossy(&output.stdout));
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(text))
 }
 
-async fn extract_docx_text(source: &Path) -> Result<String> {
-    extract_zip_text_with_python(source, "docx").await
+async fn extract_docx_text(source: &Path) -> Result<ExtractedTextPayload> {
+    Ok(ExtractedTextPayload::new(
+        extract_zip_text_with_python(source, "docx").await?,
+        "docx_zip_xml",
+        false,
+    ))
 }
 
-async fn extract_pptx_text(source: &Path) -> Result<String> {
-    extract_zip_text_with_python(source, "pptx").await
+async fn extract_pptx_text(source: &Path) -> Result<ExtractedTextPayload> {
+    Ok(ExtractedTextPayload::new(
+        extract_zip_text_with_python(source, "pptx").await?,
+        "pptx_zip_xml",
+        false,
+    ))
 }
 
 async fn extract_zip_text_with_python(source: &Path, mode: &str) -> Result<String> {
@@ -1144,7 +1247,7 @@ print('\n\n'.join(parts))"#
     Ok(String::from_utf8_lossy(&output.stdout).to_string())
 }
 
-async fn extract_with_libreoffice(source: &Path) -> Result<String> {
+async fn extract_with_libreoffice(source: &Path) -> Result<ExtractedTextPayload> {
     let out_dir = std::env::temp_dir().join(format!("harkonnen-memory-lo-{}", Uuid::new_v4()));
     tokio::fs::create_dir_all(&out_dir).await?;
     let output = Command::new("libreoffice")
@@ -1175,12 +1278,171 @@ async fn extract_with_libreoffice(source: &Path) -> Result<String> {
         }
     }
     let _ = tokio::fs::remove_dir_all(&out_dir).await;
-    text.with_context(|| {
+    let text = text.with_context(|| {
         format!(
             "libreoffice did not produce a txt output for {}",
             source.display()
         )
-    })
+    })?;
+    Ok(ExtractedTextPayload::new(text, "libreoffice_txt", false))
+}
+
+async fn extract_image_text_with_ocr(source: &Path) -> Result<ExtractedTextPayload> {
+    if !command_available("tesseract") {
+        bail!(
+            "OCR requires tesseract for {}. Install tesseract or use memory import for raw asset storage",
+            source.display()
+        );
+    }
+    let output = Command::new("tesseract")
+        .arg(source)
+        .arg("stdout")
+        .output()
+        .await
+        .with_context(|| format!("running tesseract for {}", source.display()))?;
+    if !output.status.success() {
+        bail!(
+            "tesseract failed for {}: {}",
+            source.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+    }
+    Ok(ExtractedTextPayload::new(
+        String::from_utf8_lossy(&output.stdout).to_string(),
+        "ocr_image",
+        true,
+    ))
+}
+
+async fn try_extract_pdf_text_with_ocr(source: &Path) -> Result<Option<String>> {
+    if !command_available("pdftoppm") || !command_available("tesseract") {
+        return Ok(None);
+    }
+
+    let temp_dir =
+        std::env::temp_dir().join(format!("harkonnen-memory-pdf-ocr-{}", Uuid::new_v4()));
+    tokio::fs::create_dir_all(&temp_dir).await?;
+    let page_prefix = temp_dir.join("page");
+    let render_output = Command::new("pdftoppm")
+        .arg("-png")
+        .arg(source)
+        .arg(&page_prefix)
+        .output()
+        .await
+        .with_context(|| format!("running pdftoppm for {}", source.display()))?;
+    if !render_output.status.success() {
+        let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+        tracing::warn!(
+            "pdftoppm failed for {}: {}",
+            source.display(),
+            String::from_utf8_lossy(&render_output.stderr).trim()
+        );
+        return Ok(None);
+    }
+
+    let mut pages = Vec::new();
+    let mut entries = tokio::fs::read_dir(&temp_dir).await?;
+    while let Some(entry) = entries.next_entry().await? {
+        let path = entry.path();
+        if path.extension().and_then(|value| value.to_str()) == Some("png") {
+            pages.push(path);
+        }
+    }
+    pages.sort();
+
+    let mut parts = Vec::new();
+    for page in &pages {
+        let output = Command::new("tesseract")
+            .arg(page)
+            .arg("stdout")
+            .output()
+            .await
+            .with_context(|| format!("running tesseract for {}", page.display()))?;
+        if !output.status.success() {
+            tracing::warn!(
+                "tesseract failed for OCR page {}: {}",
+                page.display(),
+                String::from_utf8_lossy(&output.stderr).trim()
+            );
+            continue;
+        }
+        let text = normalize_ingested_text(&String::from_utf8_lossy(&output.stdout));
+        if !text.trim().is_empty() {
+            parts.push(text);
+        }
+    }
+
+    let _ = tokio::fs::remove_dir_all(&temp_dir).await;
+    if parts.is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(parts.join("\n\n")))
+}
+
+async fn try_extract_text_via_external_command(
+    source: &Path,
+    env_var: &str,
+) -> Result<Option<String>> {
+    let template = match std::env::var(env_var) {
+        Ok(value) if !value.trim().is_empty() => value,
+        _ => return Ok(None),
+    };
+
+    let source_arg = shell_escape_arg(&source.to_string_lossy());
+    let raw_command = if template.contains("{source}") {
+        template.replace("{source}", &source_arg)
+    } else {
+        format!("{template} {source_arg}")
+    };
+
+    #[cfg(target_os = "windows")]
+    let mut command = {
+        let mut command = Command::new("cmd");
+        command.arg("/C").arg(&raw_command);
+        command
+    };
+
+    #[cfg(not(target_os = "windows"))]
+    let mut command = {
+        let mut command = Command::new("/bin/sh");
+        command.arg("-lc").arg(&raw_command);
+        command
+    };
+
+    let output = command.output().await.with_context(|| {
+        format!(
+            "running external extractor '{}' for {}",
+            env_var,
+            source.display()
+        )
+    })?;
+    if !output.status.success() {
+        tracing::warn!(
+            "external extractor {} failed for {}: {}",
+            env_var,
+            source.display(),
+            String::from_utf8_lossy(&output.stderr).trim()
+        );
+        return Ok(None);
+    }
+
+    let text = normalize_ingested_text(&String::from_utf8_lossy(&output.stdout));
+    if text.trim().is_empty() {
+        return Ok(None);
+    }
+    Ok(Some(text))
+}
+
+fn shell_escape_arg(arg: &str) -> String {
+    #[cfg(target_os = "windows")]
+    {
+        format!("\"{}\"", arg.replace('"', "\\\""))
+    }
+
+    #[cfg(not(target_os = "windows"))]
+    {
+        format!("'{}'", arg.replace('\'', "'\"'\"'"))
+    }
 }
 
 fn derive_title_from_path(source: &Path) -> String {
@@ -1692,11 +1954,99 @@ fn detect_media_kind(path: &Path) -> &'static str {
     }
 }
 
+fn should_write_extracted_text_sidecar(extracted: &ExtractedMemorySource) -> bool {
+    matches!(extracted.media_kind.as_str(), "pdf" | "image" | "document")
+        && extracted.extension_tag.as_deref().is_none_or(|ext| {
+            !matches!(
+                ext,
+                "txt"
+                    | "md"
+                    | "csv"
+                    | "json"
+                    | "toml"
+                    | "yaml"
+                    | "yml"
+                    | "log"
+                    | "html"
+                    | "htm"
+                    | "xml"
+            )
+        })
+}
+
+async fn write_extracted_text_sidecar(asset_path: &Path, text: &str) -> Result<PathBuf> {
+    let sidecar_path = extracted_text_sidecar_path(asset_path);
+    tokio::fs::write(&sidecar_path, text).await?;
+    Ok(sidecar_path)
+}
+
+fn extracted_text_sidecar_path(asset_path: &Path) -> PathBuf {
+    let stem = asset_path
+        .file_stem()
+        .and_then(|value| value.to_str())
+        .unwrap_or("extracted");
+    let parent = asset_path.parent().unwrap_or_else(|| Path::new("."));
+    parent.join(format!("{stem}.extracted.txt"))
+}
+
 fn asset_path_for(imports_dir: &Path, id: &str, ext: &str) -> PathBuf {
     if ext.is_empty() {
         imports_dir.join(id)
     } else {
         imports_dir.join(format!("{}.{}", id, ext))
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::{
+        extracted_text_sidecar_path, shell_escape_arg, should_write_extracted_text_sidecar,
+        ExtractedMemorySource,
+    };
+    use std::path::Path;
+
+    #[test]
+    fn extracted_text_sidecar_uses_asset_stem() {
+        let path = extracted_text_sidecar_path(Path::new("/tmp/scan.pdf"));
+        assert_eq!(path, Path::new("/tmp/scan.extracted.txt"));
+    }
+
+    #[test]
+    fn binary_ingests_request_text_sidecar() {
+        let extracted = ExtractedMemorySource {
+            title: "scan".to_string(),
+            source_kind: "file".to_string(),
+            source_locator: "/tmp/scan.pdf".to_string(),
+            text: "hello".to_string(),
+            media_kind: "pdf".to_string(),
+            extension_tag: Some("pdf".to_string()),
+            asset_source_path: None,
+            extraction_method: "pdftotext".to_string(),
+            ocr_applied: false,
+        };
+        assert!(should_write_extracted_text_sidecar(&extracted));
+    }
+
+    #[test]
+    fn plain_text_ingests_skip_sidecar() {
+        let extracted = ExtractedMemorySource {
+            title: "note".to_string(),
+            source_kind: "file".to_string(),
+            source_locator: "/tmp/note.txt".to_string(),
+            text: "hello".to_string(),
+            media_kind: "document".to_string(),
+            extension_tag: Some("txt".to_string()),
+            asset_source_path: None,
+            extraction_method: "read_to_string".to_string(),
+            ocr_applied: false,
+        };
+        assert!(!should_write_extracted_text_sidecar(&extracted));
+    }
+
+    #[test]
+    fn shell_escape_contains_wrapped_argument() {
+        let escaped = shell_escape_arg("/tmp/with spaces/file.pdf");
+        assert!(escaped.starts_with('\'') || escaped.starts_with('"'));
     }
 }
 

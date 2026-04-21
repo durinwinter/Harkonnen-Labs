@@ -242,6 +242,14 @@ cargo build
 cargo run -- setup check
 ```
 
+For this machine with LM Studio as the local model backend:
+
+```bash
+export LM_STUDIO_API_KEY=lm-studio
+export HARKONNEN_SETUP=lm-studio-local
+cargo run -- setup check
+```
+
 ### 3. Create And Validate A YAML Spec
 
 ```yaml
@@ -296,6 +304,45 @@ cargo run -- artifact package <run-id>
 
 ```bash
 cargo run -- serve
+```
+
+### 7. Launch Harkonnen Locally And Expose It Over MCP
+
+The fastest local path on this machine is:
+
+```bash
+export LM_STUDIO_API_KEY=lm-studio
+export HARKONNEN_SETUP=lm-studio-local
+./scripts/launch-harkonnen-local.sh
+```
+
+That starts the main Harkonnen API on `127.0.0.1:3000`.
+
+To expose Harkonnen itself as an MCP server for a local MCP client:
+
+```bash
+export LM_STUDIO_API_KEY=lm-studio
+export HARKONNEN_SETUP=lm-studio-local
+cargo run -- mcp serve
+```
+
+Because `lm-studio-local` now defaults `mcp.self.transport` to `stdio`, MCP clients can launch Harkonnen directly as a subprocess without a second always-on network server.
+
+Example Claude Code MCP block:
+
+```json
+{
+  "mcpServers": {
+    "harkonnen": {
+      "command": "cargo",
+      "args": ["run", "--", "mcp", "serve"],
+      "env": {
+        "HARKONNEN_SETUP": "lm-studio-local",
+        "LM_STUDIO_API_KEY": "lm-studio"
+      }
+    }
+  }
+}
 ```
 
 ## 🛠 Core Commands

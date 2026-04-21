@@ -1,0 +1,35 @@
+{
+  "generated_at": "2026-04-20T21:19:02.526945582+00:00",
+  "label": "readtime",
+  "source_kind": "path",
+  "source_path": "/media/earthling/Caleb's Files2/Harkonnen-Labs/factory/benchmarks/fixtures/devbench-smoke/python/readtime",
+  "project_memory_root": "/media/earthling/Caleb's Files2/Harkonnen-Labs/factory/benchmarks/fixtures/devbench-smoke/python/readtime/.harkonnen/project-memory",
+  "git": {
+    "branch": "main",
+    "commit": "c3ae6d51e4b4cc995e6bc7c95147dbe68fd31eb7",
+    "remote_origin": "https://github.com/durinwinter/Harkonnen-Labs.git",
+    "clean": false,
+    "changed_paths": [
+      "actory/benchmarks/fixtures/devbench-smoke/python/readtime/acceptance_tests/test_example_usage.py",
+      "actory/benchmarks/fixtures/devbench-smoke/python/readtime/repo_config.json",
+      "actory/benchmarks/fixtures/devbench-smoke/python/readtime/unit_tests/test_readtime.py",
+      "actory/benchmarks/suites.yaml",
+      "cripts/devbench_harkonnen_adapter.py",
+      "factory/benchmarks/fixtures/devbench-smoke/python/readtime/src/__init__.py",
+      "scripts/run-devbench-harkonnen.sh"
+    ]
+  },
+  "detected_files": [
+    "docs"
+  ],
+  "detected_directories": [
+    "src",
+    "examples",
+    "docs"
+  ],
+  "likely_commands": [],
+  "runtime_hints": [
+    "Example datasets or reference integrations may live under examples/.",
+    "Repo already contains Harkonnen-local continuity files."
+  ]
+}

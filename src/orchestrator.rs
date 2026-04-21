@@ -28,8 +28,8 @@ use crate::{
         HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage,
         LessonRecord, LiveEvent, OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord,
         PriorCauseSignal, ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent,
-        RunRecord, ScenarioResult, SoulIdentityContext, Spec, TwinEnvironment, TwinFailureMode,
-        TwinService, TwinServiceSpec, ValidationSummary, WorkerHarnessConfig,
+        RunRecord, RunTimingReport, ScenarioResult, SoulIdentityContext, Spec, TwinEnvironment,
+        TwinFailureMode, TwinService, TwinServiceSpec, ValidationSummary, WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -648,6 +648,14 @@ struct RetrieverHookArtifact {
 
 impl AppContext {
     pub async fn bootstrap() -> Result<Self> {
+        Self::bootstrap_with_options(true).await
+    }
+
+    pub async fn bootstrap_for_mcp() -> Result<Self> {
+        Self::bootstrap_with_options(false).await
+    }
+
+    async fn bootstrap_with_options(enable_embeddings: bool) -> Result<Self> {
         let paths = Paths::discover()?;
         tokio::fs::create_dir_all(&paths.factory).await?;
         tokio::fs::create_dir_all(&paths.logs).await?;
@@ -661,7 +669,7 @@ impl AppContext {
         let pool = db::init_db(&paths).await?;
         let memory_store = MemoryStore::new(paths.memory.clone());
         let coobie = crate::coobie::SqliteCoobie::new(pool.clone());
-        let embedding_store =
+        let embedding_store = if enable_embeddings {
             match crate::embeddings::EmbeddingStore::new(pool.clone(), &paths.setup).await {
                 Ok(es) => {
                     tracing::info!(backend = %es.backend_label(), "semantic memory ready");
@@ -674,7 +682,11 @@ impl AppContext {
                     );
                     None
                 }
-            };
+            }
+        } else {
+            tracing::info!("semantic memory skipped for lightweight MCP bootstrap");
+            None
+        };
         let (event_tx, _) = tokio::sync::broadcast::channel(512);
         let chat = crate::chat::ChatStore::new(pool.clone());
         let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
@@ -1607,6 +1619,8 @@ impl AppContext {
                     .await?;
                 self.finalize_blackboard(final_status, &output.run_dir)
                     .await?;
+                self.write_run_timing_artifact(&run_id, &output.run_dir)
+                    .await?;
                 self.package_artifacts(&run_id).await?;
             }
             Err(error) => {
@@ -1682,6 +1696,9 @@ impl AppContext {
                                 .await;
                         }
                     }
+                }
+                if run_dir.exists() {
+                    self.write_run_timing_artifact(&run_id, &run_dir).await?;
                 }
                 let _ = self.package_artifacts(&run_id).await;
             }
@@ -6135,6 +6152,10 @@ Render Coobie's preflight markdown for the pack. Incorporate repo-local guidance
         target_source: &TargetSourceMetadata,
         briefing: &CoobieBriefing,
     ) -> Result<IntentPackage> {
+        if let Some(intent) = structured_benchmark_intent(spec_obj) {
+            return Ok(intent);
+        }
+
         if let Some(provider) = llm::build_provider("scout", "claude", &self.paths.setup) {
             let memory_section = format_memory_context(&briefing.memory_hits);
             let briefing_json = serde_json::to_string_pretty(briefing).unwrap_or_default();
@@ -9200,8 +9221,7 @@ Write the twin environment narrative and identify any simulation gaps against Co
             read_optional_json_file(&run_dir.join("hidden_scenarios.json"))?;
         let twin: Option<TwinEnvironment> = read_optional_json_file(&run_dir.join("twin.json"))?;
         let build_output = read_optional_text_file(&run_dir.join("build_output.txt"))?;
-        let validation_analysis =
-            read_optional_text_file(&run_dir.join("validation_analysis.md"))?;
+        let validation_analysis = read_optional_text_file(&run_dir.join("validation_analysis.md"))?;
         let twin_narrative = read_optional_text_file(&run_dir.join("twin_narrative.md"))?;
 
         let provider = llm::build_provider("flint", "claude-haiku", &self.paths.setup);
@@ -9381,7 +9401,10 @@ Requirements:
                     .await
                     .map(|resp| resp.content)
                     .unwrap_or_else(|error| {
-                        tracing::warn!("Flint README generation failed ({}), using fallback", error);
+                        tracing::warn!(
+                            "Flint README generation failed ({}), using fallback",
+                            error
+                        );
                         render_flint_readme_fallback(
                             run_id,
                             spec_obj,
@@ -9430,7 +9453,10 @@ Requirements:
                         .await
                         .map(|resp| resp.content)
                         .unwrap_or_else(|error| {
-                            tracing::warn!("Flint API doc generation failed ({}), using fallback", error);
+                            tracing::warn!(
+                                "Flint API doc generation failed ({}), using fallback",
+                                error
+                            );
                             render_flint_api_fallback(
                                 spec_obj,
                                 &run_artifacts,
@@ -10298,6 +10324,22 @@ Return JSON only.",
         tokio::fs::write(
             run_dir.join("phase_attributions.md"),
             render_phase_attributions_markdown(phase_attributions),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn write_run_timing_artifact(&self, run_id: &str, run_dir: &Path) -> Result<()> {
+        let Some(run) = self.get_run(run_id).await? else {
+            return Ok(());
+        };
+        let episodes = self.list_run_episodes(run_id).await?;
+        let timing = build_run_timing_report(&run, &episodes, Utc::now());
+        self.write_json_file(&run_dir.join("run_timing.json"), &timing)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("run_timing.md"),
+            render_run_timing_markdown(&timing),
         )
         .await?;
         Ok(())
@@ -19205,15 +19247,7 @@ fn spec_needs_api_docs(spec_obj: &Spec, run_artifacts: &[String]) -> bool {
     )
     .to_lowercase();
     let signals = [
-        "api",
-        "endpoint",
-        "rest",
-        "http",
-        "graphql",
-        "webhook",
-        "route",
-        "openapi",
-        "swagger",
+        "api", "endpoint", "rest", "http", "graphql", "webhook", "route", "openapi", "swagger",
     ];
     if signals.iter().any(|signal| spec_text.contains(signal)) {
         return true;
@@ -19240,7 +19274,13 @@ fn render_flint_readme_fallback(
         .map(|summary| format!("{} ({})", summary.passed, summarize_validation(summary)))
         .unwrap_or_else(|| "not recorded".to_string());
     let hidden_summary = hidden_scenarios
-        .map(|summary| format!("{} ({} scenario results)", summary.passed, summary.results.len()))
+        .map(|summary| {
+            format!(
+                "{} ({} scenario results)",
+                summary.passed,
+                summary.results.len()
+            )
+        })
         .unwrap_or_else(|| "not recorded".to_string());
     let twin_summary = twin
         .map(|environment| {
@@ -19305,9 +19345,11 @@ fn render_flint_api_fallback(
         .chain(spec_obj.acceptance_criteria.iter())
         .filter(|line| {
             let lower = line.to_lowercase();
-            ["api", "endpoint", "rest", "http", "graphql", "webhook", "route"]
-                .iter()
-                .any(|signal| lower.contains(signal))
+            [
+                "api", "endpoint", "rest", "http", "graphql", "webhook", "route",
+            ]
+            .iter()
+            .any(|signal| lower.contains(signal))
         })
         .cloned()
         .collect::<Vec<_>>();
@@ -19364,10 +19406,7 @@ fn render_flint_api_fallback(
                 )
             })
             .unwrap_or_else(|| "- No validation summary was available.".to_string()),
-        artifacts = render_list(
-            run_artifacts,
-            "- No related run artifacts were available."
-        ),
+        artifacts = render_list(run_artifacts, "- No related run artifacts were available."),
     )
 }
 
@@ -19384,7 +19423,13 @@ fn summarize_validation(validation: &ValidationSummary) -> String {
         .results
         .iter()
         .filter(|result| !result.passed)
-        .map(|result| format!("{} ({})", result.scenario_id, truncate_text(&result.details, 80)))
+        .map(|result| {
+            format!(
+                "{} ({})",
+                result.scenario_id,
+                truncate_text(&result.details, 80)
+            )
+        })
         .take(3)
         .collect::<Vec<_>>();
     let failure_kind = validation
@@ -21009,4 +21054,277 @@ fn render_twin_compose_yaml(specs: &[TwinServiceSpec]) -> String {
         }
     }
     yaml
+}
+
+fn structured_benchmark_intent(spec_obj: &Spec) -> Option<IntentPackage> {
+    let harness = spec_obj.worker_harness.as_ref()?;
+    let adapter = harness.adapter.trim();
+    let profile = harness.profile.trim();
+    let is_devbench = adapter == "devbench_harkonnen_adapter" || profile == "devbench_scaffold";
+    if !is_devbench {
+        return None;
+    }
+
+    let component = spec_obj.project_components.first();
+    let target_label = component
+        .map(|entry| entry.name.trim())
+        .filter(|value| !value.is_empty())
+        .unwrap_or("benchmark target");
+    let mut ambiguity_notes = Vec::new();
+    if spec_obj.test_commands.is_empty() {
+        ambiguity_notes.push(
+            "DevBench scaffold did not provide visible validation commands; validation may be partial."
+                .to_string(),
+        );
+    }
+    if spec_obj.outputs.is_empty() {
+        ambiguity_notes
+            .push("Structured benchmark spec does not list expected outputs yet.".to_string());
+    }
+
+    let mut recommended_steps = vec![
+        "Read the repo_config-derived inputs and worker harness contract before editing.".to_string(),
+        "Keep changes scoped to the benchmark-owned repository component and task boundaries."
+            .to_string(),
+        "Implement the smallest task-complete change set that satisfies the declared acceptance criteria."
+            .to_string(),
+    ];
+    if !spec_obj.test_commands.is_empty() {
+        recommended_steps.push(
+            "Run the visible validation commands declared in `spec.test_commands` before hidden-scenario work."
+                .to_string(),
+        );
+    }
+    if !harness.return_artifacts.is_empty() {
+        recommended_steps.push(format!(
+            "Package the expected worker artifacts: {}.",
+            harness.return_artifacts.join(", ")
+        ));
+    }
+
+    Some(IntentPackage {
+        spec_id: spec_obj.id.clone(),
+        summary: format!(
+            "Execute the structured DevBench task for {} using the repo_config-grounded harness.",
+            target_label
+        ),
+        ambiguity_notes,
+        recommended_steps,
+    })
+}
+
+fn build_run_timing_report(
+    run: &RunRecord,
+    episodes: &[EpisodeRecord],
+    generated_at: chrono::DateTime<Utc>,
+) -> RunTimingReport {
+    let mut phase_durations = Vec::new();
+    for episode in episodes {
+        let duration_ms = episode_duration_ms(episode, run.updated_at);
+        if let Some(existing) = phase_durations
+            .iter_mut()
+            .find(|entry: &&mut crate::models::RunPhaseTiming| entry.phase == episode.phase)
+        {
+            existing.episode_count += 1;
+            existing.duration_ms = existing.duration_ms.saturating_add(duration_ms);
+        } else {
+            phase_durations.push(crate::models::RunPhaseTiming {
+                phase: episode.phase.clone(),
+                episode_count: 1,
+                duration_ms,
+            });
+        }
+    }
+
+    let memory_duration_ms = sum_phase_durations(&phase_durations, &["memory"]);
+    let intake_duration_ms = sum_phase_durations(&phase_durations, &["intake"]);
+    let implementation_duration_ms = sum_phase_durations(
+        &phase_durations,
+        &[
+            "workspace",
+            "implementation",
+            "build",
+            "tools",
+            "retriever_forge",
+        ],
+    );
+    let validation_duration_ms = sum_phase_durations(
+        &phase_durations,
+        &["twin", "validation", "hidden_scenarios"],
+    );
+    let total_duration_ms = positive_duration_ms(run.created_at, run.updated_at);
+    let tracked_duration_ms = memory_duration_ms
+        .saturating_add(intake_duration_ms)
+        .saturating_add(implementation_duration_ms)
+        .saturating_add(validation_duration_ms);
+    let other_duration_ms = total_duration_ms.saturating_sub(tracked_duration_ms);
+
+    RunTimingReport {
+        run_id: run.run_id.clone(),
+        total_duration_ms,
+        memory_duration_ms,
+        intake_duration_ms,
+        implementation_duration_ms,
+        validation_duration_ms,
+        other_duration_ms,
+        phase_durations,
+        generated_at,
+    }
+}
+
+fn episode_duration_ms(episode: &EpisodeRecord, fallback_end: chrono::DateTime<Utc>) -> u64 {
+    let end = episode.ended_at.unwrap_or(fallback_end);
+    positive_duration_ms(episode.started_at, end)
+}
+
+fn positive_duration_ms(start: chrono::DateTime<Utc>, end: chrono::DateTime<Utc>) -> u64 {
+    end.signed_duration_since(start).num_milliseconds().max(0) as u64
+}
+
+fn sum_phase_durations(phase_durations: &[crate::models::RunPhaseTiming], phases: &[&str]) -> u64 {
+    phase_durations
+        .iter()
+        .filter(|entry| phases.iter().any(|phase| *phase == entry.phase))
+        .fold(0u64, |acc, entry| acc.saturating_add(entry.duration_ms))
+}
+
+fn render_run_timing_markdown(report: &RunTimingReport) -> String {
+    let mut lines = vec![
+        "# Run Timing".to_string(),
+        String::new(),
+        format!("- Total duration: {} ms", report.total_duration_ms),
+        format!("- Memory: {} ms", report.memory_duration_ms),
+        format!("- Intake: {} ms", report.intake_duration_ms),
+        format!("- Implementation: {} ms", report.implementation_duration_ms),
+        format!("- Validation: {} ms", report.validation_duration_ms),
+        format!("- Other: {} ms", report.other_duration_ms),
+        String::new(),
+        "## Phase Durations".to_string(),
+    ];
+
+    if report.phase_durations.is_empty() {
+        lines.push(String::new());
+        lines.push("- No episode timing data recorded.".to_string());
+        return lines.join("\n");
+    }
+
+    lines.push(String::new());
+    for phase in &report.phase_durations {
+        lines.push(format!(
+            "- {}: {} ms across {} episode(s)",
+            phase.phase, phase.duration_ms, phase.episode_count
+        ));
+    }
+    lines.join("\n")
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use chrono::{Duration, TimeZone};
+
+    fn sample_run(run_id: &str) -> RunRecord {
+        RunRecord {
+            run_id: run_id.to_string(),
+            spec_id: "spec".to_string(),
+            product: "product".to_string(),
+            status: "completed".to_string(),
+            created_at: Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 0).unwrap(),
+            updated_at: Utc.with_ymd_and_hms(2026, 4, 20, 12, 0, 12).unwrap(),
+        }
+    }
+
+    fn sample_episode(
+        phase: &str,
+        started_at: chrono::DateTime<Utc>,
+        duration_secs: i64,
+    ) -> EpisodeRecord {
+        EpisodeRecord {
+            episode_id: format!("{phase}-episode"),
+            run_id: "run-1".to_string(),
+            phase: phase.to_string(),
+            goal: phase.to_string(),
+            outcome: Some("success".to_string()),
+            confidence: Some(1.0),
+            started_at,
+            ended_at: Some(started_at + Duration::seconds(duration_secs)),
+            state_before: None,
+            state_after: None,
+        }
+    }
+
+    #[test]
+    fn structured_benchmark_intent_recognizes_devbench_specs() {
+        let spec = Spec {
+            id: "devbench-readtime-implementation".to_string(),
+            title: "DevBench readtime Implementation".to_string(),
+            purpose: "implement the benchmark task".to_string(),
+            scope: vec!["implement the required files".to_string()],
+            constraints: vec!["keep changes bounded".to_string()],
+            inputs: vec!["repo_config".to_string()],
+            outputs: vec!["artifact".to_string()],
+            acceptance_criteria: vec!["tests pass".to_string()],
+            forbidden_behaviors: vec!["edit hidden eval assets".to_string()],
+            rollback_requirements: vec!["reversible".to_string()],
+            dependencies: vec!["python".to_string()],
+            performance_expectations: vec!["visible validation is runnable".to_string()],
+            security_expectations: vec!["local only".to_string()],
+            twin_services: Vec::new(),
+            project_components: vec![crate::models::ProjectComponent {
+                name: "readtime".to_string(),
+                role: "code_under_test".to_string(),
+                kind: "devbench_python_repo".to_string(),
+                path: "/tmp/readtime".to_string(),
+                owner: "devbench_dataset".to_string(),
+                notes: Vec::new(),
+                interfaces: vec!["python".to_string()],
+            }],
+            scenario_blueprint: None,
+            worker_harness: Some(WorkerHarnessConfig {
+                adapter: "devbench_harkonnen_adapter".to_string(),
+                profile: "devbench_scaffold".to_string(),
+                allowed_components: vec!["readtime".to_string()],
+                denied_paths: vec!["factory/scenarios".to_string()],
+                visible_success_conditions: vec!["tests pass".to_string()],
+                return_artifacts: vec!["changed_files".to_string(), "execution_log".to_string()],
+                max_iterations: Some(6),
+                continuity_file: Some("trail-state.json".to_string()),
+                llm_edits: true,
+                git_branch: false,
+            }),
+            test_commands: vec!["pytest -q".to_string()],
+        };
+
+        let intent = structured_benchmark_intent(&spec).expect("expected fast-path intent");
+        assert_eq!(intent.spec_id, spec.id);
+        assert!(intent.summary.contains("DevBench"));
+        assert!(intent
+            .recommended_steps
+            .iter()
+            .any(|step| step.contains("spec.test_commands")));
+    }
+
+    #[test]
+    fn build_run_timing_report_aggregates_requested_buckets() {
+        let run = sample_run("run-1");
+        let started_at = run.created_at;
+        let episodes = vec![
+            sample_episode("memory", started_at, 1),
+            sample_episode("intake", started_at + Duration::seconds(1), 2),
+            sample_episode("workspace", started_at + Duration::seconds(3), 1),
+            sample_episode("implementation", started_at + Duration::seconds(4), 3),
+            sample_episode("build", started_at + Duration::seconds(7), 1),
+            sample_episode("validation", started_at + Duration::seconds(8), 2),
+            sample_episode("hidden_scenarios", started_at + Duration::seconds(10), 1),
+        ];
+
+        let report = build_run_timing_report(&run, &episodes, run.updated_at);
+        assert_eq!(report.total_duration_ms, 12_000);
+        assert_eq!(report.memory_duration_ms, 1_000);
+        assert_eq!(report.intake_duration_ms, 2_000);
+        assert_eq!(report.implementation_duration_ms, 5_000);
+        assert_eq!(report.validation_duration_ms, 3_000);
+        assert_eq!(report.other_duration_ms, 1_000);
+        assert_eq!(report.phase_durations.len(), 7);
+    }
 }

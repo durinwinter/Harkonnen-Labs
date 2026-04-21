@@ -1732,7 +1732,7 @@ fn resolve_target_path(root: &Path, raw: &str) -> Result<PathBuf> {
     Ok(resolved.canonicalize().unwrap_or(resolved))
 }
 
-fn write_text_file(path: &Path, content: &str) -> Result<()> {
+pub(crate) fn write_text_file(path: &Path, content: &str) -> Result<()> {
     if let Some(parent) = path.parent() {
         fs::create_dir_all(parent)?;
     }
@@ -1747,7 +1747,7 @@ fn write_text_file_if_missing(path: &Path, content: &str) -> Result<()> {
     write_text_file(path, content)
 }
 
-fn copy_if_exists(from: &Path, to: &Path) -> Result<()> {
+pub(crate) fn copy_if_exists(from: &Path, to: &Path) -> Result<()> {
     if !from.exists() {
         return Ok(());
     }

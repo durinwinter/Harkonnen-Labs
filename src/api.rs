@@ -3106,6 +3106,26 @@ async fn build_memory_board(
     }))
 }
 
+pub async fn build_run_board_snapshot(
+    app: &AppContext,
+    id: &str,
+) -> anyhow::Result<Option<serde_json::Value>> {
+    let Some(mission) = build_mission_board(app, id).await? else {
+        return Ok(None);
+    };
+    let action = build_action_board(app, id).await?;
+    let evidence = build_evidence_board(app, id).await?;
+    let memory = build_memory_board(app, id).await?;
+
+    Ok(Some(serde_json::json!({
+        "run_id": id,
+        "mission": mission,
+        "action": action,
+        "evidence": evidence,
+        "memory": memory,
+    })))
+}
+
 async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<RunStateResponse>> {
     let Some(run) = app.get_run(id).await? else {
         return Ok(None);

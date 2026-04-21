@@ -18,7 +18,9 @@ use tracing::info;
 
 use crate::{
     benchmark,
+    chat::{dispatch_message, ChatThreadKind, OpenThreadRequest, PostMessageRequest},
     cli::McpServeArgs,
+    models::Spec,
     orchestrator::{AppContext, RunRequest},
     reporting,
 };
@@ -300,10 +302,16 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
                 .get("run_hidden_scenarios")
                 .and_then(Value::as_bool)
                 .unwrap_or(true);
+            let spec_path = resolve_spec_reference(&state.app, &spec);
+            if let Some(spec_yaml) = optional_string(&arguments, "spec_yaml") {
+                persist_spec_yaml(&state.app, &spec_path, &spec_yaml)
+                    .await
+                    .map_err(internal_error)?;
+            }
             let run = state
                 .app
                 .start_run(RunRequest {
-                    spec_path: spec,
+                    spec_path,
                     product,
                     product_path,
                     run_hidden_scenarios,
@@ -316,6 +324,210 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
                 "status": run.status,
                 "spec_id": run.spec_id,
                 "product": run.product
+            })
+        }
+        "queue_run" => {
+            let spec = required_string(&arguments, "spec")?;
+            let product = optional_string(&arguments, "product");
+            let product_path = optional_string(&arguments, "product_path");
+            if product.is_none() && product_path.is_none() {
+                return Err((
+                    -32602,
+                    "queue_run requires either arguments.product or arguments.product_path"
+                        .to_string(),
+                ));
+            }
+            let run_hidden_scenarios = arguments
+                .get("run_hidden_scenarios")
+                .and_then(Value::as_bool)
+                .unwrap_or(true);
+            let spec_path = resolve_spec_reference(&state.app, &spec);
+            if let Some(spec_yaml) = optional_string(&arguments, "spec_yaml") {
+                persist_spec_yaml(&state.app, &spec_path, &spec_yaml)
+                    .await
+                    .map_err(internal_error)?;
+            }
+            let run = state
+                .app
+                .queue_run(RunRequest {
+                    spec_path,
+                    product,
+                    product_path,
+                    run_hidden_scenarios,
+                    failure_harness: None,
+                })
+                .await
+                .map_err(internal_error)?;
+            json!({
+                "run_id": run.run_id,
+                "status": run.status,
+                "spec_id": run.spec_id,
+                "product": run.product
+            })
+        }
+        "watch_run" => {
+            let run_id = required_string(&arguments, "run_id")?;
+            let event_limit = arguments
+                .get("event_limit")
+                .and_then(Value::as_i64)
+                .unwrap_or(12)
+                .clamp(1, 100) as usize;
+            run_watch_payload(state, &run_id, event_limit)
+                .await
+                .map_err(internal_error)?
+        }
+        "get_run_board_snapshot" => {
+            let run_id = required_string(&arguments, "run_id")?;
+            let snapshot = crate::api::build_run_board_snapshot(&state.app, &run_id)
+                .await
+                .map_err(internal_error)?
+                .ok_or_else(|| (-32004, format!("run not found: {run_id}")))?;
+            let view = optional_string(&arguments, "view").unwrap_or_else(|| "summary".to_string());
+            match view.as_str() {
+                "full" => snapshot,
+                "summary" => summarize_board_snapshot(&snapshot),
+                other => {
+                    return Err((
+                        -32602,
+                        format!(
+                            "unsupported board snapshot view: {other} (expected full or summary)"
+                        ),
+                    ))
+                }
+            }
+        }
+        "list_chat_threads" => {
+            let run_id = optional_string(&arguments, "run_id");
+            let thread_kind = optional_chat_thread_kind(&arguments, "thread_kind")?;
+            let limit = arguments
+                .get("limit")
+                .and_then(Value::as_i64)
+                .unwrap_or(20)
+                .clamp(1, 100) as usize;
+            let threads = state
+                .app
+                .chat
+                .list_threads(run_id.as_deref(), thread_kind.as_ref(), limit)
+                .await
+                .map_err(internal_error)?;
+            json!(threads)
+        }
+        "open_chat_thread" => {
+            let thread = state
+                .app
+                .chat
+                .open_thread(&OpenThreadRequest {
+                    run_id: optional_string(&arguments, "run_id"),
+                    spec_id: optional_string(&arguments, "spec_id"),
+                    title: optional_string(&arguments, "title"),
+                    thread_kind: optional_chat_thread_kind(&arguments, "thread_kind")?
+                        .unwrap_or_default(),
+                    metadata_json: arguments.get("metadata_json").cloned(),
+                })
+                .await
+                .map_err(internal_error)?;
+            json!(thread)
+        }
+        "get_chat_thread" => {
+            let thread_id = required_string(&arguments, "thread_id")?;
+            let thread = state
+                .app
+                .chat
+                .get_thread(&thread_id)
+                .await
+                .map_err(internal_error)?
+                .ok_or_else(|| (-32004, format!("thread not found: {thread_id}")))?;
+            json!(thread)
+        }
+        "list_chat_messages" => {
+            let thread_id = required_string(&arguments, "thread_id")?;
+            let messages = state
+                .app
+                .chat
+                .list_messages(&thread_id)
+                .await
+                .map_err(internal_error)?;
+            json!(messages)
+        }
+        "post_chat_message" => {
+            let thread_id = required_string(&arguments, "thread_id")?;
+            let content = required_string(&arguments, "content")?;
+            let thread = state
+                .app
+                .chat
+                .get_thread(&thread_id)
+                .await
+                .map_err(internal_error)?
+                .ok_or_else(|| (-32004, format!("thread not found: {thread_id}")))?;
+            let response = dispatch_message(
+                &state.app.chat,
+                &state.app.paths,
+                &thread,
+                &PostMessageRequest {
+                    content,
+                    agent: optional_string(&arguments, "agent"),
+                },
+            )
+            .await
+            .map_err(internal_error)?;
+            json!(response)
+        }
+        "list_run_checkpoints" => {
+            let run_id = required_string(&arguments, "run_id")?;
+            let checkpoints = state
+                .app
+                .list_run_checkpoints(&run_id)
+                .await
+                .map_err(internal_error)?;
+            json!(checkpoints)
+        }
+        "reply_to_checkpoint" => {
+            let run_id = required_string(&arguments, "run_id")?;
+            let checkpoint_id = required_string(&arguments, "checkpoint_id")?;
+            let answer_text = optional_string(&arguments, "answer_text").unwrap_or_default();
+            let decision_json = arguments.get("decision_json").cloned();
+            let resolve = arguments
+                .get("resolve")
+                .and_then(Value::as_bool)
+                .unwrap_or(false);
+            let answered_by = optional_string(&arguments, "answered_by")
+                .unwrap_or_else(|| "operator".to_string());
+            let checkpoint = state
+                .app
+                .reply_to_checkpoint(
+                    &run_id,
+                    &checkpoint_id,
+                    &answered_by,
+                    &answer_text,
+                    decision_json,
+                    resolve,
+                )
+                .await
+                .map_err(internal_error)?;
+            json!(checkpoint)
+        }
+        "unblock_agent" => {
+            let run_id = required_string(&arguments, "run_id")?;
+            let agent = required_string(&arguments, "agent")?;
+            let answered_by = optional_string(&arguments, "answered_by")
+                .unwrap_or_else(|| "operator".to_string());
+            let checkpoints = state
+                .app
+                .unblock_agent_checkpoints(
+                    &run_id,
+                    &agent,
+                    optional_string(&arguments, "checkpoint_id").as_deref(),
+                    &answered_by,
+                    optional_string(&arguments, "answer_text").as_deref(),
+                    arguments.get("decision_json").cloned(),
+                )
+                .await
+                .map_err(internal_error)?;
+            json!({
+                "run_id": run_id,
+                "agent": agent,
+                "resolved": checkpoints.len(),
+                "checkpoints": checkpoints
             })
         }
         "list_benchmark_suites" => {
@@ -446,6 +658,67 @@ async fn read_resource(
             .await
             .map_err(internal_error)?;
         ("text/plain", report)
+    } else if let Some(run_id) = uri.strip_prefix("harkonnen://watch/") {
+        let payload = run_watch_payload(state, run_id, 12)
+            .await
+            .map_err(internal_error)?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&payload).map_err(internal_error)?,
+        )
+    } else if let Some(run_id) = uri.strip_prefix("harkonnen://boards/") {
+        let payload = crate::api::build_run_board_snapshot(&state.app, run_id)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| (-32004, format!("run not found: {run_id}")))?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&payload).map_err(internal_error)?,
+        )
+    } else if uri == "harkonnen://chat/threads" {
+        let threads = state
+            .app
+            .chat
+            .list_threads(None, None, 50)
+            .await
+            .map_err(internal_error)?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&threads).map_err(internal_error)?,
+        )
+    } else if let Some(thread_id) = uri.strip_prefix("harkonnen://chat/messages/") {
+        let messages = state
+            .app
+            .chat
+            .list_messages(thread_id)
+            .await
+            .map_err(internal_error)?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&messages).map_err(internal_error)?,
+        )
+    } else if let Some(thread_id) = uri.strip_prefix("harkonnen://chat/threads/") {
+        let thread = state
+            .app
+            .chat
+            .get_thread(thread_id)
+            .await
+            .map_err(internal_error)?
+            .ok_or_else(|| (-32004, format!("thread not found: {thread_id}")))?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&thread).map_err(internal_error)?,
+        )
+    } else if let Some(run_id) = uri.strip_prefix("harkonnen://checkpoints/") {
+        let checkpoints = state
+            .app
+            .list_run_checkpoints(run_id)
+            .await
+            .map_err(internal_error)?;
+        (
+            "application/json",
+            serde_json::to_string_pretty(&checkpoints).map_err(internal_error)?,
+        )
     } else if uri == "harkonnen://benchmarks/suites" {
         let manifest_path = benchmark::default_manifest_path(&state.app.paths);
         let manifest = benchmark::load_manifest(&manifest_path).map_err(internal_error)?;
@@ -565,6 +838,173 @@ fn optional_string_array(
     Ok(result)
 }
 
+fn optional_chat_thread_kind(
+    params: &Value,
+    key: &str,
+) -> std::result::Result<Option<ChatThreadKind>, (i64, String)> {
+    let Some(value) = optional_string(params, key) else {
+        return Ok(None);
+    };
+    match value.as_str() {
+        "general" => Ok(Some(ChatThreadKind::General)),
+        "run" => Ok(Some(ChatThreadKind::Run)),
+        "spec" => Ok(Some(ChatThreadKind::Spec)),
+        "operator_model" => Ok(Some(ChatThreadKind::OperatorModel)),
+        other => Err((
+            -32602,
+            format!(
+                "unsupported thread_kind: {other} (expected general, run, spec, or operator_model)"
+            ),
+        )),
+    }
+}
+
+fn resolve_spec_reference(app: &AppContext, spec: &str) -> String {
+    let spec = spec.trim();
+    if spec.ends_with(".yaml") || spec.ends_with(".yml") || spec.contains('/') {
+        return spec.to_string();
+    }
+    let drafts = app
+        .paths
+        .factory
+        .join("specs")
+        .join("drafts")
+        .join(format!("{spec}.yaml"));
+    if drafts.exists() {
+        return drafts.to_string_lossy().into_owned();
+    }
+    let examples = app
+        .paths
+        .factory
+        .join("specs")
+        .join("examples")
+        .join(format!("{spec}.yaml"));
+    if examples.exists() {
+        return examples.to_string_lossy().into_owned();
+    }
+    spec.to_string()
+}
+
+async fn persist_spec_yaml(app: &AppContext, spec_path: &str, spec_yaml: &str) -> Result<()> {
+    serde_yaml::from_str::<Spec>(spec_yaml).context("draft spec yaml is invalid")?;
+
+    let spec_path_buf = std::path::PathBuf::from(spec_path);
+    let spec_path_abs = if spec_path_buf.is_absolute() {
+        spec_path_buf
+    } else {
+        app.paths.root.join(spec_path_buf)
+    };
+
+    if let Some(parent) = spec_path_abs.parent() {
+        tokio::fs::create_dir_all(parent)
+            .await
+            .with_context(|| format!("creating spec parent dir {}", parent.display()))?;
+    }
+
+    tokio::fs::write(&spec_path_abs, spec_yaml.as_bytes())
+        .await
+        .with_context(|| format!("writing draft spec {}", spec_path_abs.display()))?;
+    Ok(())
+}
+
+async fn run_watch_payload(state: &McpState, run_id: &str, event_limit: usize) -> Result<Value> {
+    let run = state
+        .app
+        .get_run(run_id)
+        .await?
+        .with_context(|| format!("run not found: {run_id}"))?;
+    let mut events = state.app.list_run_events(run_id).await?;
+    if events.len() > event_limit {
+        let split_at = events.len() - event_limit;
+        events = events.split_off(split_at);
+    }
+    let active_checkpoints = state
+        .app
+        .list_run_checkpoints(run_id)
+        .await?
+        .into_iter()
+        .filter(|checkpoint| matches!(checkpoint.status.as_str(), "open" | "answered"))
+        .collect::<Vec<_>>();
+    let run_dir = state.app.paths.workspaces.join(run_id).join("run");
+    let run_timing = match tokio::fs::read_to_string(run_dir.join("run_timing.json")).await {
+        Ok(raw) => serde_json::from_str::<Value>(&raw).ok(),
+        Err(_) => None,
+    };
+    Ok(json!({
+        "run": run,
+        "recent_events": events,
+        "active_checkpoints": active_checkpoints,
+        "run_timing": run_timing,
+    }))
+}
+
+fn summarize_board_snapshot(snapshot: &Value) -> Value {
+    let mission = snapshot.get("mission").and_then(Value::as_object);
+    let action = snapshot.get("action").and_then(Value::as_object);
+    let evidence = snapshot.get("evidence").and_then(Value::as_object);
+    let memory = snapshot.get("memory").and_then(Value::as_object);
+
+    json!({
+        "run_id": snapshot.get("run_id").cloned().unwrap_or(Value::Null),
+        "current_phase": mission
+            .and_then(|board| board.get("current_phase"))
+            .cloned()
+            .or_else(|| action.and_then(|board| board.get("current_phase")).cloned())
+            .unwrap_or(Value::Null),
+        "run_status": mission
+            .and_then(|board| board.get("run_status"))
+            .cloned()
+            .unwrap_or(Value::Null),
+        "active_goal": mission
+            .and_then(|board| board.get("active_goal"))
+            .cloned()
+            .or_else(|| action.and_then(|board| board.get("active_goal")).cloned())
+            .unwrap_or(Value::Null),
+        "open_blocker_count": mission
+            .and_then(|board| board.get("open_blockers"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "open_checkpoint_count": action
+            .and_then(|board| board.get("open_checkpoints"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "artifact_ref_count": evidence
+            .and_then(|board| board.get("artifact_refs"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "recent_evidence_event_count": evidence
+            .and_then(|board| board.get("recent_evidence_events"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "active_lesson_count": memory
+            .and_then(|board| board.get("active_recalled_lessons"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "policy_reminder_count": memory
+            .and_then(|board| board.get("policy_reminders"))
+            .and_then(Value::as_array)
+            .map(|items| items.len())
+            .unwrap_or(0),
+        "stale_risk_count": memory
+            .and_then(|board| board.get("stale_risk_summary"))
+            .and_then(Value::as_object)
+            .and_then(|summary| summary.get("stale_risk_count"))
+            .cloned()
+            .unwrap_or(Value::from(0)),
+        "active_risk_score": memory
+            .and_then(|board| board.get("stale_risk_summary"))
+            .and_then(Value::as_object)
+            .and_then(|summary| summary.get("active_risk_score"))
+            .cloned()
+            .unwrap_or(Value::from(0)),
+    })
+}
+
 fn benchmark_manifest_path(state: &McpState, arguments: &Value) -> std::path::PathBuf {
     optional_string(arguments, "manifest_path")
         .map(std::path::PathBuf::from)
@@ -667,7 +1107,160 @@ fn tool_descriptors() -> Vec<Value> {
                     "spec": { "type": "string" },
                     "product": { "type": "string" },
                     "product_path": { "type": "string" },
+                    "spec_yaml": { "type": "string" },
                     "run_hidden_scenarios": { "type": "boolean" }
+                }
+            }
+        }),
+        json!({
+            "name": "queue_run",
+            "description": "Queue a new Harkonnen run and return immediately with the queued run record.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["spec"],
+                "properties": {
+                    "spec": { "type": "string" },
+                    "product": { "type": "string" },
+                    "product_path": { "type": "string" },
+                    "spec_yaml": { "type": "string" },
+                    "run_hidden_scenarios": { "type": "boolean" }
+                }
+            }
+        }),
+        json!({
+            "name": "watch_run",
+            "description": "Return a compact progress snapshot for a run, including recent events and active checkpoints.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "event_limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                }
+            }
+        }),
+        json!({
+            "name": "get_run_board_snapshot",
+            "description": "Return the Mission, Action, Evidence, and Memory board snapshot for a run.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "view": {
+                        "type": "string",
+                        "enum": ["summary", "full"]
+                    }
+                }
+            }
+        }),
+        json!({
+            "name": "list_chat_threads",
+            "description": "List PackChat threads, optionally filtered by run_id or thread kind.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "thread_kind": {
+                        "type": "string",
+                        "enum": ["general", "run", "spec", "operator_model"]
+                    },
+                    "limit": { "type": "integer", "minimum": 1, "maximum": 100 }
+                }
+            }
+        }),
+        json!({
+            "name": "open_chat_thread",
+            "description": "Open a new PackChat thread for general, run, spec, or operator-model discussion.",
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "spec_id": { "type": "string" },
+                    "title": { "type": "string" },
+                    "thread_kind": {
+                        "type": "string",
+                        "enum": ["general", "run", "spec", "operator_model"]
+                    },
+                    "metadata_json": { "type": "object" }
+                }
+            }
+        }),
+        json!({
+            "name": "get_chat_thread",
+            "description": "Fetch a PackChat thread by id.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["thread_id"],
+                "properties": {
+                    "thread_id": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "list_chat_messages",
+            "description": "List all messages in a PackChat thread.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["thread_id"],
+                "properties": {
+                    "thread_id": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "post_chat_message",
+            "description": "Post an operator message into a PackChat thread and persist the agent reply.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["thread_id", "content"],
+                "properties": {
+                    "thread_id": { "type": "string" },
+                    "content": { "type": "string" },
+                    "agent": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "list_run_checkpoints",
+            "description": "List current run checkpoints for a Harkonnen run.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id"],
+                "properties": {
+                    "run_id": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "reply_to_checkpoint",
+            "description": "Reply to a run checkpoint with operator text or decision JSON.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id", "checkpoint_id"],
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "checkpoint_id": { "type": "string" },
+                    "answered_by": { "type": "string" },
+                    "answer_text": { "type": "string" },
+                    "decision_json": { "type": "object" },
+                    "resolve": { "type": "boolean" }
+                }
+            }
+        }),
+        json!({
+            "name": "unblock_agent",
+            "description": "Resolve open checkpoints for a named agent on a run and unblock progress.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["run_id", "agent"],
+                "properties": {
+                    "run_id": { "type": "string" },
+                    "agent": { "type": "string" },
+                    "checkpoint_id": { "type": "string" },
+                    "answered_by": { "type": "string" },
+                    "answer_text": { "type": "string" },
+                    "decision_json": { "type": "object" }
                 }
             }
         }),
@@ -743,6 +1336,42 @@ fn resource_descriptors() -> Vec<Value> {
             "name": "Run Report",
             "description": "Rendered text report for a Harkonnen run.",
             "mimeType": "text/plain"
+        }),
+        json!({
+            "uriTemplate": "harkonnen://watch/{run_id}",
+            "name": "Run Watch",
+            "description": "Compact run progress snapshot with recent events and active checkpoints.",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uriTemplate": "harkonnen://boards/{run_id}",
+            "name": "Run Boards",
+            "description": "Mission, Action, Evidence, and Memory board snapshot for a run.",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uri": "harkonnen://chat/threads",
+            "name": "PackChat Threads",
+            "description": "Recent PackChat thread records.",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uriTemplate": "harkonnen://chat/threads/{thread_id}",
+            "name": "PackChat Thread",
+            "description": "A single PackChat thread record.",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uriTemplate": "harkonnen://chat/messages/{thread_id}",
+            "name": "PackChat Messages",
+            "description": "All messages in a PackChat thread.",
+            "mimeType": "application/json"
+        }),
+        json!({
+            "uriTemplate": "harkonnen://checkpoints/{run_id}",
+            "name": "Run Checkpoints",
+            "description": "Current checkpoints for a run.",
+            "mimeType": "application/json"
         }),
         json!({
             "uri": "harkonnen://benchmarks/suites",

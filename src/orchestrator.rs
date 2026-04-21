@@ -100,6 +100,14 @@ struct CheckpointDraft {
     context_json: serde_json::Value,
 }
 
+#[derive(Debug, Clone)]
+struct PreparedRunLaunch {
+    run_id: String,
+    spec_obj: Spec,
+    target_source: TargetSourceMetadata,
+    log_path: PathBuf,
+}
+
 impl RunRequest {
     fn harness_message(&self, phase: &str) -> Option<&str> {
         self.failure_harness
@@ -1502,9 +1510,39 @@ impl AppContext {
     }
 
     pub async fn start_run(&self, req: RunRequest) -> Result<RunRecord> {
-        let spec_obj = spec::load_spec(&req.spec_path)?;
-        let target_source = self.resolve_target_source(&req).await?;
+        let prepared = self.prepare_run_launch(&req).await?;
+        self.execute_prepared_run(&prepared.run_id, &req, &prepared)
+            .await?;
+        self.get_run(&prepared.run_id)
+            .await?
+            .with_context(|| format!("run not found after execution: {}", prepared.run_id))
+    }
 
+    pub async fn queue_run(&self, req: RunRequest) -> Result<RunRecord> {
+        let prepared = self.prepare_run_launch(&req).await?;
+        let app = self.clone();
+        let req_clone = req.clone();
+        let prepared_clone = prepared.clone();
+        tokio::spawn(async move {
+            if let Err(error) = app
+                .execute_prepared_run(&prepared_clone.run_id, &req_clone, &prepared_clone)
+                .await
+            {
+                tracing::error!(
+                    run_id = %prepared_clone.run_id,
+                    error = %error,
+                    "background queued run failed unexpectedly"
+                );
+            }
+        });
+        self.get_run(&prepared.run_id)
+            .await?
+            .with_context(|| format!("run not found after queueing: {}", prepared.run_id))
+    }
+
+    async fn prepare_run_launch(&self, req: &RunRequest) -> Result<PreparedRunLaunch> {
+        let spec_obj = spec::load_spec(&req.spec_path)?;
+        let target_source = self.resolve_target_source(req).await?;
         let run_id = Uuid::new_v4().to_string();
         let now = Utc::now();
         let log_path = self.run_log_path(&run_id);
@@ -1526,8 +1564,28 @@ impl AppContext {
             )
             .await?;
 
+        Ok(PreparedRunLaunch {
+            run_id,
+            spec_obj,
+            target_source,
+            log_path,
+        })
+    }
+
+    async fn execute_prepared_run(
+        &self,
+        run_id: &str,
+        req: &RunRequest,
+        prepared: &PreparedRunLaunch,
+    ) -> Result<()> {
         match self
-            .execute_run(&run_id, &req, &spec_obj, &target_source, &log_path)
+            .execute_run(
+                run_id,
+                req,
+                &prepared.spec_obj,
+                &prepared.target_source,
+                &prepared.log_path,
+            )
             .await
         {
             Ok(output) => {
@@ -1536,10 +1594,10 @@ impl AppContext {
                 } else {
                     "completed_with_issues"
                 };
-                self.update_run_status(&run_id, final_status).await?;
+                self.update_run_status(run_id, final_status).await?;
                 if let Err(error) = self
                     .record_memory_context_outcome(
-                        &target_source,
+                        &prepared.target_source,
                         &output.memory_context,
                         final_status == "completed",
                     )
@@ -1547,29 +1605,29 @@ impl AppContext {
                 {
                     let _ = self
                         .record_event(
-                            &run_id,
+                            run_id,
                             None,
                             "memory",
                             "coobie",
                             "warning",
                             &format!("Memory manifest outcome tracking skipped: {error}"),
-                            &log_path,
+                            &prepared.log_path,
                         )
                         .await;
                 }
 
-                let lessons = match self.consolidate_run(&run_id, &spec_obj).await {
+                let lessons = match self.consolidate_run(run_id, &prepared.spec_obj).await {
                     Ok(lessons) => lessons,
                     Err(error) => {
                         let _ = self
                             .record_event(
-                                &run_id,
+                                run_id,
                                 None,
                                 "memory",
                                 "coobie",
                                 "warning",
                                 &format!("Consolidation skipped: {error}"),
-                                &log_path,
+                                &prepared.log_path,
                             )
                             .await;
                         Vec::new()
@@ -1579,9 +1637,9 @@ impl AppContext {
                     .await?;
                 if let Err(error) = self
                     .record_stale_memory_mitigation_outcomes(
-                        &run_id,
-                        &spec_obj,
-                        &target_source,
+                        run_id,
+                        &prepared.spec_obj,
+                        &prepared.target_source,
                         &output.briefing,
                         &output.validation,
                         &output.hidden_scenarios,
@@ -1591,20 +1649,20 @@ impl AppContext {
                 {
                     let _ = self
                         .record_event(
-                            &run_id,
+                            run_id,
                             None,
                             "memory",
                             "coobie",
                             "warning",
                             &format!("Stale-memory mitigation tracking skipped: {error}"),
-                            &log_path,
+                            &prepared.log_path,
                         )
                         .await;
                 }
 
                 let _ = self
                     .record_event(
-                        &run_id,
+                        run_id,
                         None,
                         "complete",
                         "orchestrator",
@@ -1614,43 +1672,43 @@ impl AppContext {
                             "warning"
                         },
                         &format!("Run finished with status {}", final_status),
-                        &log_path,
+                        &prepared.log_path,
                     )
                     .await?;
                 self.finalize_blackboard(final_status, &output.run_dir)
                     .await?;
-                self.write_run_timing_artifact(&run_id, &output.run_dir)
+                self.write_run_timing_artifact(run_id, &output.run_dir)
                     .await?;
-                self.package_artifacts(&run_id).await?;
+                self.package_artifacts(run_id).await?;
             }
             Err(error) => {
                 let message = error.to_string();
-                self.update_run_status(&run_id, "failed").await?;
+                self.update_run_status(run_id, "failed").await?;
                 let _ = self
                     .record_event(
-                        &run_id,
+                        run_id,
                         None,
                         "complete",
                         "orchestrator",
                         "failed",
                         &message,
-                        &log_path,
+                        &prepared.log_path,
                     )
                     .await?;
-                let run_dir = self.run_dir(&run_id);
+                let run_dir = self.run_dir(run_id);
                 self.mark_blackboard_failed(&message, &run_dir).await?;
-                let lessons = match self.consolidate_run(&run_id, &spec_obj).await {
+                let lessons = match self.consolidate_run(run_id, &prepared.spec_obj).await {
                     Ok(lessons) => lessons,
                     Err(consolidation_error) => {
                         let _ = self
                             .record_event(
-                                &run_id,
+                                run_id,
                                 None,
                                 "memory",
                                 "coobie",
                                 "warning",
                                 &format!("Consolidation skipped: {consolidation_error}"),
-                                &log_path,
+                                &prepared.log_path,
                             )
                             .await;
                         Vec::new()
@@ -1659,7 +1717,7 @@ impl AppContext {
                 if run_dir.exists() {
                     self.attach_lessons_to_blackboard(&run_dir, &lessons)
                         .await?;
-                    if let Ok(Some(briefing)) = self.load_run_briefing(&run_id).await {
+                    if let Ok(Some(briefing)) = self.load_run_briefing(run_id).await {
                         let fallback_validation = ValidationSummary {
                             passed: false,
                             scored_checks: 0,
@@ -1673,9 +1731,9 @@ impl AppContext {
                         };
                         if let Err(tracking_error) = self
                             .record_stale_memory_mitigation_outcomes(
-                                &run_id,
-                                &spec_obj,
-                                &target_source,
+                                run_id,
+                                &prepared.spec_obj,
+                                &prepared.target_source,
                                 &briefing,
                                 &fallback_validation,
                                 &fallback_hidden,
@@ -1685,28 +1743,28 @@ impl AppContext {
                         {
                             let _ = self
                                 .record_event(
-                                    &run_id,
+                                    run_id,
                                     None,
                                     "memory",
                                     "coobie",
                                     "warning",
-                                    &format!("Stale-memory mitigation tracking skipped: {tracking_error}"),
-                                    &log_path,
+                                    &format!(
+                                        "Stale-memory mitigation tracking skipped: {tracking_error}"
+                                    ),
+                                    &prepared.log_path,
                                 )
                                 .await;
                         }
                     }
                 }
                 if run_dir.exists() {
-                    self.write_run_timing_artifact(&run_id, &run_dir).await?;
+                    self.write_run_timing_artifact(run_id, &run_dir).await?;
                 }
-                let _ = self.package_artifacts(&run_id).await;
+                let _ = self.package_artifacts(run_id).await;
             }
         }
 
-        self.get_run(&run_id)
-            .await?
-            .with_context(|| format!("run not found after execution: {run_id}"))
+        Ok(())
     }
 
     async fn execute_run(

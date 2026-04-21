@@ -32,7 +32,9 @@ mod scenarios;
 mod setup;
 mod spec;
 mod spec_adherence;
+mod stamp;
 mod streamingqa;
+mod subagent;
 mod tesseract;
 mod twin_fidelity;
 mod workspace;
@@ -97,6 +99,11 @@ async fn main() -> Result<()> {
             let paths = config::Paths::discover()?;
             cli::handle_benchmark(command, &paths).await?
         }
+        Commands::Stamp { command } => {
+            let paths = config::Paths::discover()?;
+            cli::handle_stamp(command, &paths).await?
+        }
+        Commands::Subagent { command } => cli::handle_subagent(command).await?,
     }
 
     Ok(())

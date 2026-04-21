@@ -11,7 +11,7 @@ stale_when: [implementation behavior, oracle semantics, or runtime assumptions c
 observed_paths: [src/llm.rs, src/capacity.rs]
 code_under_test_paths: [src/llm.rs, src/capacity.rs]
 status: challenged
-challenged_by: [lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09, lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas, lesson-exploration-hidden_scenarios-efb339d6-1c2c-4928-b2d3-27f80a48ff8a, lesson-dead-end-567e9116-b313-4696-9dbb-bb7ecdad6ef6-hidden-scenarios-sable-sable-pack-is-workin-thas]
+challenged_by: [lesson-exploration-hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09, lesson-dead-end-b5db6db6-0a13-494e-91a5-663af6cd8c2a-hidden-scenarios-sable-sable-pack-is-workin-thas, lesson-exploration-hidden_scenarios-efb339d6-1c2c-4928-b2d3-27f80a48ff8a, lesson-dead-end-567e9116-b313-4696-9dbb-bb7ecdad6ef6-hidden-scenarios-sable-sable-pack-is-workin-thas, lesson-exploration-hidden_scenarios-b1b6d872-05e9-4a81-85b9-c52af07e841d]
 ---
 
 Source episode: hidden_scenarios-b456dea5-e17e-496a-9934-b8c429129e09

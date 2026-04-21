@@ -70,6 +70,14 @@ pub enum Commands {
         #[command(subcommand)]
         command: BenchmarkCommands,
     },
+    Stamp {
+        #[command(subcommand)]
+        command: StampCommands,
+    },
+    Subagent {
+        #[command(subcommand)]
+        command: SubagentCommands,
+    },
 }
 
 #[derive(Subcommand, Debug)]
@@ -2134,6 +2142,136 @@ pub async fn handle_capacity(command: CapacityCommands, paths: &Paths) -> Result
                 }
                 println!("\nUpdate assignments.md manually to reflect the handoff context.");
             }
+        }
+    }
+    Ok(())
+}
+
+// ── Stamp ────────────────────────────────────────────────────────────────────
+
+#[derive(Subcommand, Debug)]
+pub enum StampCommands {
+    /// Initialize managed-repo stamp (copy skills + templates).
+    Init(StampInitArgs),
+    /// Refresh skills in an already-stamped repo.
+    Update(StampUpdateArgs),
+    /// Show stamp status for a managed repo.
+    Status(StampStatusArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct StampInitArgs {
+    /// Path to the managed repo to stamp.
+    pub repo_path: String,
+    /// Harkonnen Labs root (defaults to current directory).
+    #[arg(long)]
+    pub harkonnen_root: Option<String>,
+    /// Reinitialize even if already at latest stamp version.
+    #[arg(long, default_value_t = false)]
+    pub force: bool,
+    /// Replace CLAUDE.md even if it already exists (use on major version bumps).
+    #[arg(long, default_value_t = false)]
+    pub overwrite_claude_md: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct StampUpdateArgs {
+    /// Path to the managed repo to update.
+    pub repo_path: String,
+    /// Replace CLAUDE.md with the current template.
+    #[arg(long, default_value_t = false)]
+    pub overwrite_claude_md: bool,
+}
+
+#[derive(Args, Debug)]
+pub struct StampStatusArgs {
+    /// Path to the managed repo to inspect.
+    pub repo_path: String,
+}
+
+pub async fn handle_stamp(command: StampCommands, paths: &Paths) -> Result<()> {
+    match command {
+        StampCommands::Init(args) => {
+            let repo_path = PathBuf::from(&args.repo_path);
+            let harkonnen_root = args
+                .harkonnen_root
+                .as_deref()
+                .map(PathBuf::from)
+                .unwrap_or_else(|| paths.root.clone());
+            crate::stamp::stamp_init(
+                &repo_path,
+                &harkonnen_root,
+                args.force,
+                args.overwrite_claude_md,
+            )
+            .await?;
+        }
+        StampCommands::Update(args) => {
+            let repo_path = PathBuf::from(&args.repo_path);
+            let harkonnen_root = paths.root.clone();
+            crate::stamp::stamp_update(&repo_path, &harkonnen_root, args.overwrite_claude_md)
+                .await?;
+        }
+        StampCommands::Status(args) => {
+            let repo_path = PathBuf::from(&args.repo_path);
+            crate::stamp::stamp_status(&repo_path).await?;
+        }
+    }
+    Ok(())
+}
+
+// ── Subagent ─────────────────────────────────────────────────────────────────
+
+#[derive(Subcommand, Debug)]
+pub enum SubagentCommands {
+    /// Print a role-specific prompt for use with the Claude Code Agent tool.
+    Prompt(SubagentPromptArgs),
+}
+
+#[derive(Args, Debug)]
+pub struct SubagentPromptArgs {
+    /// Role to generate a prompt for: scout, coobie, sable, keeper.
+    pub role: String,
+    /// Spec path (used by scout).
+    #[arg(long)]
+    pub spec: Option<String>,
+    /// Run ID context.
+    #[arg(long, default_value = "")]
+    pub run_id: String,
+    /// Phase context (used by coobie).
+    #[arg(long, default_value = "pre-run")]
+    pub phase: String,
+    /// Comma-separated search keywords (used by coobie).
+    #[arg(long, default_value = "")]
+    pub keywords: String,
+    /// Artifact path (used by sable).
+    #[arg(long, default_value = "")]
+    pub artifact: String,
+    /// Action description (used by keeper).
+    #[arg(long, default_value = "")]
+    pub action: String,
+    /// Additional context (used by keeper).
+    #[arg(long, default_value = "")]
+    pub context: String,
+}
+
+pub async fn handle_subagent(command: SubagentCommands) -> Result<()> {
+    match command {
+        SubagentCommands::Prompt(args) => {
+            let prompt = match args.role.as_str() {
+                "scout" => {
+                    let spec = args.spec.as_deref().unwrap_or("");
+                    crate::subagent::scout_prompt(spec, &args.run_id)
+                }
+                "coobie" => {
+                    let kws: Vec<&str> = args.keywords.split(',').map(str::trim).collect();
+                    crate::subagent::coobie_briefing_prompt(&args.run_id, &args.phase, &kws)
+                }
+                "sable" => crate::subagent::sable_prompt(&args.run_id, &args.artifact),
+                "keeper" => crate::subagent::keeper_prompt(&args.action, &args.context),
+                other => bail!("unknown role: {other} (valid: scout, coobie, sable, keeper)"),
+            };
+            println!("{prompt}");
         }
     }
     Ok(())

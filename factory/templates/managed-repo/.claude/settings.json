@@ -1,0 +1,5 @@
+{
+  "permissions": {
+    "allow": ["Bash(cargo run -- *)", "WebFetch(github.com)"]
+  }
+}

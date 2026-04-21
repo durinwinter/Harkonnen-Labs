@@ -38,3 +38,14 @@ setups/machines/*.toml
 
 # Local benchmark and evaluation datasets — large BYO files kept out of git
 development_datasets/
+
+# .harkonnen/ runtime state — regenerated per session, not portable source
+.harkonnen/memory-status.*
+.harkonnen/resume-packet.*
+.harkonnen/stale-memory-history.*
+.harkonnen/strategy-register.*
+.harkonnen/memory-updates.*
+
+# Per-run artifacts in project-memory — same category as factory/artifacts/
+.harkonnen/project-memory/run-*.md
+.harkonnen/project-memory/causal-sample-*.md

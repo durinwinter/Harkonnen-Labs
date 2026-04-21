@@ -269,6 +269,26 @@ provisioning is intentionally out of scope until a product needs it.
 
 ---
 
+## Phase 5-C — Per-Phase Context Gating for Coobie Briefings
+
+**Why:** Every agent currently receives the same Coobie preflight briefing regardless of role or phase. Scout, Mason, and Sable have fundamentally different information needs: Scout needs spec history and prior ambiguities; Mason needs failure patterns and workspace guardrails; Sable needs scenario patterns and what Mason changed. Giving each agent the full undifferentiated corpus wastes context window and, more importantly, risks priming agents with information they should not see at their phase — most critically, Sable should not see Mason's implementation reasoning before scoring hidden scenarios.
+
+This is a retrieval-shaping capability, not a storage change. It does not require TypeDB or Qdrant. It builds naturally on the memory module refactor in Phase 5b.
+
+**What to build:**
+
+- `BriefingScope` enum in `src/memory/briefing.rs` (or `src/coobie.rs`): `ScoutPreflight`, `MasonPreflight`, `PiperPreflight`, `SablePreflight`, `CoobbieConsolidation`, `OperatorQuery`. Each variant carries a `phase_id` and a `role` tag.
+- Scope-keyed retrieval filter: each scope defines a `allow_categories` list (e.g. Scout: `spec_history, prior_ambiguities, operator_model`; Mason: `failure_patterns, fix_patterns, workspace_guardrails, causal_links`; Sable: `scenario_patterns, hidden_scenario_outcomes` — explicitly excludes Mason implementation notes).
+- `build_scoped_briefing(scope: BriefingScope, run_id, spec_id) -> BriefingPackage` replaces the current single-path `build_preflight_briefing`. Internally calls the same multi-hop retrieval chain but filters retrieved hits against the scope's `allow_categories` before assembling the briefing text.
+- Wire in orchestrator: pass the correct `BriefingScope` at each phase entry point (Scout, Mason, Sable are the critical three; others can default to `OperatorQuery` for now).
+- Coobie episode record: add `briefing_scope` field so causal analysis can distinguish whether a lesson was visible at the relevant phase or not.
+
+**Sable isolation constraint (non-negotiable):** `SablePreflight` scope must never include retrieved hits tagged `implementation_notes`, `mason_plan`, or `edit_rationale`. This is the hidden-scenario firewall. If a hit's tag set intersects these, it is dropped regardless of relevance score.
+
+**Done when:** Scout, Mason, and Sable each receive a distinct briefing shaped to their role; a log entry confirms which scope was used per phase; and Sable's briefing verifiably contains no Mason implementation content.
+
+---
+
 ## Phase 6 — TypeDB Semantic Layer (Layer C)
 
 **Unlocks:** Typed causal queries that vector similarity cannot answer. "Find all runs where TWIN_GAP caused a failure that was fixed by an intervention that held for ≥ 3 runs" requires a graph, not a similarity score.

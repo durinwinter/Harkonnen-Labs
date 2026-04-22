@@ -31,6 +31,9 @@ Skill sources: {{skill_sources}}
 
 {{operator_intent}}
 
+Stakeholder attitudes:
+{{attitudes}}
+
 ---
 
 ## Chamber V — Logos (Structure and Patterns)

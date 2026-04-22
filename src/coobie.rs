@@ -31,8 +31,8 @@ use uuid::Uuid;
 use crate::models::{
     CausalEventEdge, CausalHypothesis, CausalHypothesisEvidence, CausalStreak, CoobieBriefing,
     CoobieEvidenceCitation, CounterfactualEstimate, CounterfactualOutcome, FactoryEpisode,
-    InterventionPlan, LessonRecord, PearlHierarchyLevel, ProjectComponent, ProjectResumeRisk,
-    ScenarioBlueprint, SoulIdentityContext,
+    InterventionPlan, LessonRecord, PearlHierarchyLevel, ProjectComponent, ProjectInterviewContext,
+    ProjectResumeRisk, ScenarioBlueprint, SoulIdentityContext,
 };
 
 // ── Public reasoning trait ────────────────────────────────────────────────────
@@ -707,6 +707,13 @@ pub fn render_coobie_briefing_response(briefing: &CoobieBriefing) -> String {
         .as_ref()
         .map(render_operator_model_context)
         .unwrap_or_else(|| "- No operator-model context was attached to this run yet.".to_string());
+    let project_interview_section = briefing
+        .project_interview_context
+        .as_ref()
+        .map(render_project_interview_context)
+        .unwrap_or_else(|| {
+            "- No stamped project interview context was attached to this run yet.".to_string()
+        });
     let soul_identity_section = briefing
         .soul_identity_context
         .as_ref()
@@ -743,6 +750,9 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
 {}
 
 ## Operator Model Context
+{}
+
+## Stamped Project Interview Context
 {}
 
 ## Soul Preservation Context
@@ -838,6 +848,7 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
             "No Harkonnen core memory hits were retrieved yet.",
         ),
         operator_model_section,
+        project_interview_section,
         soul_identity_section,
         render_bullet_lines(
             &briefing.domain_signals,
@@ -913,6 +924,62 @@ I reviewed prior memory and causal history for `{}` targeting `{}`.
         ),
         render_bullet_lines(&briefing.open_questions, "No open questions were raised."),
     )
+}
+
+fn render_project_interview_context(context: &ProjectInterviewContext) -> String {
+    let mut lines = Vec::new();
+    if !context.repo_purpose.trim().is_empty() {
+        lines.push(format!("- Purpose: {}", context.repo_purpose.trim()));
+    }
+    if !context.operator_intent.trim().is_empty() {
+        lines.push(format!("- Stakes: {}", context.operator_intent.trim()));
+    }
+    if !context.environment.trim().is_empty() {
+        lines.push(format!("- Environment: {}", context.environment.trim()));
+    }
+    if !context.vertical.trim().is_empty() {
+        lines.push(format!("- Vertical: {}", context.vertical.trim()));
+    }
+    if !context.domains.is_empty() {
+        lines.push(format!("- Domains: {}", context.domains.join(" | ")));
+    }
+    if !context.constraints.is_empty() {
+        lines.push(format!(
+            "- Constraints: {}",
+            context.constraints.join(" | ")
+        ));
+    }
+    if !context.attitudes.is_empty() {
+        lines.push(format!(
+            "- Stakeholder attitudes: {}",
+            context.attitudes.join(" | ")
+        ));
+    }
+    if !context.skill_sources.is_empty() {
+        lines.push(format!(
+            "- External skill sources: {}",
+            context.skill_sources.join(" | ")
+        ));
+    }
+    if !context.mcp_servers.is_empty() {
+        lines.push(format!(
+            "- MCP servers: {}",
+            context.mcp_servers.join(" | ")
+        ));
+    }
+    if !context.interview_context_path.trim().is_empty() {
+        lines.push(format!(
+            "- Interview context artifact: {}",
+            context.interview_context_path
+        ));
+    }
+    if lines.is_empty() {
+        lines.push(
+            "- A stamped interview exists, but it did not contain reusable context yet."
+                .to_string(),
+        );
+    }
+    lines.join("\n")
 }
 
 fn render_operator_model_context(context: &crate::models::OperatorModelContext) -> String {

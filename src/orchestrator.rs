@@ -27,9 +27,10 @@ use crate::{
         EvidenceMatchReport, EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch,
         HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage,
         LessonRecord, LiveEvent, OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord,
-        PriorCauseSignal, ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent,
-        RunRecord, RunTimingReport, ScenarioResult, SoulIdentityContext, Spec, TwinEnvironment,
-        TwinFailureMode, TwinService, TwinServiceSpec, ValidationSummary, WorkerHarnessConfig,
+        PriorCauseSignal, ProjectInterviewContext, ProjectResumeRisk, RunCausalGraph,
+        RunCheckpointRecord, RunEvent, RunRecord, RunTimingReport, ScenarioResult,
+        SoulIdentityContext, Spec, TwinEnvironment, TwinFailureMode, TwinService, TwinServiceSpec,
+        ValidationSummary, WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -5752,8 +5753,20 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
         domain_signals: &[String],
         memory_context: &MemoryContextBundle,
     ) -> Result<CoobieBriefing> {
+        let project_interview_context = self
+            .load_project_interview_context(Some(Path::new(&target_source.source_path)))
+            .await
+            .unwrap_or(None);
+        let mut briefing_query_terms = query_terms.to_vec();
+        if let Some(context) = project_interview_context.as_ref() {
+            extend_unique(
+                &mut briefing_query_terms,
+                build_project_interview_query_terms(context),
+                32,
+            );
+        }
         let relevant_lessons = self
-            .find_relevant_lessons(query_terms, domain_signals)
+            .find_relevant_lessons(&briefing_query_terms, domain_signals)
             .await?;
         let prior_causes = self.summarize_prior_causes(5).await?;
         let (
@@ -5766,7 +5779,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             .collect_briefing_evidence_citations(
                 spec_obj,
                 target_source,
-                query_terms,
+                &briefing_query_terms,
                 domain_signals,
             )
             .await?;
@@ -5774,7 +5787,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             .collect_evidence_memory_exemplar_citations(
                 spec_obj,
                 target_source,
-                query_terms,
+                &briefing_query_terms,
                 domain_signals,
             )
             .await?;
@@ -5782,19 +5795,19 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             .collect_nearest_evidence_window_citations(
                 spec_obj,
                 target_source,
-                query_terms,
+                &briefing_query_terms,
                 domain_signals,
             )
             .await?;
         let pattern_matching_focus =
             build_pattern_matching_focus(&evidence_pattern_exemplar_citations);
         let causal_chain_focus = build_causal_chain_focus(&evidence_causal_exemplar_citations);
-        let mut enriched_query_terms = query_terms.to_vec();
+        let mut enriched_query_terms = briefing_query_terms.clone();
         let preferred_forge_commands = self
             .collect_preferred_retriever_forge_commands(
                 spec_obj,
                 target_source,
-                query_terms,
+                &briefing_query_terms,
                 domain_signals,
             )
             .await?;
@@ -5876,6 +5889,14 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             .unwrap_or(None);
         if let Some(context) = operator_model_context.as_ref() {
             apply_operator_model_preflight_guidance(
+                context,
+                &mut required_checks,
+                &mut recommended_guardrails,
+                &mut open_questions,
+            );
+        }
+        if let Some(context) = project_interview_context.as_ref() {
+            apply_project_interview_preflight_guidance(
                 context,
                 &mut required_checks,
                 &mut recommended_guardrails,
@@ -5973,6 +5994,7 @@ Do not keep everything in Harkonnen core memory. Promote only durable cross-proj
             environment_risks,
             regulatory_considerations,
             operator_model_context,
+            project_interview_context,
             soul_identity_context,
             recommended_guardrails,
             required_checks,
@@ -10254,6 +10276,77 @@ Return JSON only.",
         }
 
         Ok(Some(context))
+    }
+
+    async fn load_project_interview_context(
+        &self,
+        project_root: Option<&Path>,
+    ) -> Result<Option<ProjectInterviewContext>> {
+        #[derive(Debug, Deserialize, Default)]
+        struct RawStampedRepoToml {
+            #[serde(default)]
+            repo_name: String,
+            #[serde(default)]
+            repo_purpose: Option<String>,
+            #[serde(default)]
+            operator_intent: Option<String>,
+            #[serde(default)]
+            environment: Option<String>,
+            #[serde(default)]
+            vertical: Option<String>,
+            #[serde(default)]
+            domains: Option<Vec<String>>,
+            #[serde(default)]
+            attitudes: Option<Vec<String>>,
+            #[serde(default)]
+            constraints: Option<Vec<String>>,
+            #[serde(default)]
+            skill_sources: Option<Vec<String>>,
+            #[serde(default)]
+            mcp_servers: Option<Vec<String>>,
+        }
+
+        let Some(project_root) = project_root else {
+            return Ok(None);
+        };
+
+        let repo_toml_path = project_root.join(".harkonnen").join("repo.toml");
+        if !repo_toml_path.exists() {
+            return Ok(None);
+        }
+
+        let raw = tokio::fs::read_to_string(&repo_toml_path)
+            .await
+            .with_context(|| format!("reading {}", repo_toml_path.display()))?;
+        let parsed: RawStampedRepoToml = toml::from_str(&raw)
+            .with_context(|| format!("parsing {}", repo_toml_path.display()))?;
+        let interview_context_path = project_root.join(".harkonnen").join("interview-context.md");
+
+        Ok(Some(ProjectInterviewContext {
+            repo_name: if parsed.repo_name.trim().is_empty() {
+                project_root
+                    .file_name()
+                    .and_then(|value| value.to_str())
+                    .unwrap_or("unknown-project")
+                    .to_string()
+            } else {
+                parsed.repo_name
+            },
+            repo_purpose: parsed.repo_purpose.unwrap_or_default(),
+            operator_intent: parsed.operator_intent.unwrap_or_default(),
+            environment: parsed.environment.unwrap_or_default(),
+            vertical: parsed.vertical.unwrap_or_default(),
+            domains: parsed.domains.unwrap_or_default(),
+            attitudes: parsed.attitudes.unwrap_or_default(),
+            constraints: parsed.constraints.unwrap_or_default(),
+            skill_sources: parsed.skill_sources.unwrap_or_default(),
+            mcp_servers: parsed.mcp_servers.unwrap_or_default(),
+            interview_context_path: if interview_context_path.exists() {
+                interview_context_path.display().to_string()
+            } else {
+                String::new()
+            },
+        }))
     }
 
     async fn project_evidence_bundle_path(
@@ -21511,6 +21604,107 @@ fn apply_operator_model_preflight_guidance(
     }
     for question in context.open_questions.iter().take(3) {
         open_questions.push(format!("Operator-model follow-up — {question}"));
+    }
+    recommended_guardrails.dedup();
+    required_checks.dedup();
+    open_questions.dedup();
+}
+
+fn build_project_interview_query_terms(context: &ProjectInterviewContext) -> Vec<String> {
+    let mut terms = Vec::new();
+    for value in [
+        context.repo_name.as_str(),
+        context.repo_purpose.as_str(),
+        context.operator_intent.as_str(),
+        context.environment.as_str(),
+        context.vertical.as_str(),
+    ] {
+        let trimmed = value.trim();
+        if !trimmed.is_empty() {
+            terms.push(trimmed.to_string());
+        }
+    }
+    terms.extend(context.domains.iter().cloned());
+    terms.extend(context.attitudes.iter().cloned());
+    terms.extend(context.constraints.iter().cloned());
+    terms.extend(context.skill_sources.iter().cloned());
+    terms.extend(context.mcp_servers.iter().cloned());
+    let mut unique = Vec::new();
+    let mut seen = HashSet::new();
+    for term in terms {
+        let trimmed = term.trim();
+        if trimmed.is_empty() {
+            continue;
+        }
+        let key = trimmed.to_ascii_lowercase();
+        if seen.insert(key) {
+            unique.push(trimmed.to_string());
+        }
+    }
+    unique
+}
+
+fn apply_project_interview_preflight_guidance(
+    context: &ProjectInterviewContext,
+    required_checks: &mut Vec<String>,
+    recommended_guardrails: &mut Vec<String>,
+    open_questions: &mut Vec<String>,
+) {
+    if !context.repo_purpose.trim().is_empty() {
+        recommended_guardrails.push(format!(
+            "Stamped project purpose — keep implementation choices legible against this purpose: {}",
+            context.repo_purpose
+        ));
+    }
+    if !context.operator_intent.trim().is_empty() {
+        required_checks.push(format!(
+            "Stamped project stakes — before execution, confirm the plan protects what matters here: {}",
+            context.operator_intent
+        ));
+    }
+    if !context.environment.trim().is_empty() {
+        recommended_guardrails.push(format!(
+            "Stamped environment context — prefer assumptions that fit the declared environment: {}",
+            context.environment
+        ));
+    }
+    if !context.vertical.trim().is_empty() {
+        recommended_guardrails.push(format!(
+            "Stamped project vertical — preserve posture appropriate to '{}', not a generic software-only default.",
+            context.vertical
+        ));
+    }
+    if !context.domains.is_empty() {
+        recommended_guardrails.push(format!(
+            "Stamped project domains — keep solutions grounded in these domains: {}",
+            context.domains.join(", ")
+        ));
+    }
+    for constraint in context.constraints.iter().take(4) {
+        required_checks.push(format!("Stamped repo prohibition — {constraint}"));
+    }
+    for attitude in context.attitudes.iter().take(4) {
+        required_checks.push(format!(
+            "Stakeholder alignment check — before proposing architecture or tooling changes, confirm the plan respects this recorded posture: {attitude}"
+        ));
+    }
+    if !context.skill_sources.is_empty() {
+        recommended_guardrails.push(format!(
+            "Stamped skill sources exist ({}) — prefer established repo/project workflows before inventing a fresh one.",
+            context.skill_sources.join(", ")
+        ));
+    }
+    if !context.mcp_servers.is_empty() {
+        required_checks.push(format!(
+            "Stamped MCP surface check — prefer configured MCP servers where they cover the task: {}",
+            context.mcp_servers.join(", ")
+        ));
+    }
+    if !context.attitudes.is_empty() || !context.operator_intent.trim().is_empty() {
+        open_questions.push(
+            "Project posture question — does the current plan respect the recorded human and organizational attitudes, not just the technical spec?"
+                .to_string(),
+        );
     }
     recommended_guardrails.dedup();
     required_checks.dedup();

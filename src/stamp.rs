@@ -14,7 +14,7 @@ use crate::mcp_registry::{
 use crate::skill_fetcher::{fetch_skills_from_repo, list_skills_in_repo};
 use crate::skill_registry::{auto_select_skills, deploy_skill, load_registry, SkillEntry};
 
-const STAMP_VERSION: u32 = 3;
+const STAMP_VERSION: u32 = 5;
 const STAMP_MAJOR: u32 = 1;
 const PUBLIC_SKILLS_REPO: &str = "https://github.com/anthropics/skills";
 const PDF_STANDARDS_SKILL: &str = "pdf-standards";
@@ -28,9 +28,12 @@ struct RepoTomlRaw {
     repo_name: String,
     managed_since: String,
     updated_at: Option<String>,
+    repo_purpose: Option<String>,
+    operator_intent: Option<String>,
     environment: Option<String>,
     domains: Option<Vec<String>>,
     vertical: Option<String>,
+    attitudes: Option<Vec<String>>,
     features: Option<Vec<String>>,
     constraints: Option<Vec<String>>,
     skill_sources: Option<Vec<String>>,
@@ -44,9 +47,12 @@ struct RepoToml {
     harkonnen_root: PathBuf,
     repo_name: String,
     managed_since: String,
+    repo_purpose: Option<String>,
+    operator_intent: Option<String>,
     environment: Option<String>,
     domains: Vec<String>,
     vertical: Option<String>,
+    attitudes: Vec<String>,
     features: Vec<String>,
     constraints: Vec<String>,
     skill_sources: Vec<String>,
@@ -61,9 +67,12 @@ impl From<RepoTomlRaw> for RepoToml {
             harkonnen_root: PathBuf::from(raw.harkonnen_root),
             repo_name: raw.repo_name,
             managed_since: raw.managed_since,
+            repo_purpose: raw.repo_purpose,
+            operator_intent: raw.operator_intent,
             environment: raw.environment,
             domains: raw.domains.unwrap_or_default(),
             vertical: raw.vertical,
+            attitudes: raw.attitudes.unwrap_or_default(),
             features: raw.features.unwrap_or_default(),
             constraints: raw.constraints.unwrap_or_default(),
             skill_sources: raw.skill_sources.unwrap_or_default(),
@@ -82,6 +91,7 @@ struct ExternalSkillSelection {
 struct InterviewAnswers {
     repo_purpose: String,
     operator_intent: Option<String>,
+    stakeholder_attitudes: Vec<String>,
     prohibitions: Vec<String>,
     environment: Option<String>,
     vertical: Option<String>,
@@ -110,9 +120,12 @@ fn write_repo_toml(repo_path: &Path, toml: &RepoToml) -> Result<()> {
         repo_name: toml.repo_name.clone(),
         managed_since: toml.managed_since.clone(),
         updated_at: Some(Utc::now().to_rfc3339()),
+        repo_purpose: toml.repo_purpose.clone(),
+        operator_intent: toml.operator_intent.clone(),
         environment: toml.environment.clone(),
         domains: non_empty_vec(&toml.domains),
         vertical: toml.vertical.clone(),
+        attitudes: non_empty_vec(&toml.attitudes),
         features: non_empty_vec(&toml.features),
         constraints: non_empty_vec(&toml.constraints),
         skill_sources: non_empty_vec(&toml.skill_sources),
@@ -285,6 +298,16 @@ fn build_archive_seed(
         .as_deref()
         .unwrap_or("Not specified.")
         .to_string();
+    let attitudes = if answers.stakeholder_attitudes.is_empty() {
+        "No stakeholder attitudes recorded.".to_string()
+    } else {
+        answers
+            .stakeholder_attitudes
+            .iter()
+            .map(|attitude| format!("- {attitude}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
 
     let environment = answers
         .environment
@@ -345,6 +368,7 @@ fn build_archive_seed(
             ("episteme", ""),
             ("prohibitions", &prohibitions),
             ("operator_intent", &operator_intent),
+            ("attitudes", &attitudes),
             ("logos_structure", &logos),
             ("deployed_skills", &skills_str),
             ("mcp_servers", &mcp_servers),
@@ -376,9 +400,18 @@ fn build_intent_doc(
         .as_deref()
         .unwrap_or("Not specified.")
         .to_string();
+    let attitudes_list = bullet_list_or_default(
+        &answers.stakeholder_attitudes,
+        "No stakeholder attitudes recorded.",
+    );
 
     let environment = answers
         .environment
+        .as_deref()
+        .unwrap_or("not specified")
+        .to_string();
+    let vertical = answers
+        .vertical
         .as_deref()
         .unwrap_or("not specified")
         .to_string();
@@ -389,12 +422,18 @@ fn build_intent_doc(
         .chain(answers.confirmed_projects.iter())
         .cloned()
         .collect();
-    let domains_list = if all_domains.is_empty() {
+    let domains_list = bullet_list_or_default(&all_domains, "none");
+    let skill_sources_list = bullet_list_or_default(&answers.external_skill_sources, "none");
+    let mcp_servers_list = if answers.confirmed_mcps.is_empty() {
         "none".to_string()
     } else {
-        all_domains
+        answers
+            .confirmed_mcps
             .iter()
-            .map(|domain| format!("- {domain}"))
+            .map(|server| server.name.clone())
+            .collect::<Vec<_>>()
+            .iter()
+            .map(|server| format!("- {server}"))
             .collect::<Vec<_>>()
             .join("\n")
     };
@@ -412,12 +451,148 @@ fn build_intent_doc(
             ("generated_at", &generated_at),
             ("repo_purpose", &answers.repo_purpose),
             ("operator_intent", &operator_intent),
+            ("attitudes_list", &attitudes_list),
             ("prohibitions_list", &prohibitions_list),
             ("environment", &environment),
+            ("vertical", &vertical),
             ("domains_list", &domains_list),
+            ("skill_sources_list", &skill_sources_list),
             ("skills_list", &skills_list),
+            ("mcp_servers_list", &mcp_servers_list),
         ],
     )
+}
+
+fn build_interview_context_doc(
+    answers: &InterviewAnswers,
+    repo_name: &str,
+    deployed_skills: &[String],
+) -> String {
+    let generated_at = Utc::now().to_rfc3339();
+    let operator_intent = answers
+        .operator_intent
+        .as_deref()
+        .unwrap_or("Not specified.")
+        .to_string();
+    let attitudes_list = bullet_list_or_default(
+        &answers.stakeholder_attitudes,
+        "No stakeholder attitudes recorded.",
+    );
+    let prohibitions_list =
+        bullet_list_or_default(&answers.prohibitions, "No explicit prohibitions recorded.");
+    let environment = answers
+        .environment
+        .as_deref()
+        .unwrap_or("not specified")
+        .to_string();
+    let vertical = answers
+        .vertical
+        .as_deref()
+        .unwrap_or("not specified")
+        .to_string();
+    let all_domains: Vec<String> = answers
+        .confirmed_domains
+        .iter()
+        .chain(answers.confirmed_projects.iter())
+        .cloned()
+        .collect();
+    let domains_list = bullet_list_or_default(&all_domains, "none");
+    let skill_sources_list = bullet_list_or_default(&answers.external_skill_sources, "none");
+    let skills_list = bullet_list_or_default(deployed_skills, "none");
+    let mcp_names = answers
+        .confirmed_mcps
+        .iter()
+        .map(|server| server.name.clone())
+        .collect::<Vec<_>>();
+    let mcp_servers_list = bullet_list_or_default(&mcp_names, "none");
+
+    render_with_vars(
+        include_str!("../factory/templates/interview-context.md"),
+        &[
+            ("repo_name", repo_name),
+            ("generated_at", &generated_at),
+            ("repo_purpose", &answers.repo_purpose),
+            ("operator_intent", &operator_intent),
+            ("attitudes_list", &attitudes_list),
+            ("prohibitions_list", &prohibitions_list),
+            ("environment", &environment),
+            ("vertical", &vertical),
+            ("domains_list", &domains_list),
+            ("skill_sources_list", &skill_sources_list),
+            ("skills_list", &skills_list),
+            ("mcp_servers_list", &mcp_servers_list),
+        ],
+    )
+}
+
+fn build_claude_interview_section(
+    answers: &InterviewAnswers,
+    interview_context_path: &Path,
+) -> String {
+    let purpose = answers.repo_purpose.trim();
+    let stakes = answers
+        .operator_intent
+        .as_deref()
+        .unwrap_or("Not specified.");
+    let environment = answers.environment.as_deref().unwrap_or("not specified");
+    let vertical = answers.vertical.as_deref().unwrap_or("not specified");
+    let domains: Vec<String> = answers
+        .confirmed_domains
+        .iter()
+        .chain(answers.confirmed_projects.iter())
+        .cloned()
+        .collect();
+    let domain_line = list_or_default(&domains, "none");
+    let skill_sources = list_or_default(&answers.external_skill_sources, "none");
+    let mcp_names = answers
+        .confirmed_mcps
+        .iter()
+        .map(|server| server.name.clone())
+        .collect::<Vec<_>>();
+    let mcp_line = list_or_default(&mcp_names, "none");
+
+    let mut out = String::new();
+    out.push_str("\n---\n\n## Project Interview Context\n\n");
+    out.push_str(&format!(
+        "Full interview context: `{}`\n\n",
+        interview_context_path.display()
+    ));
+    out.push_str(&format!("- Purpose: {purpose}\n"));
+    out.push_str(&format!("- Stakes: {stakes}\n"));
+    out.push_str(&format!("- Environment: {environment}\n"));
+    out.push_str(&format!("- Vertical: {vertical}\n"));
+    out.push_str(&format!("- Domains: {domain_line}\n"));
+    out.push_str(&format!("- External skill sources: {skill_sources}\n"));
+    out.push_str(&format!("- MCP servers: {mcp_line}\n"));
+    if answers.prohibitions.is_empty() {
+        out.push_str("- Prohibitions: none recorded\n");
+    } else {
+        out.push_str("- Prohibitions:\n");
+        for prohibition in &answers.prohibitions {
+            out.push_str(&format!("  - {prohibition}\n"));
+        }
+    }
+    if answers.stakeholder_attitudes.is_empty() {
+        out.push_str("- Stakeholder attitudes: none recorded\n");
+    } else {
+        out.push_str("- Stakeholder attitudes:\n");
+        for attitude in &answers.stakeholder_attitudes {
+            out.push_str(&format!("  - {attitude}\n"));
+        }
+    }
+    out
+}
+
+fn bullet_list_or_default(values: &[String], default: &str) -> String {
+    if values.is_empty() {
+        default.to_string()
+    } else {
+        values
+            .iter()
+            .map(|value| format!("- {value}"))
+            .collect::<Vec<_>>()
+            .join("\n")
+    }
 }
 
 fn list_or_default(values: &[String], default: &str) -> String {
@@ -807,12 +982,20 @@ pub async fn stamp_init(
         harkonnen_root: harkonnen_root.to_path_buf(),
         repo_name: repo_name.clone(),
         managed_since,
+        repo_purpose: existing.as_ref().and_then(|toml| toml.repo_purpose.clone()),
+        operator_intent: existing
+            .as_ref()
+            .and_then(|toml| toml.operator_intent.clone()),
         environment: existing.as_ref().and_then(|toml| toml.environment.clone()),
         domains: existing
             .as_ref()
             .map(|toml| toml.domains.clone())
             .unwrap_or_default(),
         vertical: existing.as_ref().and_then(|toml| toml.vertical.clone()),
+        attitudes: existing
+            .as_ref()
+            .map(|toml| toml.attitudes.clone())
+            .unwrap_or_default(),
         features: existing
             .as_ref()
             .map(|toml| toml.features.clone())
@@ -893,9 +1076,12 @@ pub async fn stamp_update(
         harkonnen_root: harkonnen_root.to_path_buf(),
         repo_name: existing.repo_name.clone(),
         managed_since: existing.managed_since.clone(),
+        repo_purpose: existing.repo_purpose.clone(),
+        operator_intent: existing.operator_intent.clone(),
         environment: existing.environment.clone(),
         domains: existing.domains.clone(),
         vertical: existing.vertical.clone(),
+        attitudes: existing.attitudes.clone(),
         features: existing.features.clone(),
         constraints: existing.constraints.clone(),
         skill_sources: existing.skill_sources.clone(),
@@ -923,6 +1109,12 @@ pub async fn stamp_status(repo_path: &Path) -> Result<()> {
     println!("stamp_version:       {}", toml.stamp_version);
     println!("harkonnen_root:      {}", toml.harkonnen_root.display());
     println!("managed_since:       {}", toml.managed_since);
+    if let Some(ref repo_purpose) = toml.repo_purpose {
+        println!("repo_purpose:        {repo_purpose}");
+    }
+    if let Some(ref operator_intent) = toml.operator_intent {
+        println!("operator_intent:     {operator_intent}");
+    }
     println!(
         "interview_completed: {}",
         if toml.interview_completed {
@@ -936,6 +1128,9 @@ pub async fn stamp_status(repo_path: &Path) -> Result<()> {
     }
     if let Some(ref vertical) = toml.vertical {
         println!("vertical:            {vertical}");
+    }
+    if !toml.attitudes.is_empty() {
+        println!("attitudes:           {}", toml.attitudes.join(" | "));
     }
     if !toml.domains.is_empty() {
         println!("domains:             {}", toml.domains.join(", "));
@@ -1000,19 +1195,47 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
     println!();
 
     println!("Q1 — Mythos");
-    let repo_purpose = prompt_text("What is this repo for? (one or two sentences)", "")?;
+    let repo_purpose = prompt_text(
+        "What is this repo for? (one or two sentences)",
+        existing.repo_purpose.as_deref().unwrap_or(""),
+    )?;
     if repo_purpose.is_empty() {
         bail!("Repo purpose is required.");
     }
 
     println!("\nQ2 — Pathos");
     println!("Who uses it and what breaks if it fails? (blank to skip)");
-    let operator_intent_raw = prompt_text("Stakes", "")?;
+    let operator_intent_raw =
+        prompt_text("Stakes", existing.operator_intent.as_deref().unwrap_or(""))?;
     let operator_intent = if operator_intent_raw.is_empty() {
         None
     } else {
         Some(operator_intent_raw)
     };
+    println!("\nStakeholder attitudes and organizational posture:");
+    println!("Examples:");
+    println!("  - Department X wants to replace software Y with Z");
+    println!("  - Finance prefers AWS over Azure");
+    println!("  - Operations dislikes cloud-hosted systems altogether");
+    println!("Enter one attitude per line. Blank line to finish.");
+    let mut stakeholder_attitudes = existing.attitudes.clone();
+    if !stakeholder_attitudes.is_empty() {
+        println!("Previously recorded attitudes:");
+        for attitude in &stakeholder_attitudes {
+            println!("  - {attitude}");
+        }
+        if !prompt_bool("Keep previously recorded attitudes?", true)? {
+            stakeholder_attitudes.clear();
+        }
+    }
+    loop {
+        let attitude = prompt_text("Attitude (blank to finish)", "")?;
+        if attitude.is_empty() {
+            break;
+        }
+        stakeholder_attitudes.push(attitude);
+    }
+    stakeholder_attitudes.dedup();
 
     println!("\nQ3 — Ethos");
     println!("What must NEVER happen in this repo?");
@@ -1243,6 +1466,12 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
     if pdf_standards_skill {
         println!("  Vertical skill: {PDF_STANDARDS_SKILL}");
     }
+    if !stakeholder_attitudes.is_empty() {
+        println!("  Attitudes:");
+        for attitude in &stakeholder_attitudes {
+            println!("    - {attitude}");
+        }
+    }
     if !confirmed_projects.is_empty() {
         println!("  Project: {}", confirmed_projects.join(", "));
     }
@@ -1272,6 +1501,7 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
     let answers = InterviewAnswers {
         repo_purpose,
         operator_intent,
+        stakeholder_attitudes: stakeholder_attitudes.clone(),
         prohibitions,
         environment: environment.clone(),
         vertical: vertical.clone(),
@@ -1369,6 +1599,11 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
     let intent_path = repo_path.join(".harkonnen").join("intent.md");
     write_text_file(&intent_path, &intent_doc)?;
 
+    let interview_context_doc =
+        build_interview_context_doc(&answers, &existing.repo_name, &deployed);
+    let interview_context_path = repo_path.join(".harkonnen").join("interview-context.md");
+    write_text_file(&interview_context_path, &interview_context_doc)?;
+
     let claude_md_src = harkonnen_root
         .join("factory")
         .join("templates")
@@ -1389,6 +1624,10 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
             rendered.push_str("\n---\n");
             rendered.push_str(&all_sections);
         }
+        rendered.push_str(&build_claude_interview_section(
+            &answers,
+            &interview_context_path,
+        ));
         write_text_file(&claude_md_dst, &rendered)?;
     }
 
@@ -1409,9 +1648,12 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
         harkonnen_root: harkonnen_root.to_path_buf(),
         repo_name: existing.repo_name.clone(),
         managed_since: existing.managed_since.clone(),
+        repo_purpose: Some(answers.repo_purpose.clone()),
+        operator_intent: answers.operator_intent.clone(),
         environment,
         domains: all_domains_for_toml,
         vertical,
+        attitudes: stakeholder_attitudes,
         features: existing.features.clone(),
         constraints: answers.prohibitions.clone(),
         skill_sources: answers.external_skill_sources.clone(),
@@ -1423,6 +1665,7 @@ pub async fn stamp_interview(repo_path: &Path, harkonnen_root: &Path, force: boo
     println!("\n=== Interview complete ===");
     println!("  archive-seed:       {}", archive_path.display());
     println!("  intent:             {}", intent_path.display());
+    println!("  interview-context:  {}", interview_context_path.display());
     println!("  CLAUDE.md:          {}", claude_md_dst.display());
     println!("  repo.toml:          interview_completed = true");
     println!("  skills deployed:    {}", deployed.join(", "));

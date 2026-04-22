@@ -598,12 +598,40 @@ pub struct CoobieBriefing {
     #[serde(default)]
     pub operator_model_context: Option<OperatorModelContext>,
     #[serde(default)]
+    pub project_interview_context: Option<ProjectInterviewContext>,
+    #[serde(default)]
     pub soul_identity_context: Option<SoulIdentityContext>,
     pub recommended_guardrails: Vec<String>,
     pub required_checks: Vec<String>,
     pub open_questions: Vec<String>,
     pub coobie_response: String,
     pub generated_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct ProjectInterviewContext {
+    #[serde(default)]
+    pub repo_name: String,
+    #[serde(default)]
+    pub repo_purpose: String,
+    #[serde(default)]
+    pub operator_intent: String,
+    #[serde(default)]
+    pub environment: String,
+    #[serde(default)]
+    pub vertical: String,
+    #[serde(default)]
+    pub domains: Vec<String>,
+    #[serde(default)]
+    pub attitudes: Vec<String>,
+    #[serde(default)]
+    pub constraints: Vec<String>,
+    #[serde(default)]
+    pub skill_sources: Vec<String>,
+    #[serde(default)]
+    pub mcp_servers: Vec<String>,
+    #[serde(default)]
+    pub interview_context_path: String,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

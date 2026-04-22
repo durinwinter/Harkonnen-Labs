@@ -138,6 +138,21 @@ Benchmark wiring advances in lockstep with implementation phases. Each phase shi
 
 ---
 
+### v1-E — Transactional Execution And Approval Boundaries
+
+**Why:** Guardrails are stronger when high-impact actions have explicit transaction boundaries rather than relying on best-effort cleanup after a mistake. If a run is about to mutate sensitive code, open a privileged MCP surface, or cross a policy threshold, Harkonnen should be able to pause, request approval, and either commit or roll back from a known boundary. This is the operational analogue of the Soul-of-AI requirement that continuity and policy remain inspectable rather than implicit.
+
+**What to build:**
+
+- Transaction envelope for high-impact phases: capture an explicit pre-action snapshot, planned mutation set, approval state, and rollback note before execution proceeds
+- Human-interrupt checkpoint for guarded transitions: if Keeper or Coobie flags a privileged step, the run pauses at a reversible boundary rather than drifting forward and apologizing later
+- Rollback artifact written per guarded transition: what was attempted, what state changed, what was restored, and what residual risk remains
+- Decision-log integration: approval, commit, rollback, and abort outcomes become explicit decision records rather than only phase logs
+
+**Done when:** A guarded run can pause before a privileged transition, record an approval or rejection, and either commit or roll back from a named boundary with an auditable artifact.
+
+---
+
 ### v1 Benchmark / product gate
 
 - Decision audit log surfaced in Pack Board per run
@@ -185,12 +200,13 @@ This is a retrieval-shaping capability, not a storage change. It does not requir
 - `BriefingScope` enum in `src/coobie.rs` (migrates to `src/memory/briefing.rs` in Phase 5b): `ScoutPreflight`, `MasonPreflight`, `PiperPreflight`, `SablePreflight`, `CoobiConsolidation`, `OperatorQuery`. Each variant carries a `phase_id` and a `role` tag.
 - Scope-keyed retrieval filter: each scope defines an `allow_categories` list (e.g. Scout: `spec_history, prior_ambiguities, operator_model`; Mason: `failure_patterns, fix_patterns, workspace_guardrails, causal_links`; Sable: `scenario_patterns, hidden_scenario_outcomes` — explicitly excludes Mason implementation notes).
 - `build_scoped_briefing(scope: BriefingScope, run_id, spec_id) -> BriefingPackage` replaces the current single-path `build_preflight_briefing`. Internally calls the same multi-hop retrieval chain but filters retrieved hits against the scope's `allow_categories` before assembling the briefing text.
+- **Stamped project interview context as first-class preflight input** — the repo-stamp interview's Mythos/Pathos/Ethos/Episteme/Praxis material (purpose, stakes, stakeholder attitudes, prohibitions, vertical, skill sources, MCP posture) should be loaded from `.harkonnen/repo.toml` and injected into Scout + Coobie briefing shaping. This keeps project posture inspectable and continuity-aligned rather than leaving it trapped in generated markdown artifacts.
 - Wire in orchestrator: pass the correct `BriefingScope` at each phase entry point (Scout, Mason, Sable are the critical three; others can default to `OperatorQuery` for now).
 - Coobie episode record: add `briefing_scope` field so causal analysis can distinguish whether a lesson was visible at the relevant phase or not.
 
 **Sable isolation constraint (non-negotiable):** `SablePreflight` scope must never include retrieved hits tagged `implementation_notes`, `mason_plan`, or `edit_rationale`. This is the hidden-scenario firewall. If a hit's tag set intersects these, it is dropped regardless of relevance score.
 
-**Done when:** Scout, Mason, and Sable each receive a distinct briefing shaped to their role; a log entry confirms which scope was used per phase; and Sable's briefing verifiably contains no Mason implementation content.
+**Done when:** Scout, Mason, and Sable each receive a distinct briefing shaped to their role; stamped repo interview context is visible in the relevant preflight surfaces; a log entry confirms which scope was used per phase; and Sable's briefing verifiably contains no Mason implementation content.
 
 ---
 
@@ -371,13 +387,29 @@ New builtin benchmark module — Harkonnen-native, no external dataset.
 - Optional `DEVBENCH_ROOT` points at the benchmark checkout or adapter workspace
 - The wrapper exits with skip code `10` when DevBench is not configured so Phase 3 can be wired before the full external harness is installed
 
+### 3-G — Comparative Control-Style Benchmarking
+
+- Add benchmark suites that compare three execution styles on the same tasks where practical: pure-LLM baseline, rule-heavy baseline, and Harkonnen's hybrid pack/control-plane path
+- Publish not only task success but also recovery rate, guardrail violation rate, operator interruption count, and time-to-correctness
+- Treat this as a factory benchmark, not a model-only benchmark: the question is how safely and efficiently the delivery system moves, not only how strong one model is in isolation
+
+### 3-H — Adversarial Tool-Use And Stakeholder-Alignment Evaluation
+
+- Add adversarial smokes that probe unsafe tool invocation, policy-bypass attempts, MCP misuse, and recovery behavior after intentionally hostile prompts or malformed tool outputs
+- Add stakeholder-alignment reporting per run: did the plan respect recorded project purpose, operator stakes, stakeholder attitudes, prohibitions, and approved MCP posture?
+- Include a report section that distinguishes technical correctness from project-posture correctness so Harkonnen can fail visibly when it solves the wrong problem the "right" way
+- Publish baseline scores for both adversarial resilience and stakeholder-alignment adherence once enough runs exist
+
 **Benchmark gate:**
 
 - `spec_adherence` first run published — completeness and precision against local run corpus
 - `scenario_delta` first run published — visible vs hidden pass rate gap across recent runs
 - `DevBench` adapter wired (script-based, not builtin)
+- comparative control-style benchmark suite wired
+- adversarial tool-use smoke suite wired
+- stakeholder-alignment reporting visible in run or benchmark artifacts
 
-**Done when:** Flint produces a doc artifact per run, `spec_adherence` and `scenario_delta` have first-run baselines, and the DevBench adapter is wired so local or hosted runs can be launched through the benchmark manifest.
+**Done when:** Flint produces a doc artifact per run, `spec_adherence` and `scenario_delta` have first-run baselines, the DevBench adapter is wired so local or hosted runs can be launched through the benchmark manifest, and the benchmark surface can distinguish pure correctness from governed, stakeholder-aligned correctness.
 
 ---
 
@@ -452,6 +484,15 @@ This is a usability prerequisite for any team or multi-machine deployment. Most 
 - `POST /api/auth/keys` (create), `GET /api/auth/keys` (list), `DELETE /api/auth/keys/:id` (revoke)
 - `GET /health` and the SSE stream remain unauthenticated (monitoring and browser clients)
 - CLI flag `--api-key` or env var `HARKONNEN_API_KEY` for local development bypass
+
+### EI-1b — MCP Authentication And Gateway Policy Parity
+
+**Why next to API auth:** Harkonnen is increasingly MCP-first. API auth without MCP auth leaves the external control surface uneven and undermines Keeper's policy role.
+
+- Authenticated MCP profiles for privileged servers: local-only trusted surfaces remain simple, but remote or high-impact MCP routes require explicit credentials or signed session context
+- Gateway policy layer for MCP invocations: approval, deny, and audit outcomes should be symmetrical whether the request arrived over HTTP or MCP
+- Policy-aware MCP metadata in setup TOML so machine-local surfaces can remain convenient while shared or remote surfaces become explicitly governed
+- Audit trail for MCP decisions: server name, requested tool, approval outcome, actor, and timestamp
 
 ### EI-2 — Outbound Webhook Notifications
 

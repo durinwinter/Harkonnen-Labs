@@ -859,6 +859,10 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
             new_memory_id   TEXT NOT NULL,
             memory_root     TEXT NOT NULL DEFAULT '',
             reason          TEXT NOT NULL DEFAULT '',
+            review_status   TEXT NOT NULL DEFAULT 'pending',
+            reviewed_by     TEXT,
+            review_note     TEXT,
+            reviewed_at     TEXT,
             created_at      TEXT NOT NULL
         )
         "#,
@@ -871,6 +875,38 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
         "memory_updates",
         "memory_root",
         "ALTER TABLE memory_updates ADD COLUMN memory_root TEXT NOT NULL DEFAULT ''",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_updates",
+        "review_status",
+        "ALTER TABLE memory_updates ADD COLUMN review_status TEXT NOT NULL DEFAULT 'pending'",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_updates",
+        "reviewed_by",
+        "ALTER TABLE memory_updates ADD COLUMN reviewed_by TEXT",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_updates",
+        "review_note",
+        "ALTER TABLE memory_updates ADD COLUMN review_note TEXT",
+    )
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_updates",
+        "reviewed_at",
+        "ALTER TABLE memory_updates ADD COLUMN reviewed_at TEXT",
     )
     .await?;
 

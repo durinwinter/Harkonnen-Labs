@@ -130,6 +130,19 @@ async function fetchJson(url) {
   return response.json();
 }
 
+async function postJson(url, body) {
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(body),
+  });
+  if (!response.ok) {
+    const text = await response.text();
+    throw new Error(text || `${response.status} ${response.statusText}`);
+  }
+  return response.json();
+}
+
 function Panel({ title, children, compact = false }) {
   return (
     <section className={`ops-panel ${compact ? 'compact' : ''}`}>
@@ -147,6 +160,7 @@ function App() {
   const [activeRunId, setActiveRunId] = useState('');
   const [runState, setRunState] = useState(null);
   const [memoryUpdates, setMemoryUpdates] = useState([]);
+  const [reviewingMemoryUpdateId, setReviewingMemoryUpdateId] = useState('');
   const [selectedRole, setSelectedRole] = useState('mason');
   const [roleBoard, setRoleBoard] = useState(null);
   const [coordination, setCoordination] = useState(null);
@@ -157,6 +171,31 @@ function App() {
   const [showSystem, setShowSystem] = useState(false);
   const [causalReport, setCausalReport] = useState(null);
   const [error, setError] = useState('');
+
+  const loadMemoryUpdates = async () => {
+    try {
+      const data = await fetchJson(`${API_BASE}/memory/updates`);
+      setMemoryUpdates(Array.isArray(data) ? data : []);
+    } catch {
+      setMemoryUpdates([]);
+    }
+  };
+
+  const reviewMemoryUpdate = async (updateId, status) => {
+    setReviewingMemoryUpdateId(updateId);
+    try {
+      await postJson(`${API_BASE}/memory/updates/${updateId}/review`, {
+        status,
+        reviewed_by: 'operator',
+      });
+      await loadMemoryUpdates();
+      setError('');
+    } catch (reviewError) {
+      setError(reviewError.message);
+    } finally {
+      setReviewingMemoryUpdateId('');
+    }
+  };
 
   useEffect(() => {
     let cancelled = false;
@@ -486,13 +525,48 @@ function App() {
               ) : (
                 recentMemoryUpdates.map((update) => (
                   <div key={update.update_id} className="list-item">
+                    <div className="memory-update-header">
+                      <div className="memory-update-status-row">
+                        <span className={`status-pill status-${(update.review_status || 'pending').toLowerCase()}`}>
+                          {titleCase(update.review_status || 'pending')}
+                        </span>
+                      </div>
+                      {(update.reviewed_at || update.reviewed_by) ? (
+                        <div className="list-item-subtle">
+                          {(update.reviewed_by || 'operator')} · {update.reviewed_at ? new Date(update.reviewed_at).toLocaleString() : 'reviewed'}
+                        </div>
+                      ) : null}
+                    </div>
                     <div className="list-item-title">
                       {update.old_memory_id} → {update.new_memory_id}
                     </div>
                     <div className="list-item-subtle">{update.reason}</div>
+                    {update.review_note ? (
+                      <div className="list-item-subtle">note: {update.review_note}</div>
+                    ) : null}
                     <div className="list-item-subtle">
                       {(update.memory_root || 'memory root unavailable')} · {new Date(update.created_at).toLocaleString()}
                     </div>
+                    {(update.review_status || 'pending').toLowerCase() === 'pending' ? (
+                      <div className="memory-update-actions">
+                        <button
+                          type="button"
+                          className="memory-update-btn confirm"
+                          disabled={reviewingMemoryUpdateId === update.update_id}
+                          onClick={() => reviewMemoryUpdate(update.update_id, 'confirmed')}
+                        >
+                          {reviewingMemoryUpdateId === update.update_id ? 'Working...' : 'Confirm'}
+                        </button>
+                        <button
+                          type="button"
+                          className="memory-update-btn reject"
+                          disabled={reviewingMemoryUpdateId === update.update_id}
+                          onClick={() => reviewMemoryUpdate(update.update_id, 'rejected')}
+                        >
+                          Reject
+                        </button>
+                      </div>
+                    ) : null}
                   </div>
                 ))
               )}
@@ -809,6 +883,22 @@ function App() {
           color: var(--accent-gold);
         }
 
+        .status-pending {
+          color: var(--accent-gold);
+        }
+
+        .status-confirmed {
+          color: #8fae7c;
+          border-color: rgba(143, 174, 124, 0.32);
+          background: rgba(143, 174, 124, 0.12);
+        }
+
+        .status-rejected {
+          color: #d8876e;
+          border-color: rgba(216, 135, 110, 0.35);
+          background: rgba(120, 39, 30, 0.22);
+        }
+
         .dashboard-grid {
           display: grid;
           grid-template-columns: minmax(0, 1.9fr) minmax(320px, 0.95fr);
@@ -973,6 +1063,56 @@ function App() {
           color: var(--text-secondary);
           font-size: 0.76rem;
           line-height: 1.45;
+        }
+
+        .memory-update-header {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.6rem;
+          margin-bottom: 0.45rem;
+          flex-wrap: wrap;
+        }
+
+        .memory-update-status-row {
+          display: flex;
+          align-items: center;
+          gap: 0.45rem;
+        }
+
+        .memory-update-actions {
+          display: flex;
+          gap: 0.55rem;
+          margin-top: 0.65rem;
+        }
+
+        .memory-update-btn {
+          border-radius: 999px;
+          border: 1px solid rgba(255, 255, 255, 0.12);
+          background: rgba(255, 255, 255, 0.04);
+          color: var(--text-primary);
+          padding: 0.38rem 0.8rem;
+          font: inherit;
+          font-size: 0.74rem;
+          font-weight: 700;
+          cursor: pointer;
+        }
+
+        .memory-update-btn:disabled {
+          opacity: 0.6;
+          cursor: wait;
+        }
+
+        .memory-update-btn.confirm {
+          border-color: rgba(143, 174, 124, 0.4);
+          background: rgba(143, 174, 124, 0.12);
+          color: #cfe2bf;
+        }
+
+        .memory-update-btn.reject {
+          border-color: rgba(216, 135, 110, 0.38);
+          background: rgba(120, 39, 30, 0.22);
+          color: #f0c7bc;
         }
 
         .policy-event.blocked,

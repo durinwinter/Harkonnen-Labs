@@ -654,6 +654,15 @@ struct EvidenceAnnotationReviewRequest {
     promote_scope: Option<String>,
 }
 
+#[derive(Debug, Deserialize)]
+struct MemoryUpdateReviewRequest {
+    status: String,
+    #[serde(default)]
+    reviewed_by: Option<String>,
+    #[serde(default)]
+    review_note: Option<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct EvidenceBundleSaveResponse {
     bundle_name: String,
@@ -862,6 +871,10 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         .route("/api/memory/init", post(post_memory_init))
         .route("/api/memory/index", post(post_memory_index))
         .route("/api/memory/updates", get(get_memory_updates))
+        .route(
+            "/api/memory/updates/:id/review",
+            post(post_memory_update_review),
+        )
         .route("/api/runs/start", post(start_run))
         .route("/api/runs/:id/report", get(get_run_report))
         .route("/api/runs/:id/package", post(post_run_package))
@@ -4605,6 +4618,33 @@ async fn get_memory_updates(State(app): State<AppContext>) -> impl IntoResponse 
     match app.list_memory_updates().await {
         Ok(records) => (StatusCode::OK, Json(records)).into_response(),
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
+    }
+}
+
+async fn post_memory_update_review(
+    State(app): State<AppContext>,
+    Path(id): Path<String>,
+    Json(request): Json<MemoryUpdateReviewRequest>,
+) -> impl IntoResponse {
+    match app
+        .review_memory_update(
+            &id,
+            &request.status,
+            request.reviewed_by.as_deref(),
+            request.review_note.as_deref(),
+        )
+        .await
+    {
+        Ok(record) => (StatusCode::OK, Json(record)).into_response(),
+        Err(error) => {
+            let message = error.to_string();
+            let status = if message.contains("not found") {
+                StatusCode::NOT_FOUND
+            } else {
+                StatusCode::BAD_REQUEST
+            };
+            (status, message).into_response()
+        }
     }
 }
 

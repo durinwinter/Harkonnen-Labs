@@ -1210,6 +1210,14 @@ pub struct MemoryUpdateRecord {
     #[serde(default)]
     pub memory_root: Option<String>,
     pub reason: String,
+    #[serde(default)]
+    pub review_status: String,
+    #[serde(default)]
+    pub reviewed_by: Option<String>,
+    #[serde(default)]
+    pub review_note: Option<String>,
+    #[serde(default)]
+    pub reviewed_at: Option<String>,
     pub created_at: String,
 }
 

@@ -684,6 +684,49 @@ impl MemoryStore {
         Ok(())
     }
 
+    pub async fn clear_entry_supersession(
+        &self,
+        id: &str,
+        expected_successor_id: Option<&str>,
+    ) -> Result<()> {
+        let path = self.root.join(format!("{}.md", sanitize_memory_id(id)));
+        if !path.exists() {
+            return Ok(());
+        }
+
+        let raw = tokio::fs::read_to_string(&path).await?;
+        let mut parsed = parse_frontmatter(&raw);
+        let should_clear = match expected_successor_id {
+            Some(expected) => parsed.provenance.superseded_by.as_deref() == Some(expected),
+            None => {
+                parsed.provenance.superseded_by.is_some()
+                    || parsed.provenance.status.as_deref() == Some("superseded")
+            }
+        };
+        if !should_clear {
+            return Ok(());
+        }
+
+        parsed.provenance.superseded_by = None;
+        if parsed.provenance.status.as_deref() == Some("superseded") {
+            parsed.provenance.status = if parsed.provenance.challenged_by.is_empty() {
+                None
+            } else {
+                Some("challenged".to_string())
+            };
+        }
+
+        let doc = render_memory_document(
+            &parsed.tags,
+            &parsed.summary,
+            &parsed.body,
+            &parsed.provenance,
+        );
+        tokio::fs::write(&path, doc).await?;
+        self.reindex().await?;
+        Ok(())
+    }
+
     pub async fn mark_entries_loaded(&self, ids: &[String]) -> Result<()> {
         if ids.is_empty() {
             return Ok(());
@@ -2239,8 +2282,8 @@ fn asset_path_for(imports_dir: &Path, id: &str, ext: &str) -> PathBuf {
 mod tests {
     use super::{
         extracted_text_sidecar_path, memory_match_score, memory_matches,
-        shell_escape_arg, should_write_extracted_text_sidecar, ExtractedMemorySource,
-        MemoryEntry, MemoryProvenance, MemoryStore,
+        parse_frontmatter, shell_escape_arg, should_write_extracted_text_sidecar,
+        ExtractedMemorySource, MemoryEntry, MemoryProvenance, MemoryStore,
     };
     use std::path::Path;
     use tempfile::tempdir;
@@ -2351,6 +2394,43 @@ mod tests {
         assert_eq!(candidates.len(), 1);
         assert_eq!(candidates[0].stale_memory_id, "deployment-target-aws");
         assert!(candidates[0].reason.contains("same source path"));
+    }
+
+    #[tokio::test]
+    async fn clear_entry_supersession_removes_pointer_and_status() {
+        let temp = tempdir().unwrap();
+        let store = MemoryStore::new(temp.path().to_path_buf());
+
+        store
+            .store_with_metadata(
+                "deployment-target-aws",
+                vec!["deploy".to_string()],
+                "deployment target",
+                "Deployment target is AWS us-west-2.",
+                MemoryProvenance {
+                    status: Some("superseded".to_string()),
+                    superseded_by: Some("deployment-target-onprem".to_string()),
+                    ..MemoryProvenance::default()
+                },
+            )
+            .await
+            .unwrap();
+
+        store
+            .clear_entry_supersession(
+                "deployment-target-aws",
+                Some("deployment-target-onprem"),
+            )
+            .await
+            .unwrap();
+
+        let raw = tokio::fs::read_to_string(temp.path().join("deployment-target-aws.md"))
+            .await
+            .unwrap();
+        let parsed = parse_frontmatter(&raw);
+
+        assert_eq!(parsed.provenance.superseded_by, None);
+        assert_eq!(parsed.provenance.status, None);
     }
 }
 

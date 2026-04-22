@@ -11517,8 +11517,16 @@ Return JSON only.",
 
         sqlx::query(
             r#"
-            INSERT INTO memory_updates (update_id, old_memory_id, new_memory_id, memory_root, reason, created_at)
-            VALUES (?1, ?2, ?3, ?4, ?5, ?6)
+            INSERT INTO memory_updates (
+                update_id,
+                old_memory_id,
+                new_memory_id,
+                memory_root,
+                reason,
+                review_status,
+                created_at
+            )
+            VALUES (?1, ?2, ?3, ?4, ?5, 'pending', ?6)
             "#,
         )
         .bind(&update_id)
@@ -11585,7 +11593,17 @@ Return JSON only.",
     pub async fn list_memory_updates(&self) -> Result<Vec<crate::models::MemoryUpdateRecord>> {
         let rows = sqlx::query(
             r#"
-            SELECT update_id, old_memory_id, new_memory_id, memory_root, reason, created_at
+            SELECT
+                update_id,
+                old_memory_id,
+                new_memory_id,
+                memory_root,
+                reason,
+                review_status,
+                reviewed_by,
+                review_note,
+                reviewed_at,
+                created_at
             FROM memory_updates
             ORDER BY created_at DESC
             "#,
@@ -11603,10 +11621,141 @@ Return JSON only.",
                         .get::<Option<String>, _>("memory_root")
                         .filter(|value| !value.trim().is_empty()),
                     reason: row.get("reason"),
+                    review_status: row.get::<String, _>("review_status"),
+                    reviewed_by: row
+                        .get::<Option<String>, _>("reviewed_by")
+                        .filter(|value| !value.trim().is_empty()),
+                    review_note: row
+                        .get::<Option<String>, _>("review_note")
+                        .filter(|value| !value.trim().is_empty()),
+                    reviewed_at: row
+                        .get::<Option<String>, _>("reviewed_at")
+                        .filter(|value| !value.trim().is_empty()),
                     created_at: row.get("created_at"),
                 })
             })
             .collect()
+    }
+
+    pub async fn review_memory_update(
+        &self,
+        update_id: &str,
+        status: &str,
+        reviewed_by: Option<&str>,
+        review_note: Option<&str>,
+    ) -> Result<crate::models::MemoryUpdateRecord> {
+        let normalized_status = normalize_memory_update_review_status(status)?;
+        let Some(current) = self.get_memory_update(update_id).await? else {
+            bail!("memory update '{}' not found", update_id);
+        };
+
+        let store = current
+            .memory_root
+            .as_deref()
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| MemoryStore::new(PathBuf::from(value)))
+            .unwrap_or_else(|| self.memory_store.clone());
+
+        match normalized_status {
+            "confirmed" => {
+                store
+                    .annotate_entry_status(
+                        &current.old_memory_id,
+                        "superseded",
+                        Some(&current.new_memory_id),
+                    )
+                    .await?;
+            }
+            "rejected" => {
+                store
+                    .clear_entry_supersession(
+                        &current.old_memory_id,
+                        Some(&current.new_memory_id),
+                    )
+                    .await?;
+            }
+            _ => {}
+        }
+
+        let reviewed_by = reviewed_by
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+        let review_note = review_note
+            .map(str::trim)
+            .filter(|value| !value.is_empty())
+            .map(|value| value.to_string());
+        let reviewed_at = Utc::now().to_rfc3339();
+
+        sqlx::query(
+            r#"
+            UPDATE memory_updates
+            SET review_status = ?2, reviewed_by = ?3, review_note = ?4, reviewed_at = ?5
+            WHERE update_id = ?1
+            "#,
+        )
+        .bind(update_id)
+        .bind(normalized_status)
+        .bind(reviewed_by.as_deref())
+        .bind(review_note.as_deref())
+        .bind(&reviewed_at)
+        .execute(&self.pool)
+        .await?;
+
+        self.get_memory_update(update_id)
+            .await?
+            .with_context(|| format!("memory update '{}' not found after review", update_id))
+    }
+
+    async fn get_memory_update(
+        &self,
+        update_id: &str,
+    ) -> Result<Option<crate::models::MemoryUpdateRecord>> {
+        let row = sqlx::query(
+            r#"
+            SELECT
+                update_id,
+                old_memory_id,
+                new_memory_id,
+                memory_root,
+                reason,
+                review_status,
+                reviewed_by,
+                review_note,
+                reviewed_at,
+                created_at
+            FROM memory_updates
+            WHERE update_id = ?1
+            "#,
+        )
+        .bind(update_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        row.map(|row| {
+            Ok(crate::models::MemoryUpdateRecord {
+                update_id: row.get("update_id"),
+                old_memory_id: row.get("old_memory_id"),
+                new_memory_id: row.get("new_memory_id"),
+                memory_root: row
+                    .get::<Option<String>, _>("memory_root")
+                    .filter(|value| !value.trim().is_empty()),
+                reason: row.get("reason"),
+                review_status: row.get::<String, _>("review_status"),
+                reviewed_by: row
+                    .get::<Option<String>, _>("reviewed_by")
+                    .filter(|value| !value.trim().is_empty()),
+                review_note: row
+                    .get::<Option<String>, _>("review_note")
+                    .filter(|value| !value.trim().is_empty()),
+                reviewed_at: row
+                    .get::<Option<String>, _>("reviewed_at")
+                    .filter(|value| !value.trim().is_empty()),
+                created_at: row.get("created_at"),
+            })
+        })
+        .transpose()
     }
 
     // ── v1-D: Operator Model Interview ───────────────────────────────────────
@@ -18274,6 +18423,16 @@ fn normalize_annotation_review_status(status: &str) -> Result<&'static str> {
         "reviewed" => Ok("reviewed"),
         "approved" => Ok("approved"),
         other => bail!("unsupported evidence annotation status '{}'", other),
+    }
+}
+
+fn normalize_memory_update_review_status(status: &str) -> Result<&'static str> {
+    match status.trim().to_ascii_lowercase().as_str() {
+        "confirm" | "confirmed" | "approve" | "approved" | "accept" | "accepted" => {
+            Ok("confirmed")
+        }
+        "reject" | "rejected" | "dismiss" | "dismissed" => Ok("rejected"),
+        other => bail!("unsupported memory update review status '{}'", other),
     }
 }
 

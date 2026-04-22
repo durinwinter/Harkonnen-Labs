@@ -103,7 +103,7 @@ Benchmark wiring advances in lockstep with implementation phases. Each phase shi
 
 ### v1-B — Memory Invalidation Persistence (Phase 4b completion)
 
-**Why:** The core persistence path is now live on the main ingest flow, and the benchmark-facing smoke has now been rerun against that stored history. The remaining close-out work is operator adjudication for supersession events.
+**Why:** The core persistence path is now live on the main ingest flow, and the benchmark-facing smoke has now been rerun against that stored history. The active close-out work is the operator adjudication loop for supersession events. Broader benchmark enrichment is intentionally deferred until after the current narrow end-to-end Harkonnen pass.
 
 **Shipped on the current path:**
 
@@ -115,9 +115,9 @@ Benchmark wiring advances in lockstep with implementation phases. Each phase shi
 
 **Remaining close-out:**
 
-- Memory Board operator action to confirm or reject a supersession when human review is needed
+- No additional v1-B blockers after the operator confirm/reject loop lands; defer wider benchmark report polish and cross-suite metric expansion until after the narrow full-system pass.
 
-**Status:** Core path verified on the current code line. A repeated ingest from the same source path now writes `memory_updates` rows, marks stale notes with `superseded_by`, and surfaces the history through `GET /api/memory/updates` and the Pack Board Memory panel. The bundled StreamingQA smoke fixture has also been rerun under `lm-studio-local`, producing `1.0000` accuracy, exact match, evidence hit rate, and updated-fact accuracy while persisting the benchmark-local supersession row.
+**Status:** Core path verified on the current code line. A repeated ingest from the same source path now writes `memory_updates` rows, marks stale notes with `superseded_by`, surfaces the history through `GET /api/memory/updates` and the Pack Board Memory panel, and supports operator confirm/reject review from the Memory Board. The bundled StreamingQA smoke fixture has also been rerun under `lm-studio-local`, producing `1.0000` accuracy, exact match, evidence hit rate, and updated-fact accuracy while persisting the benchmark-local supersession row.
 
 ---
 
@@ -236,6 +236,7 @@ This is a retrieval-shaping capability, not a storage change. It does not requir
 
 **Benchmark gate:**
 
+- Hold additional benchmark report polish until the narrow end-to-end Harkonnen pass is complete; use the existing native adapters as guardrails rather than expanding coverage mid-pass.
 - re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
 - `LongMemEval` and `LoCoMo` re-run to confirm semantic recall quality does not regress
 - re-run `StreamingQA` to confirm belief-update accuracy does not regress after the module refactor
@@ -842,7 +843,7 @@ Every reportable benchmark claim should include:
 
 - `invalidation_reasons` field on `MemoryRetrievalHit` — computed at retrieval time from `superseded_by` / `challenged_by` provenance fields
 - `memory_invalidation_reasons()` helper in orchestrator surfaces reasons per hit
-- Persistence layer (`memory_updates` table, `invalidated_by` / `superseded_by` provenance, `GET /api/memory/updates`, Memory Board panel) is live; StreamingQA persisted-history smoke is published, and operator adjudication remains follow-on work
+- Persistence layer (`memory_updates` table, `invalidated_by` / `superseded_by` provenance, `GET /api/memory/updates`, Memory Board panel) is live; StreamingQA persisted-history smoke is published, and the operator confirm/reject loop is now part of the shipped path
 
 **Phase 5 — Consolidation Workbench:**
 

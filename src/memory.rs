@@ -2281,9 +2281,9 @@ fn asset_path_for(imports_dir: &Path, id: &str, ext: &str) -> PathBuf {
 #[cfg(test)]
 mod tests {
     use super::{
-        extracted_text_sidecar_path, memory_match_score, memory_matches,
-        parse_frontmatter, shell_escape_arg, should_write_extracted_text_sidecar,
-        ExtractedMemorySource, MemoryEntry, MemoryProvenance, MemoryStore,
+        extracted_text_sidecar_path, memory_match_score, memory_matches, parse_frontmatter,
+        shell_escape_arg, should_write_extracted_text_sidecar, ExtractedMemorySource, MemoryEntry,
+        MemoryProvenance, MemoryStore,
     };
     use std::path::Path;
     use tempfile::tempdir;
@@ -2417,10 +2417,7 @@ mod tests {
             .unwrap();
 
         store
-            .clear_entry_supersession(
-                "deployment-target-aws",
-                Some("deployment-target-onprem"),
-            )
+            .clear_entry_supersession("deployment-target-aws", Some("deployment-target-onprem"))
             .await
             .unwrap();
 

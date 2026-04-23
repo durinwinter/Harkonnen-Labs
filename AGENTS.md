@@ -57,6 +57,7 @@ src/                    Rust CLI (cargo run -- <command>)
 factory/
   agents/profiles/      Nine agent YAML profiles (one per agent)
   agents/personality/   labrador.md — shared personality for all agents
+                        <agent>.md — per-agent addendum for each Labrador role
   memory/               Coobie's memory store (md files + index.json)
   mcp/                  MCP server documentation YAMLs
   context/              Machine-parseable YAML context for agent consumption

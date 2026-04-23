@@ -163,6 +163,30 @@ struct CommandTrialReport {
     commands: Vec<CommandTrialRecord>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct TransactionBoundaryArtifact {
+    boundary_id: String,
+    run_id: String,
+    spec_id: String,
+    phase: String,
+    agent: String,
+    status: String,
+    approval_state: String,
+    #[serde(default)]
+    checkpoint_id: Option<String>,
+    opened_at: String,
+    #[serde(default)]
+    closed_at: Option<String>,
+    planned_mutation_set: Vec<String>,
+    guardrails: Vec<String>,
+    approval_blockers: Vec<String>,
+    pre_action_snapshot: WorkspaceStateSnapshot,
+    #[serde(default)]
+    post_action_snapshot: Option<WorkspaceStateSnapshot>,
+    rollback_note: String,
+    residual_risk: String,
+}
+
 #[derive(Debug, Clone)]
 struct DecisionTrialSnapshot {
     agent: String,
@@ -3137,6 +3161,7 @@ next_actions={}",
                 passed: false,
                 details: message.to_string(),
             });
+            validation.failure_kind = classify_failure_kind(&validation.results);
         }
         self.write_json_file(&run_dir.join("validation.json"), &validation)
             .await?;
@@ -10274,6 +10299,10 @@ Requirements:
                     #[serde(default)]
                     dependencies: Vec<String>,
                     #[serde(default)]
+                    preferred_tools: Vec<String>,
+                    #[serde(default)]
+                    risk_tolerances: Vec<String>,
+                    #[serde(default)]
                     open_questions: Vec<String>,
                 }
 
@@ -10283,7 +10312,7 @@ Requirements:
                     .collect::<Vec<_>>()
                     .join("\n");
                 let request = LlmRequest::simple(
-                    "You are Coobie, summarizing an operator-model interview for Harkonnen Labs. Return one raw JSON object only with keys: summary, operating_rhythms, guardrails, escalation_rules, dependencies, open_questions. Keep every item concrete, reusable, and short. Prefer durable operating logic over biography.",
+                    "You are Coobie, summarizing an operator-model interview for Harkonnen Labs. Return one raw JSON object only with keys: summary, operating_rhythms, guardrails, escalation_rules, dependencies, preferred_tools, risk_tolerances, open_questions. Keep every item concrete, reusable, and short. Prefer durable operating logic over biography.",
                     format!(
                         "PROFILE:
 - scope: {}
@@ -10319,6 +10348,8 @@ Return JSON only.",
                         extend_unique(&mut context.guardrails, raw.guardrails, 6);
                         extend_unique(&mut context.escalation_rules, raw.escalation_rules, 5);
                         extend_unique(&mut context.dependencies, raw.dependencies, 5);
+                        extend_unique(&mut context.preferred_tools, raw.preferred_tools, 5);
+                        extend_unique(&mut context.risk_tolerances, raw.risk_tolerances, 5);
                         extend_unique(&mut context.open_questions, raw.open_questions, 5);
                     }
                 }
@@ -10337,9 +10368,15 @@ Return JSON only.",
         if let Ok(json) = tokio::fs::read_to_string(&brief_path).await {
             if let Ok(brief) = serde_json::from_str::<CommissioningBrief>(&json) {
                 extend_unique(&mut context.operating_rhythms, brief.operating_rhythms, 8);
+                extend_unique(&mut context.preferred_tools, brief.preferred_tools, 6);
+                extend_unique(&mut context.risk_tolerances, brief.risk_tolerances, 6);
                 for pattern in brief.top_patterns.iter().take(3) {
                     let entry = format!("commissioning brief — {pattern}");
                     push_unique(&mut context.guardrails, &entry);
+                }
+                for tolerance in context.risk_tolerances.iter().take(3) {
+                    let entry = format!("risk tolerance — {tolerance}");
+                    push_unique(&mut context.escalation_rules, &entry);
                 }
             }
         }
@@ -11669,10 +11706,7 @@ Return JSON only.",
             }
             "rejected" => {
                 store
-                    .clear_entry_supersession(
-                        &current.old_memory_id,
-                        Some(&current.new_memory_id),
-                    )
+                    .clear_entry_supersession(&current.old_memory_id, Some(&current.new_memory_id))
                     .await?;
             }
             _ => {}
@@ -11775,6 +11809,15 @@ Return JSON only.",
             .get_session(session_id)
             .await?
             .ok_or_else(|| anyhow::anyhow!("operator model session not found: {session_id}"))?;
+        if session.status == "completed" {
+            anyhow::bail!("operator model session is already completed: {session_id}");
+        }
+        if session.pending_layer.as_deref() != Some(layer) {
+            anyhow::bail!(
+                "operator model layer mismatch: session expects {:?}, got {layer}",
+                session.pending_layer
+            );
+        }
 
         let messages = self.chat.list_messages(thread_id).await?;
         let layer_messages: Vec<_> = messages
@@ -11852,19 +11895,22 @@ Return JSON only.",
 
         let mut operating_rhythms: Vec<String> = Vec::new();
         let mut recurring_decisions: Vec<String> = Vec::new();
+        let mut preferred_tools: Vec<String> = Vec::new();
+        let mut risk_tolerances: Vec<String> = Vec::new();
+        let version = checkpoints
+            .iter()
+            .map(|checkpoint| checkpoint.version)
+            .max()
+            .unwrap_or(profile.current_version.max(1));
 
         for cp in &checkpoints {
-            let lines: Vec<String> = cp
-                .summary_md
-                .lines()
-                .map(|l| l.trim_start_matches("- ").trim().to_string())
-                .filter(|l| !l.is_empty())
-                .collect();
+            let lines = operator_model_checkpoint_lines(&cp.summary_md);
             match cp.layer.as_str() {
-                "operating_rhythms" => operating_rhythms.extend(lines),
-                "recurring_decisions" => recurring_decisions.extend(lines),
+                "operating_rhythms" => extend_unique(&mut operating_rhythms, lines.clone(), 12),
+                "recurring_decisions" => extend_unique(&mut recurring_decisions, lines.clone(), 12),
                 _ => {}
             }
+            collect_commissioning_brief_signals(&lines, &mut preferred_tools, &mut risk_tolerances);
         }
 
         // Top-3 patterns for Scout: rhythms first, then decisions
@@ -11881,8 +11927,8 @@ Return JSON only.",
             operating_rhythms,
             recurring_decisions,
             top_patterns,
-            preferred_tools: Vec::new(),
-            risk_tolerances: Vec::new(),
+            preferred_tools,
+            risk_tolerances,
         };
 
         // Persist to export root
@@ -11892,7 +11938,17 @@ Return JSON only.",
         tokio::fs::create_dir_all(&export_root).await?;
         let brief_path = export_root.join("commissioning-brief.json");
         let json = serde_json::to_string_pretty(&brief)?;
-        tokio::fs::write(&brief_path, json).await?;
+        tokio::fs::write(&brief_path, &json).await?;
+        let _ = self
+            .operator_models
+            .record_export(
+                profile_id,
+                version,
+                "commissioning-brief.json",
+                &json,
+                "application/json",
+            )
+            .await?;
 
         Ok(brief)
     }
@@ -18428,9 +18484,7 @@ fn normalize_annotation_review_status(status: &str) -> Result<&'static str> {
 
 fn normalize_memory_update_review_status(status: &str) -> Result<&'static str> {
     match status.trim().to_ascii_lowercase().as_str() {
-        "confirm" | "confirmed" | "approve" | "approved" | "accept" | "accepted" => {
-            Ok("confirmed")
-        }
+        "confirm" | "confirmed" | "approve" | "approved" | "accept" | "accepted" => Ok("confirmed"),
         "reject" | "rejected" | "dismiss" | "dismissed" => Ok("rejected"),
         other => bail!("unsupported memory update review status '{}'", other),
     }
@@ -20619,6 +20673,24 @@ fn classify_failure_kind(results: &[ScenarioResult]) -> Option<crate::models::Fa
     if failing.is_empty() {
         return None;
     }
+
+    let failure_texts = failing
+        .iter()
+        .map(|result| result.details.to_ascii_lowercase())
+        .collect::<Vec<_>>();
+
+    // Timeout is behavioral rather than language/toolchain specific, so detect
+    // it before scenario-id based compile/test buckets.
+    let is_timeout = failure_texts.iter().any(|details| {
+        details.contains("timed out")
+            || details.contains("timeout")
+            || details.contains("time limit exceeded")
+            || details.contains("terminated_by_signal")
+    });
+    if is_timeout {
+        return Some(FailureKind::Timeout);
+    }
+
     // Compile / build failures: cargo_check, cargo_build, npm_build, etc.
     let is_compile = failing.iter().any(|r| {
         matches!(
@@ -20631,38 +20703,51 @@ fn classify_failure_kind(results: &[ScenarioResult]) -> Option<crate::models::Fa
                 | "node_bootstrap"
                 | "python_compile"
         )
+    }) || failure_texts.iter().any(|details| {
+        details.contains("could not compile")
+            || details.contains("compilation failed")
+            || details.contains("compile error")
+            || details.contains("syntaxerror")
+            || details.contains("type error")
+            || details.contains("borrow checker")
     });
     if is_compile {
         return Some(FailureKind::CompileError);
     }
+
     // Wrong-answer: test ran but output didn't match expected
-    // Detected by "expected" / "got" / "assert" patterns in details.
-    let is_wrong_answer = failing.iter().any(|r| {
-        let d = r.details.to_lowercase();
-        (d.contains("expected") && d.contains("got"))
-            || d.contains("assertion failed")
-            || d.contains("assertionerror")
-            || d.contains("expected:")
-            || d.contains("left:")
-            || d.contains("wrong answer")
+    // Detected by common assertion and expected/actual diff patterns.
+    let is_wrong_answer = failure_texts.iter().any(|details| {
+        (details.contains("expected")
+            && (details.contains("got")
+                || details.contains("actual")
+                || details.contains("found")
+                || details.contains("received")))
+            || details.contains("assertion failed")
+            || details.contains("assertionerror")
+            || details.contains("assert_eq")
+            || details.contains("expected:")
+            || details.contains("actual:")
+            || (details.contains("left:") && details.contains("right:"))
+            || details.contains("wrong answer")
+            || details.contains("mismatch")
     });
     if is_wrong_answer {
         return Some(FailureKind::WrongAnswer);
     }
-    // Timeout
-    let is_timeout = failing.iter().any(|r| {
-        let d = r.details.to_lowercase();
-        d.contains("timed out") || d.contains("timeout") || d.contains("time limit exceeded")
-    });
-    if is_timeout {
-        return Some(FailureKind::Timeout);
-    }
+
     // Real test run (not compile) — generic TestFailure
     let is_test = failing.iter().any(|r| {
         matches!(
             r.scenario_id.as_str(),
             "cargo_test" | "npm_test" | "pnpm_test" | "yarn_test" | "go_test" | "python_tests"
         ) || r.scenario_id.starts_with("test_command_")
+    }) || failure_texts.iter().any(|details| {
+        details.contains("[failed]")
+            || details.contains("test failed")
+            || details.contains("tests failed")
+            || details.contains("failed tests")
+            || details.contains("failures:")
     });
     if is_test {
         return Some(FailureKind::TestFailure);
@@ -22176,6 +22261,63 @@ fn next_interview_layer(current: &str) -> Option<&'static str> {
     }
 }
 
+fn operator_model_checkpoint_lines(summary_md: &str) -> Vec<String> {
+    summary_md
+        .lines()
+        .map(|line| {
+            line.trim()
+                .trim_start_matches("- ")
+                .trim_start_matches("* ")
+                .trim()
+                .to_string()
+        })
+        .filter(|line| {
+            !line.is_empty()
+                && !line.starts_with('#')
+                && !line.eq_ignore_ascii_case("no durable facts recorded")
+        })
+        .collect()
+}
+
+fn collect_commissioning_brief_signals(
+    lines: &[String],
+    preferred_tools: &mut Vec<String>,
+    risk_tolerances: &mut Vec<String>,
+) {
+    for line in lines {
+        let lower = line.to_ascii_lowercase();
+        if [
+            "tool", "prefer", "use ", "uses ", "aws", "cloud", "github", "slack", "mcp",
+            "database", "local", "terminal",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(preferred_tools, line.clone(), 8);
+        }
+        if [
+            "risk",
+            "toler",
+            "avoid",
+            "never",
+            "must",
+            "approval",
+            "approve",
+            "escalat",
+            "boundary",
+            "guardrail",
+            "do not",
+            "don't",
+            "rollback",
+        ]
+        .iter()
+        .any(|needle| lower.contains(needle))
+        {
+            push_unique_limited(risk_tolerances, line.clone(), 8);
+        }
+    }
+}
+
 fn build_operator_model_transcript_excerpt(
     messages: &[crate::chat::ChatMessage],
     max_lines: usize,
@@ -22334,6 +22476,12 @@ fn apply_operator_model_preflight_guidance(
         required_checks.push(format!(
             "Operator dependency to confirm before execution — {dependency}"
         ));
+    }
+    for tool in context.preferred_tools.iter().take(3) {
+        recommended_guardrails.push(format!("Operator preferred tool posture — {tool}"));
+    }
+    for tolerance in context.risk_tolerances.iter().take(3) {
+        required_checks.push(format!("Operator risk tolerance — {tolerance}"));
     }
     for question in context.open_questions.iter().take(3) {
         open_questions.push(format!("Operator-model follow-up — {question}"));
@@ -23418,6 +23566,112 @@ mod tests {
         let (classification, _) =
             command_outcome_classification("claude --project-context", &outcome);
         assert_eq!(classification, "usage_error");
+    }
+
+    #[test]
+    fn validation_summary_classifies_wrong_answer_diff() {
+        let summary = build_validation_summary(vec![ScenarioResult {
+            scenario_id: "test_command_1".to_string(),
+            passed: false,
+            details: "Command failed (runtime_failure): expected: 42 actual: 41".to_string(),
+        }]);
+
+        assert_eq!(
+            summary.failure_kind,
+            Some(crate::models::FailureKind::WrongAnswer)
+        );
+        assert!(has_real_test_failure(&summary));
+        assert!(format_validation_failure_output(&summary).contains("[FAILED] test_command_1"));
+    }
+
+    #[test]
+    fn validation_summary_classifies_compile_error_from_output() {
+        let summary = build_validation_summary(vec![ScenarioResult {
+            scenario_id: "test_command_1".to_string(),
+            passed: false,
+            details: "SyntaxError: invalid syntax while importing module".to_string(),
+        }]);
+
+        assert_eq!(
+            summary.failure_kind,
+            Some(crate::models::FailureKind::CompileError)
+        );
+    }
+
+    #[test]
+    fn validation_summary_classifies_timeout_before_test_failure() {
+        let summary = build_validation_summary(vec![ScenarioResult {
+            scenario_id: "cargo_test".to_string(),
+            passed: false,
+            details: "Command terminated_by_signal after timeout".to_string(),
+        }]);
+
+        assert_eq!(
+            summary.failure_kind,
+            Some(crate::models::FailureKind::Timeout)
+        );
+    }
+
+    #[test]
+    fn validation_summary_classifies_generic_test_failure() {
+        let summary = build_validation_summary(vec![ScenarioResult {
+            scenario_id: "cargo_test".to_string(),
+            passed: false,
+            details: "test failed: process exited with status 1".to_string(),
+        }]);
+
+        assert_eq!(
+            summary.failure_kind,
+            Some(crate::models::FailureKind::TestFailure)
+        );
+    }
+
+    #[test]
+    fn commissioning_brief_signal_collection_extracts_tools_and_risk() {
+        let lines = vec![
+            "Prefer AWS for deployment tooling when the department already owns it.".to_string(),
+            "Do not move regulated data to cloud services without approval.".to_string(),
+            "Weekly release reviews happen every Friday morning.".to_string(),
+        ];
+        let mut preferred_tools = Vec::new();
+        let mut risk_tolerances = Vec::new();
+
+        collect_commissioning_brief_signals(&lines, &mut preferred_tools, &mut risk_tolerances);
+
+        assert!(preferred_tools
+            .iter()
+            .any(|item| item.contains("Prefer AWS")));
+        assert!(risk_tolerances
+            .iter()
+            .any(|item| item.contains("regulated data")));
+    }
+
+    #[test]
+    fn operator_model_preflight_uses_preferred_tools_and_risk_tolerances() {
+        let context = OperatorModelContext {
+            display_name: "sample repo".to_string(),
+            summary: "Operator prefers narrow reviewed changes.".to_string(),
+            preferred_tools: vec!["Use GitHub issues as the work queue.".to_string()],
+            risk_tolerances: vec![
+                "Escalate before replacing department-owned software.".to_string()
+            ],
+            ..OperatorModelContext::default()
+        };
+        let mut required_checks = Vec::new();
+        let mut guardrails = Vec::new();
+        let mut open_questions = Vec::new();
+
+        apply_operator_model_preflight_guidance(
+            &context,
+            &mut required_checks,
+            &mut guardrails,
+            &mut open_questions,
+        );
+
+        assert!(guardrails.iter().any(|item| item.contains("GitHub issues")));
+        assert!(required_checks
+            .iter()
+            .any(|item| item.contains("replacing department-owned software")));
     }
 
     #[test]

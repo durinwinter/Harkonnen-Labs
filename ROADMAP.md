@@ -123,16 +123,18 @@ Benchmark wiring advances in lockstep with implementation phases. Each phase shi
 
 ### v1-C — FailureKind Classification
 
-**Why:** Mason's fix loop handles all failures identically. A wrong-answer failure (test ran, output was wrong) requires a different fix prompt than a compile error (code never ran).
+**Why:** Mason's fix loop should not handle all failures identically. A wrong-answer failure (test ran, output was wrong) requires a different fix prompt than a compile error (code never ran).
 
-**What to build:**
+**Shipped on the current path:**
 
 - `FailureKind` enum in `src/models.rs`: `CompileError`, `TestFailure`, `WrongAnswer`, `Timeout`, `Unknown`
-- Parser in the fix loop that classifies stdout/stderr: detect "expected … got …", "FAILED", "assertion failed", exit code patterns
-- `WrongAnswer` variant triggers a distinct Mason prompt that includes the expected vs actual diff rather than the raw compiler error
-- `failure_kind` field on `ValidationSummary` so Coobie can pattern-match on failure type in its causal records
+- Validation summary construction classifies stdout/stderr-style details from visible checks, including compile/build errors, generic test failures, wrong-answer diffs, and timeouts.
+- `WrongAnswer` triggers a distinct Mason validation-fix prompt that asks Mason to study the expected/actual diff and fix implementation logic without modifying tests.
+- `failure_kind` is persisted on `ValidationSummary`, included in validation summaries, and recalculated after validation harness mutations so Coobie can pattern-match on failure type in causal records.
 
 **Done when:** A run with a wrong-answer test failure shows `failure_kind: WrongAnswer` in the run summary and Mason's fix attempt uses the diff-focused prompt.
+
+**Status:** Shipped and covered by focused classifier tests. Keep broader benchmark expansion deferred until the narrow full-system pass is complete.
 
 ---
 
@@ -140,15 +142,17 @@ Benchmark wiring advances in lockstep with implementation phases. Each phase shi
 
 **Why:** Scout's intent generation and Coobie's preflight have no connection to operator context. Without this, every new spec starts from scratch regardless of how well Coobie knows the operator's patterns.
 
-**What to build (two-layer MVP, not the full five-layer spec):**
+**Shipped on the current path (two-layer MVP, not the full five-layer spec):**
 
 - PackChat `interview` command: initiates a two-layer intake (operating rhythms + recurring decisions) with checkpoint approval after each layer
 - `commissioning-brief.json` artifact generated from the approved layers: contains operator's primary work patterns, preferred tools, recurring decisions, and risk tolerances
 - Scout draft integration: when a `commissioning-brief.json` exists for the operator, Scout includes its top-3 patterns in the intent package prompt
 - Coobie preflight integration: operator's stated risk tolerances contribute to `required_checks` and guardrail text
-- Update the `operator_model_sessions` and `operator_model_layer_checkpoints` tables (schema exists; no logic is wired)
+- `operator_model_sessions`, `operator_model_layer_checkpoints`, and `operator_model_exports` are now exercised by the approval/export path; completed sessions stamp the project under `.harkonnen/operator-model/`
 
 **Done when:** An operator who has completed the two-layer interview sees their stated patterns reflected in Scout's intent packages and Coobie's required checks on subsequent runs.
+
+**Status:** MVP shipped and hardened. The Pack Board operator-model flow can now approve the active layer, advance the session, generate the commissioning brief, persist export metadata, and surface preferred-tool / risk-tolerance signals into Coobie preflight. Full five-layer interview and post-run update review remain in the parallel Operator Model product track.
 
 ---
 
@@ -290,6 +294,44 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 - `causal attribution accuracy` first run published — top-1 / top-3 vs semantic-only baseline
 
 **Done when:** The corpus has at least 30 labeled entries, the causal attribution accuracy benchmark has a published run, and E-CARE has a published score.
+
+---
+
+## Phase 8 Design Prerequisites
+
+**Resolve these before implementation begins.** These gaps were identified in a soul-of-ai audit (2026-04-22) as missing or under-specified relative to what Phase 8 requires. None are code work; resolving them means specifying them in MASTER_SPEC Part 5 or equivalent design documents before the build phase opens.
+
+### P8-P1 — Behavioral contract structure per agent
+
+Chapter 09 of the-soul-of-ai defines `C = (P, I, G, R)` — preconditions, invariants, governance policies, recovery mechanisms — as the formal behavioral contract per agent. D* and SSA both presuppose this structure. Specify how `BehavioralContract` is represented (likely a struct in `src/models.rs`) and what the `R` (recovery mechanism) set looks like for each Labrador role before wiring the metrics.
+
+### P8-P2 — Three-timescale integration architecture
+
+Chapter 08 of the-soul-of-ai distinguishes three architecturally distinct loops: fast (per experience: belief/disposition updates), medium (per reflection cycle: schema revision, cross-episode pattern integration operating on compressed representations), slow (per meta-reflection with human endorsement: integration policy revision). Phase 8 covers the slow loop explicitly. The **medium loop** — how compressed cross-episode patterns are created, stored, and fed into schema revision — needs explicit specification before the Calvin Archive schema is finalized. Schema revision must be structurally distinct from ordinary belief revision.
+
+### P8-P3 — Pathos propagation mechanism
+
+The Pathos chamber is not a passive store. It is a weighting layer that determines how far an experience propagates through the other chambers. High-Pathos events reach Ethos; low-Pathos events inform priors without dominating. Without this propagation mechanism, the six chambers are six separate stores rather than stages in a pipeline. Specify the Pathos score computation and the threshold logic that gates propagation to Ethos before the TypeDB schema is written.
+
+### P8-P4 — F (Variational Free Energy) approximation decision
+
+The-soul-of-ai/09 explicitly flags `symthaea-fep` as a non-existent aspirational crate and calls F "computed on-demand." Before Phase 8 opens, decide: (a) build a tractable approximation (e.g., KL divergence between agent's recent action priors and the Labrador baseline embedding as a proxy), (b) defer F as aspirational-only and remove it from the Phase 8 "done when" criteria, or (c) scope a minimal Active Inference runtime. The current Phase 8 benchmark gate does not mention F — if it stays out-of-scope, remove it from the metrics implementation list to avoid confusion.
+
+### P8-P5 — Φ (Integrated Information) approximation strategy
+
+Chapter 09 flags exact Φ as NP-hard and says any real implementation requires approximations. Phase 8 lists "Φ post-learning drop detection wired" as a milestone but gives no path. Before Phase 8 opens, specify the approximation method (e.g., small-graph bipartition over the Calvin Archive causal subgraph for a given update, with a configurable node limit) and what constitutes a "drop" that triggers quarantine.
+
+### P8-P6 — Pending evidence bounty mechanism
+
+Chapter 08 requires each quarantined item to carry a "pending evidence bounty" — specific future observations that would resolve the quarantine — with salience decay and resurrection triggers. The quarantine ledger in Phase 8 mentions "pending evidence conditions" but does not specify how conditions are expressed, how incoming experience is matched against them, or what triggers re-evaluation. This needs a schema-level decision before the TypeDB quarantine entity is defined.
+
+### P8-P7 — Integration policy as versioned artifact
+
+Chapter 08's slow loop revises the *policies* about what earns quarantine, what thresholds trigger escalation, and what counts as coherent change. These policies must exist as explicit, versioned artifacts distinct from memory entries. Specify how integration policies are stored (separate TypeDB entity type? a `integration_policies` SQLite table?), versioned, and attached to the slow-loop human endorsement flow before Phase 8 implementation begins.
+
+### P8-P8 — `soul.json` manifest schema
+
+The soul package includes `soul.json` as a manifest with version, integrity hashes, compatibility thresholds, and package wiring. Phase 8 generates this from canonical continuity state, but the schema for `soul.json` is not specified anywhere. Define the fields before the projection logic is written.
 
 ---
 
@@ -460,7 +502,7 @@ New builtin benchmark module — Harkonnen-native, no external dataset.
 
 **Unlocks:** Better commissioning, fewer mid-run clarification failures, and a reusable operator context layer that Scout, Coobie, and Keeper can all consume.
 
-**Current state:** DB schema is complete (`operator_model_profiles`, `operator_model_sessions`, `operator_model_layer_checkpoints`, `operator_model_entries`, `operator_model_exports`, `operator_model_update_candidates` tables all exist). No interview logic, no layer progression, no artifact generation, no Scout/Coobie integration is wired. Phase v1-D ships the two-layer MVP. The full five-layer spec follows.
+**Current state:** DB schema is complete (`operator_model_profiles`, `operator_model_sessions`, `operator_model_layer_checkpoints`, `operator_model_entries`, `operator_model_exports`, `operator_model_update_candidates` tables all exist). Phase v1-D shipped the two-layer MVP: project-first session creation, PackChat operator-model threads, layer approval, `commissioning-brief.json` generation, export metadata, and Scout/Coobie consumption. The full five-layer spec follows.
 
 **Full five-layer spec (post-v1):**
 

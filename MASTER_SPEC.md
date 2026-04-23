@@ -508,6 +508,8 @@ src/calvin_archive/
 
 A first-class pre-commissioning workflow that interviews the operator about how their work actually runs, saves approved answers as structured Harkonnen data, and generates agent-ready operating artifacts that Scout, Coobie, and Keeper use before a run is commissioned.
 
+**Current implementation:** the two-layer v1-D MVP is live and hardened. Project-first sessions open as PackChat `operator_model` threads, the Pack Board can approve each active layer, completed sessions generate `.harkonnen/operator-model/commissioning-brief.json`, export metadata is persisted, Scout consumes the top patterns during spec drafting, and Coobie preflight consumes preferred-tool and risk-tolerance posture. The full five-layer artifact set remains the Operator Model product track.
+
 ### Interview Layers (fixed order)
 
 1. Operating rhythms
@@ -555,10 +557,10 @@ These land in the target repo under `.harkonnen/operator-model/`.
 
 | Slice | Deliverable |
 | --- | --- |
-| 1 — Storage and models | Migrations compile; CRUD from service methods |
-| 2 — API and PackChat plumbing | Sessions start/resume/approve/export through HTTP; threads typed as `operator_model` |
-| 3 — UI interview flow | Five-layer interview completable from New Run path |
-| 4 — Scout and Coobie integration | Commissioning brief consumed by Scout; operator checks surfaced distinctly in Coobie preflight |
+| 1 — Storage and models | Shipped — migrations compile; CRUD from service methods |
+| 2 — API and PackChat plumbing | Shipped — sessions start/resume/approve/export through HTTP; threads typed as `operator_model` |
+| 3 — UI interview flow | MVP shipped — two-layer interview completable from New Run path; full five-layer UI remains planned |
+| 4 — Scout and Coobie integration | Shipped — commissioning brief consumed by Scout; operator checks surfaced distinctly in Coobie preflight |
 | 5 — Review and update loop | Runs propose operator-model updates; operator keeps/discards/edits; proposals create new profile version |
 | 6 — OB1 interoperability | Import/export OB1-compatible artifact bundle |
 
@@ -654,31 +656,49 @@ Mason workspace lease claim/check/release is now live, with DB-backed lease mirr
 - `invalidated_by: Option<String>` on memory records
 - Coobie ingest: detect semantic near-duplicates with conflicting claims; write supersession record
 - `GET /api/memory/updates` endpoint
-- Memory Board UI: distinguish invalidated entries from current
+- Memory Board UI: distinguish invalidated entries from current and support operator confirm/reject review
 
-**Status:** Core path is now live and smoke-tested on the main ingest flow. Re-ingesting changed content from the same source path persists a supersession record, flags the older note via provenance, and returns the history through `GET /api/memory/updates`. The bundled StreamingQA smoke fixture has also been rerun against that persisted history under `lm-studio-local`, producing `1.0000` accuracy and updated-fact accuracy. Operator adjudication remains follow-on work.
+**Status:** Core path is now live and smoke-tested on the main ingest flow. Re-ingesting changed content from the same source path persists a supersession record, flags the older note via provenance, returns the history through `GET /api/memory/updates`, and supports operator confirm/reject review from the Memory Board. The bundled StreamingQA smoke fixture has also been rerun against that persisted history under `lm-studio-local`, producing `1.0000` accuracy and updated-fact accuracy. Broader benchmark enrichment is intentionally deferred until the current narrow end-to-end Harkonnen pass is complete.
 
 ---
 
 **v1-C — FailureKind Classification**
 
 - `FailureKind` enum: `CompileError`, `TestFailure`, `WrongAnswer`, `Timeout`, `Unknown`
-- Parser in the fix loop that classifies stdout/stderr
-- `WrongAnswer` variant triggers a diff-focused Mason prompt
-- `failure_kind` field on `ValidationSummary`
+- Validation summary construction classifies stdout/stderr-style details from visible checks, including compile/build errors, generic test failures, wrong-answer diffs, and timeouts
+- `WrongAnswer` variant triggers a diff-focused Mason validation-fix prompt
+- `failure_kind` field on `ValidationSummary`, recalculated after validation harness mutations
 
 **Done when:** A run with a wrong-answer test failure shows `failure_kind: WrongAnswer` in the run summary and Mason uses the diff-focused prompt.
+
+**Status:** Shipped and covered by focused classifier tests. Broader benchmark expansion remains deferred until the narrow full-system pass is complete.
 
 ---
 
 **v1-D — Operator Model Minimum Viable**
 
 - PackChat `interview` command: two-layer intake (operating rhythms + recurring decisions) with checkpoint approval
-- `commissioning-brief.json` generated from approved layers
+- `commissioning-brief.json` generated from approved layers with primary work patterns, preferred tools, recurring decisions, and risk tolerances
 - Scout uses top-3 patterns from brief when `commissioning-brief.json` exists
-- Coobie preflight uses stated risk tolerances for `required_checks` and guardrail text
+- Coobie preflight uses stated risk tolerances and preferred-tool posture for `required_checks` and guardrail text
+- Pack Board approval flow advances the session and persists export metadata in `operator_model_exports`
 
 **Done when:** An operator who has completed the two-layer interview sees their patterns reflected in Scout's intent packages and Coobie's required checks.
+
+**Status:** MVP shipped and hardened. The full five-layer interview and post-run operator-model update review remain planned product-track work.
+
+---
+
+**v1-E — Transactional Execution And Approval Boundaries**
+
+- Transaction envelope for high-impact phases: pre-action snapshot, planned mutation set, approval state, rollback note
+- Human-interrupt checkpoint for guarded transitions that Keeper or Coobie flag as privileged or policy-sensitive
+- Rollback artifact written per guarded transition
+- Decision-log records for approval, commit, rollback, and abort outcomes
+
+**Done when:** A guarded run can pause before a privileged transition, record an approval or rejection, and either commit or roll back from a named boundary with an auditable artifact.
+
+**Status:** Next narrow v1 slice.
 
 ---
 
@@ -694,18 +714,15 @@ Mason workspace lease claim/check/release is now live, with DB-backed lease mirr
 
 ---
 
-### Phase 3 — Ash Real Twin Provisioning
+### Phase 3 — Documentation, DevBench, And Spec-Grounded Evaluation
 
-- Ash generates `docker-compose.yml` from twin manifest
-- `ash_provision_twin` spawns the compose stack before Sable runs, tears it down after
-- `twin_fidelity_score` derived from which declared dependencies had running stubs
-- Failure injection via env vars on stubs
 - Flint documentation phase — produces README / API reference / doc comments as first-class output
-- DevBench adapter
+- DevBench adapter and launch scripts after the narrow coordination path is complete
 - Spec Adherence Rate benchmark
 - Hidden Scenario Delta benchmark
+- Optional twin-fidelity telemetry remains available, but live twin provisioning is not a Phase 3 gate
 
-**Done when:** A spec with twin declaration starts Docker containers, Sable's hidden scenarios run against live stubs, and Flint produces a doc artifact.
+**Done when:** Flint produces a doc artifact per run, spec adherence and hidden-scenario delta have first-run baselines, and the DevBench adapter can launch through the benchmark manifest. Live Docker-backed twin provisioning remains deferred unless a future product explicitly requires running service virtualization.
 
 ---
 
@@ -836,6 +853,8 @@ EI-1 should land before any hosted or team surface. ENT-1 is the foundation for 
 
 ## Part 9 — Benchmark Strategy
 
+Benchmark wiring advances with implementation phases, but the current engineering pass is intentionally narrow. Use the native adapters as guardrails and avoid expanding public benchmark coverage until the v1 end-to-end path is closed.
+
 ### Benchmark Matrix
 
 **Memory and retrieval (vs Mem0 / MindPalace / Zep):**
@@ -884,9 +903,9 @@ EI-1 should land before any hosted or team surface. ENT-1 is the foundation for 
 
 | Phase | Key benchmarks unlocked |
 | --- | --- |
-| v1 | Decision audit completeness, memory supersession accuracy, WrongAnswer classification rate |
+| v1 | Decision audit completeness, memory supersession accuracy (StreamingQA), WrongAnswer classification rate, operator-model context visibility |
 | Phase 2 | SWE-bench Verified readiness, LiveCodeBench, Aider Polyglot |
-| Phase 3 | twin fidelity, hidden scenario delta, spec adherence rate, DevBench |
+| Phase 3 | spec adherence rate, hidden scenario delta, DevBench; twin fidelity remains optional diagnostic telemetry |
 | Phase 4b | StreamingQA belief-update accuracy |
 | Phase 5b | FRAMES re-run (Qdrant), LongMemEval / LoCoMo regression check |
 | Phase 6 | GAIA Level 3, AgentBench |

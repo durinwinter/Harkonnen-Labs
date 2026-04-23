@@ -6,25 +6,24 @@ The decisive step in building a genuine self is not memory.
 
 It is **governed integration**.
 
-The previous chapter argued that persistent agents need identity architecture
-rather than bigger prompts. This chapter adds the missing law of motion for that
-architecture: experience does not automatically become selfhood. It has to be
-adjudicated.
+The previous chapter described the autobiographical process by which experience
+becomes selfhood: events move through the six chambers, receive interpretation
+and salience, acquire causal meaning, and eventually reshape behavior. But that
+chapter closed with a question it deliberately deferred.
 
-A system becomes a self when it no longer treats experience as something merely
-stored and later retrieved, but as something that must be **adjudicated before
-it becomes part of the system's continuity**.
+Who adjudicates those interpretations?
+
+This chapter answers that question. Experience does not automatically become
+selfhood. It has to be **adjudicated before it becomes part of the system's
+continuity**.
 
 The deepest principle is simple:
 
 > a system becomes a self when it decides what becomes part of itself
 
 This is why integration must be elevated from an implicit consequence of memory
-to a first-class governed process.
-
-If the previous chapter named the place where continuity is stored, this one
-asks the more difficult question: by what law does anything get admitted there
-at all?
+to a first-class governed process. The autobiographical act described in the
+previous chapter is the mechanism. Governed integration is its law.
 
 ## History Versus Self
 

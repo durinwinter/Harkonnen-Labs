@@ -155,7 +155,7 @@ cargo run -- benchmark run --all
 ./scripts/run-benchmarks.sh
 ```
 
-The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `MASTER_SPEC.md` (Part 6), and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, and LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, and CLADDER now run through native Harkonnen adapters alongside raw-LLM or direct baselines where supported. The execution roadmap in `ROADMAP.md` treats benchmark gates as phase-level exit criteria rather than optional follow-up work.
+The machine-readable suite manifest lives at `factory/benchmarks/suites.yaml`, benchmark strategy and reporting guidance live in `MASTER_SPEC.md` (Part 6), and reports are written to `factory/artifacts/benchmarks/`. The default suite is a local regression gate, and LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, and CLADDER now run through native Harkonnen adapters alongside raw-LLM or direct baselines where supported. The execution roadmap in `ROADMAP.md` treats benchmark gates as phase-level exit criteria rather than optional follow-up work, but broader benchmark expansion is intentionally paused until the current narrow end-to-end Harkonnen pass is complete.
 
 The OpenAI/Codex provider path also supports optional OpenAI-compatible BYO endpoints through a setup `base_url`, so benchmark runs can target local or third-party compatible backends without changing Rust code.
 
@@ -482,17 +482,17 @@ Spec → Agents → Validation → Artifacts → Memory → Consolidation → Be
 
 ## ⚠️ Status
 
-Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and v1 (gap closure) are shipped. Phase 2 is next.
+Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and the v1-A through v1-D coordination/continuity slices are shipped. The remaining v1 structural slice is v1-E transactional execution and approval boundaries; Phase 2 real test execution follows the narrow v1 pass.
 
 | Area | Status |
 | --- | --- |
 | Core factory pipeline (Scout → Mason → Piper → Bramble → Sable → Ash → Flint) | Live |
 | Mason fix loop with FailureKind classification (compile / test / wrong-answer / timeout) | Live |
 | Mason workspace lease enforcement — blocks competing agent writes | Live |
-| Memory invalidation persistence (`memory_updates` table, supersession tracking, Memory Board updates panel) | Live |
+| Memory invalidation persistence (`memory_updates` table, supersession tracking, Memory Board updates panel) | Live — includes operator confirm/reject review |
 | PackChat conversational control plane | Live — threads, `@mention` routing, checkpoint/unblock flow, auto-created run coordination threads |
-| Operator Model two-layer interview (operating rhythms → recurring decisions) | Live — MVP shipped (v1-D) |
-| Commissioning brief (`commissioning-brief.json`) — consumed by Scout + Coobie preflight | Live |
+| Operator Model two-layer interview (operating rhythms → recurring decisions) | Live — MVP shipped and hardened (v1-D) |
+| Commissioning brief (`commissioning-brief.json`) — consumed by Scout + Coobie preflight | Live — approval/export path persists metadata and carries preferred-tool/risk posture |
 | Coobie layered memory (episodic, semantic, causal) | Live |
 | Coobie Palace (den-based compound recall, patrol, scent) | Live |
 | Coobie causal streaks and cross-run pattern detection | Live |
@@ -507,8 +507,9 @@ Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and v1 (
 | Canonical dog runtime registry (`agent_runtime_state` + PackChat runtime roster) | Live |
 | Run decision log API (`GET /api/runs/:id/decisions`) | Live |
 | Benchmark toolchain (LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, CLADDER native adapters) | Live |
-| Bramble real test execution | Phase 2 — next |
-| Ash live twin provisioning (Docker stubs) | Phase 3 |
+| Transactional execution and approval boundaries | v1-E — next narrow slice |
+| Bramble real test execution | Phase 2 — follows v1-E |
+| Ash live twin provisioning (Docker stubs) | Deferred unless a future product explicitly requires running service virtualization |
 | Qdrant + OCR memory infrastructure | Phase 5b |
 | TypeDB 3.x semantic graph layer | Phase 6 |
 | E-CARE + causal attribution corpus | Phase 7 |
@@ -557,9 +558,10 @@ Full design: [the-soul-of-ai/06-The-Calvin-Archive.md](the-soul-of-ai/06-The-Cal
 
 Near-term:
 
+* **v1-E** — transactional execution and approval boundaries for high-impact transitions, including named rollback artifacts and auditable commit/abort decisions
 * **Phase 2** — Bramble real test execution so `validation_passed` and coverage-style signals are grounded in actual test runs
-* **Phase 3** — Ash live twin provisioning plus Flint documentation artifacts for richer hidden-scenario and DevBench evaluation
-* **Operator Model full five-layer interview** — extend the MVP (v1-D) to cover dependencies, institutional knowledge, and friction layers; generate the full artifact set (`USER.md`, `HEARTBEAT.md`, `operating-model.json`)
+* **Phase 3** — Flint documentation, spec-grounded evaluation, and DevBench readiness after the coordination path; live twin provisioning remains deferred unless a product explicitly needs it
+* **Operator Model full five-layer interview** — extend the shipped two-layer MVP (v1-D) to cover dependencies, institutional knowledge, and friction layers; generate the full artifact set (`USER.md`, `HEARTBEAT.md`, `operating-model.json`)
 
 Mid-term:
 

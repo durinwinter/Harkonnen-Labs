@@ -36,6 +36,8 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
   const [sessionLoading, setSessionLoading] = useState(false);
   const [messagesLoading, setMessagesLoading] = useState(false);
   const [sending, setSending] = useState(false);
+  const [approving, setApproving] = useState(false);
+  const [commissioningBrief, setCommissioningBrief] = useState(null);
   const [error, setError] = useState('');
   const [draft, setDraft] = useState('');
   const requestedPathRef = useRef('');
@@ -86,6 +88,7 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
       const data = await res.json();
       requestedPathRef.current = normalizedProjectPath;
       setSessionData(data);
+      setCommissioningBrief(null);
       await fetchMessages(data.thread?.thread_id, { silent: true });
     } catch (err) {
       setError(err.message || String(err));
@@ -123,12 +126,60 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
     }
   }
 
+  async function approveCurrentLayer() {
+    const sessionId = sessionData?.session?.session_id;
+    const threadId = sessionData?.thread?.thread_id;
+    if (!sessionId || !threadId || approving) return;
+    setApproving(true);
+    setError('');
+    try {
+      const res = await fetch(`${API_BASE}/operator-model/sessions/${sessionId}/approve-layer`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          layer: currentLayer,
+          thread_id: threadId,
+          approved_by: 'operator',
+        }),
+      });
+      if (!res.ok) {
+        const text = await res.text();
+        throw new Error(text || `${res.status} ${res.statusText}`);
+      }
+      const data = await res.json();
+      setSessionData(prev => prev ? {
+        ...prev,
+        session: {
+          ...prev.session,
+          status: data.session_status,
+          pending_layer: data.pending_layer,
+        },
+        thread: {
+          ...prev.thread,
+          metadata_json: {
+            ...(prev.thread?.metadata_json || {}),
+            pending_layer: data.pending_layer,
+          },
+        },
+      } : prev);
+      if (data.commissioning_brief) {
+        setCommissioningBrief(data.commissioning_brief);
+      }
+      await fetchMessages(threadId, { silent: true });
+    } catch (err) {
+      setError(err.message || String(err));
+    } finally {
+      setApproving(false);
+    }
+  }
+
   useEffect(() => {
     if (!active) return;
     if (!normalizedProjectPath) {
       requestedPathRef.current = '';
       setSessionData(null);
       setMessages([]);
+      setCommissioningBrief(null);
       return;
     }
     if (requestedPathRef.current === normalizedProjectPath && sessionData) {
@@ -137,6 +188,7 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
     requestedPathRef.current = normalizedProjectPath;
     setSessionData(null);
     setMessages([]);
+    setCommissioningBrief(null);
     startOrResumeSession({ silent: true });
   }, [active, normalizedProjectPath]);
 
@@ -159,11 +211,18 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
   const currentLayer =
     sessionData?.session?.pending_layer ||
     sessionData?.thread?.metadata_json?.pending_layer ||
-    'operating_rhythms';
+    (sessionData?.session?.status === 'completed' ? 'complete' : 'operating_rhythms');
   const primaryCards = getActionCards(OPERATOR_MODEL_CARD_GROUPS.primary);
   const supportCards = getActionCards(OPERATOR_MODEL_CARD_GROUPS.support);
   const supervisorFallbackCards = getActionCards(OPERATOR_MODEL_CARD_GROUPS.supervisorFallback);
   const incomingCards = getActionCards(OPERATOR_MODEL_CARD_GROUPS.incoming);
+  const sessionStatus = sessionData?.session?.status || 'not_started';
+  const canApproveLayer = Boolean(
+    sessionData?.session?.session_id &&
+    sessionData?.thread?.thread_id &&
+    sessionStatus !== 'completed' &&
+    currentLayer
+  );
 
   return (
     <div className="omf-shell">
@@ -241,9 +300,42 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
           <div className="omf-meta-grid">
             <div className="omf-chip"><strong>Profile</strong><span>{displayName}</span></div>
             <div className="omf-chip"><strong>Layer</strong><span>{currentLayer}</span></div>
+            <div className="omf-chip"><strong>Status</strong><span>{sessionStatus}</span></div>
             <div className="omf-chip"><strong>Scope</strong><span>{sessionData?.profile?.scope || 'project'}</span></div>
             <div className="omf-chip omf-chip-wide"><strong>Export root</strong><span>{sessionData?.export_root || 'Waiting for session...'}</span></div>
           </div>
+
+          <div className="omf-approval-card">
+            <div>
+              <div className="omf-approval-title">
+                {sessionStatus === 'completed' ? 'Commissioning brief ready' : `Approve ${currentLayer}`}
+              </div>
+              <div className="omf-approval-copy">
+                {sessionStatus === 'completed'
+                  ? 'Both MVP layers are approved. Scout and Coobie can now load commissioning-brief.json for this repo.'
+                  : 'When the current answers capture durable operator posture, approve this layer. Coobie will advance to the next layer or generate the commissioning brief.'}
+              </div>
+            </div>
+            <button
+              className="omf-btn primary"
+              type="button"
+              onClick={approveCurrentLayer}
+              disabled={!canApproveLayer || approving}
+            >
+              {approving ? 'Approving...' : sessionStatus === 'completed' ? 'Approved' : 'Approve Layer'}
+            </button>
+          </div>
+
+          {commissioningBrief && (
+            <div className="omf-brief-card">
+              <div className="omf-approval-title">Generated commissioning brief</div>
+              <div className="omf-brief-list">
+                {(commissioningBrief.top_patterns || []).slice(0, 3).map(pattern => (
+                  <span key={pattern}>{pattern}</span>
+                ))}
+              </div>
+            </div>
+          )}
 
           {error && <div className="omf-error">{error}</div>}
 
@@ -462,6 +554,49 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
         .omf-chip-wide {
           grid-column: 1 / -1;
         }
+        .omf-approval-card,
+        .omf-brief-card {
+          display: flex;
+          align-items: center;
+          justify-content: space-between;
+          gap: 0.85rem;
+          padding: 0.8rem 0.9rem;
+          border-radius: 14px;
+          border: 1px solid rgba(194, 163, 114, 0.22);
+          background: rgba(194, 163, 114, 0.08);
+        }
+        .omf-brief-card {
+          align-items: flex-start;
+          flex-direction: column;
+          border-color: rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.04);
+        }
+        .omf-approval-title {
+          font-size: 0.82rem;
+          font-weight: 800;
+          letter-spacing: 0.08em;
+          text-transform: uppercase;
+          color: var(--accent-gold, #c2a372);
+        }
+        .omf-approval-copy {
+          margin-top: 0.28rem;
+          color: rgba(255, 255, 255, 0.74);
+          font-size: 0.82rem;
+          line-height: 1.5;
+        }
+        .omf-brief-list {
+          display: flex;
+          flex-wrap: wrap;
+          gap: 0.45rem;
+        }
+        .omf-brief-list span {
+          border-radius: 999px;
+          padding: 0.38rem 0.58rem;
+          border: 1px solid rgba(255, 255, 255, 0.1);
+          background: rgba(255, 255, 255, 0.05);
+          color: rgba(255, 255, 255, 0.84);
+          font-size: 0.76rem;
+        }
         .omf-transcript {
           display: flex;
           flex-direction: column;
@@ -575,7 +710,8 @@ export default function OperatorModelFlow({ active, projectPath, product }) {
             grid-template-columns: 1fr;
           }
           .omf-compose-actions,
-          .omf-header {
+          .omf-header,
+          .omf-approval-card {
             flex-direction: column;
             align-items: stretch;
           }

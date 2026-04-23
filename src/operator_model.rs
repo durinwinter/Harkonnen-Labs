@@ -390,7 +390,7 @@ impl OperatorModelStore {
             None => ("completed", None),
         };
         sqlx::query(
-            "UPDATE operator_model_sessions SET status = ?1, pending_layer = ?2, updated_at = ?3 WHERE session_id = ?4",
+            "UPDATE operator_model_sessions SET status = ?1, pending_layer = ?2, updated_at = ?3, completed_at = CASE WHEN ?1 = 'completed' THEN ?3 ELSE completed_at END WHERE session_id = ?4",
         )
         .bind(new_status)
         .bind(new_layer)
@@ -413,6 +413,57 @@ impl OperatorModelStore {
             approved_at: Some(DateTime::parse_from_rfc3339(&now)?.with_timezone(&Utc)),
         };
         Ok(checkpoint)
+    }
+
+    pub async fn record_export(
+        &self,
+        profile_id: &str,
+        version: i64,
+        artifact_name: &str,
+        content: &str,
+        content_type: &str,
+    ) -> Result<OperatorModelExport> {
+        let export_id = Uuid::new_v4().to_string();
+        let now = Utc::now();
+
+        sqlx::query(
+            r#"
+            INSERT INTO operator_model_exports
+                (export_id, profile_id, version, artifact_name, content, content_type, created_at)
+            VALUES
+                (?1, ?2, ?3, ?4, ?5, ?6, ?7)
+            "#,
+        )
+        .bind(&export_id)
+        .bind(profile_id)
+        .bind(version)
+        .bind(artifact_name)
+        .bind(content)
+        .bind(content_type)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .context("insert operator_model_export")?;
+
+        sqlx::query(
+            "UPDATE operator_model_profiles SET current_version = MAX(current_version, ?2), updated_at = ?3 WHERE profile_id = ?1",
+        )
+        .bind(profile_id)
+        .bind(version)
+        .bind(now.to_rfc3339())
+        .execute(&self.pool)
+        .await
+        .context("update operator_model_profile export version")?;
+
+        Ok(OperatorModelExport {
+            export_id,
+            profile_id: profile_id.to_string(),
+            version,
+            artifact_name: artifact_name.to_string(),
+            content: content.to_string(),
+            content_type: content_type.to_string(),
+            created_at: now,
+        })
     }
 
     /// Return all approved checkpoints for a profile, ordered by version.

@@ -773,10 +773,7 @@ async fn ingest_available_documents(
                     old_memory_id,
                     &memory_id,
                     memory_root,
-                    &format!(
-                        "StreamingQA document {} supersedes {}",
-                        document.id, old_id
-                    ),
+                    &format!("StreamingQA document {} supersedes {}", document.id, old_id),
                 )
                 .await?;
             }
@@ -1858,7 +1855,9 @@ mod tests {
                 supersedes: vec!["doc-1".to_string()],
             },
         );
-        assert!(question_requires_supersession_history(&question, &documents));
+        assert!(question_requires_supersession_history(
+            &question, &documents
+        ));
     }
 
     #[test]

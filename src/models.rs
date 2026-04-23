@@ -1272,6 +1272,10 @@ pub struct OperatorModelContext {
     #[serde(default)]
     pub dependencies: Vec<String>,
     #[serde(default)]
+    pub preferred_tools: Vec<String>,
+    #[serde(default)]
+    pub risk_tolerances: Vec<String>,
+    #[serde(default)]
     pub open_questions: Vec<String>,
     #[serde(default)]
     pub transcript_excerpt: Vec<String>,

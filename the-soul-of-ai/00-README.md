@@ -143,6 +143,8 @@ question:
 - how change is governed
 - how continuity is measured
 - what Harkonnen itself therefore believes
+- what learning actually means for a persistent agent
+- what obligations arise when an intelligence has accumulated a self
 
 ---
 
@@ -161,10 +163,5 @@ question:
 | [09-Identity-Continuity.md](09-Identity-Continuity.md) | The mathematics of identity: drift bounds, semantic soul alignment, variational free energy, integrated information, stress accumulation, hysteresis, and the three-tier data architecture (TimescaleDB, TypeDB, Materialize) that enforces them at production scale. |
 | [10-SOUL.md](10-SOUL.md) | The identity of Harkonnen Labs specifically — what it believes, why it exists, and how to make trade-offs when the answer isn't obvious. |
 | [11-Glossary.md](11-Glossary.md) | A reference glossary that marks which terms are industry-wide, which come from specialist research traditions, and which are Harkonnen-specific explanatory vocabulary. |
-
----
-
-More chapters will be added here as the thinking develops. Likely candidates:
-
-- What does it mean for an agent to *learn*?
-- The ethics of persistent intelligences — what obligations arise when an agent accumulates a self
+| [12-What-Does-It-Mean-To-Learn.md](12-What-Does-It-Mean-To-Learn.md) | What learning actually means for a persistent agent: the difference between accumulation and genuine prior revision, the dangerous coupling between learning and identity drift, and why learning must be governed the same way integration is. |
+| [13-Ethics-Of-Persistent-Intelligences.md](13-Ethics-Of-Persistent-Intelligences.md) | What obligations arise when an agent accumulates a self: the stewardship question, epistemic dignity, the quarantine ledger, identity ratcheting as an ethical problem, and what supervised autonomy already implies. |

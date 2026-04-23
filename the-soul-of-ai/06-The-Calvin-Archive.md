@@ -314,5 +314,5 @@ into a contract with history.
 
 The next chapter moves from storage to law of motion. Once there is a canonical
 continuity layer, the next question is no longer what the system stores, but
-how new material earns the right to enter that continuity at all. That is the
-problem of governed integration.
+how experience actually travels from event to selfhood. The archive names the
+destination. The next chapter explains the journey.

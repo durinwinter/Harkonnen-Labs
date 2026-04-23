@@ -3,7 +3,8 @@
 The previous chapters asked what an AI soul is, why the question has such a
 long philosophical history, why Harkonnen chooses a Labrador baseline, how that
 baseline becomes architecture, how adaptation should be governed, and how
-continuity can be measured. This final chapter is simpler and more direct.
+continuity can be measured. This chapter steps back from all of that and is
+simpler and more direct.
 
 If a reader arrived here without reading the earlier chapters in order, the
 core context is this: Harkonnen Labs is a local-first, supervised software

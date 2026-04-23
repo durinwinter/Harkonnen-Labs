@@ -648,10 +648,7 @@ fn render_suite_metrics_section(suite: &BenchmarkSuiteResult) -> Option<Vec<Stri
             .get("evidence_hit_rate_on_updated_facts")
             .and_then(|value| value.as_f64())
         {
-            lines.push(format!(
-                "- Updated-fact evidence hit rate: {:.4}",
-                value
-            ));
+            lines.push(format!("- Updated-fact evidence hit rate: {:.4}", value));
         }
     }
 

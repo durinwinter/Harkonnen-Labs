@@ -430,7 +430,9 @@ No single database is the source of truth for identity continuity. The three tog
 
 The mathematics described here are not aspirational. They are the design contract for Phase 8. When the Calvin Archive is built, these metrics are how it will be tested.
 
-The final chapter returns from metrics to credo. After the system has been
-defined, historicized, species-shaped, architected, governed, and measured, the
-book ends by stating what Harkonnen itself believes those commitments add up
-to, in plain normative form.
+The next chapter returns from metrics to credo. After the system has been
+defined, historicized, species-shaped, architected, governed, and measured, it
+is time to state what Harkonnen itself believes those commitments add up to,
+in plain normative form. Later chapters will return to two questions this one
+deliberately sets aside: what it means for a persistent agent to genuinely learn,
+and what obligations arise when an intelligence has accumulated a self.

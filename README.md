@@ -482,7 +482,7 @@ Spec → Agents → Validation → Artifacts → Memory → Consolidation → Be
 
 ## ⚠️ Status
 
-Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and the v1-A through v1-D coordination/continuity slices are shipped. The v1-E transactional execution slice now includes the implementation-phase Mason edit boundary, approve/reject/revise/rollback checkpoint handling, visible-validation continuation after approved edits, rollback restore from a named backup, and privileged MCP/tool-surface approval boundaries; Phase 2 real test execution follows the narrow v1 pass.
+Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and the v1-A through v1-D coordination/continuity slices are shipped. The v1-E transactional execution slice now includes the implementation-phase Mason edit boundary, approve/reject/revise/rollback checkpoint handling, visible-validation plus hidden-scenario/artifact/causal-report continuation after approved edits, rollback restore from a named backup, privileged MCP/tool-surface approval boundaries, and invocation-level host-command gateway logging/enforcement for run-loop build and validation commands; Phase 2 real test execution follows the narrow v1 pass.
 
 | Area | Status |
 | --- | --- |
@@ -507,7 +507,7 @@ Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and the 
 | Canonical dog runtime registry (`agent_runtime_state` + PackChat runtime roster) | Live |
 | Run decision log API (`GET /api/runs/:id/decisions`) | Live |
 | Benchmark toolchain (LongMemEval, LoCoMo, FRAMES, StreamingQA, HELMET, CLADDER native adapters) | Live |
-| Transactional execution and approval boundaries | v1-E — implementation approval, validation continuation, rollback execution, and privileged tool-surface boundaries shipped |
+| Transactional execution and approval boundaries | v1-E — implementation approval, validation plus hidden/artifact continuation, rollback execution, privileged tool-surface boundaries, and invocation-level host-command gateway shipped |
 | Bramble real test execution | Phase 2 — follows v1-E |
 | Ash live twin provisioning (Docker stubs) | Deferred unless a future product explicitly requires running service virtualization |
 | Qdrant + OCR memory infrastructure | Phase 5b |
@@ -558,7 +558,7 @@ Full design: [the-soul-of-ai/06-The-Calvin-Archive.md](the-soul-of-ai/06-The-Cal
 
 Near-term:
 
-* **v1-E** — finish transactional execution by continuing hidden-scenario/artifact phases after approved implementation transactions and moving privileged tool approval from surface-level envelopes to invocation-level MCP gateway enforcement
+* **v1-E** — extend the invocation gateway from in-process host-command execution to any future proxied third-party MCP traffic Harkonnen brokers directly
 * **Phase 2** — Bramble real test execution so `validation_passed` and coverage-style signals are grounded in actual test runs
 * **Phase 3** — Flint documentation, spec-grounded evaluation, and DevBench readiness after the coordination path; live twin provisioning remains deferred unless a product explicitly needs it
 * **Operator Model full five-layer interview** — extend the shipped two-layer MVP (v1-D) to cover dependencies, institutional knowledge, and friction layers; generate the full artifact set (`USER.md`, `HEARTBEAT.md`, `operating-model.json`)

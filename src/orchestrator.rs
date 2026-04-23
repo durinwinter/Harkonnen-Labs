@@ -247,6 +247,52 @@ struct ToolSurfaceAssessment {
     reasons: Vec<String>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolInvocationArtifact {
+    run_id: String,
+    generated_at: String,
+    invocations: Vec<ToolInvocationRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ToolInvocationRecord {
+    invocation_id: String,
+    run_id: String,
+    phase: String,
+    agent: String,
+    surface_type: String,
+    tool_name: String,
+    command: String,
+    cwd: String,
+    risk: String,
+    approval_required: bool,
+    approval_state: String,
+    allowed: bool,
+    reasons: Vec<String>,
+    started_at: String,
+    #[serde(default)]
+    completed_at: Option<String>,
+    #[serde(default)]
+    success: Option<bool>,
+    #[serde(default)]
+    exit_code: Option<i32>,
+    #[serde(default)]
+    stdout_preview: Option<String>,
+    #[serde(default)]
+    stderr_preview: Option<String>,
+}
+
+#[derive(Debug, Clone)]
+struct ToolInvocationAssessment {
+    surface_type: String,
+    tool_name: String,
+    command: String,
+    cwd: String,
+    risk: String,
+    approval_required: bool,
+    reasons: Vec<String>,
+}
+
 #[derive(Debug, Clone)]
 struct DecisionTrialSnapshot {
     agent: String,
@@ -7767,86 +7813,29 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
             let mut parts = cmd_str.split_whitespace();
             let prog = parts.next().unwrap_or("sh");
             let args: Vec<&str> = parts.collect();
-
-            let mut child = tokio::process::Command::new(prog)
-                .args(&args)
-                .current_dir(staged_product)
-                .stdout(std::process::Stdio::piped())
-                .stderr(std::process::Stdio::piped())
-                .spawn()
-                .with_context(|| format!("spawning build command: {}", cmd_str))?;
-
-            let stdout = child.stdout.take().expect("stdout piped");
-            let stderr = child.stderr.take().expect("stderr piped");
-
-            let mut stdout_lines = tokio::io::BufReader::new(stdout).lines();
-            let mut stderr_lines = tokio::io::BufReader::new(stderr).lines();
-            let mut done_out = false;
-            let mut done_err = false;
-            let mut stdout_buf = String::new();
-            let mut stderr_buf = String::new();
-
-            loop {
-                tokio::select! {
-                    line = stdout_lines.next_line(), if !done_out => {
-                        match line? {
-                            Some(l) => {
-                                combined_output.push_str(&l);
-                                combined_output.push('\n');
-                                if !stdout_buf.is_empty() {
-                                    stdout_buf.push('\n');
-                                }
-                                stdout_buf.push_str(&l);
-                                let _ = self.event_tx.send(LiveEvent::BuildOutput {
-                                    run_id: run_id.to_string(),
-                                    phase: "build".to_string(),
-                                    agent: "piper".to_string(),
-                                    line: l,
-                                    stream: "stdout".to_string(),
-                                    created_at: Utc::now(),
-                                });
-                            }
-                            None => done_out = true,
-                        }
-                    }
-                    line = stderr_lines.next_line(), if !done_err => {
-                        match line? {
-                            Some(l) => {
-                                combined_output.push_str(&l);
-                                combined_output.push('\n');
-                                if !stderr_buf.is_empty() {
-                                    stderr_buf.push('\n');
-                                }
-                                stderr_buf.push_str(&l);
-                                let _ = self.event_tx.send(LiveEvent::BuildOutput {
-                                    run_id: run_id.to_string(),
-                                    phase: "build".to_string(),
-                                    agent: "piper".to_string(),
-                                    line: l,
-                                    stream: "stderr".to_string(),
-                                    created_at: Utc::now(),
-                                });
-                            }
-                            None => done_err = true,
-                        }
-                    }
-                }
-                if done_out && done_err {
-                    break;
-                }
-            }
-
-            let exit_status = child.wait().await?;
-            final_exit = exit_status.code().unwrap_or(-1);
-            let outcome = CommandOutcome {
-                success: exit_status.success(),
-                code: exit_status.code(),
-                stdout: stdout_buf.trim().to_string(),
-                stderr: stderr_buf.trim().to_string(),
-            };
+            let outcome = self
+                .run_command_capture_streaming(
+                    run_id,
+                    "build",
+                    "piper",
+                    prog,
+                    &args,
+                    staged_product,
+                )
+                .await?;
+            final_exit = outcome.code.unwrap_or(-1);
             let trial = build_command_trial_record(cmd_str, &outcome);
 
-            let verdict = if exit_status.success() {
+            if !outcome.stdout.is_empty() {
+                combined_output.push_str(&outcome.stdout);
+                combined_output.push('\n');
+            }
+            if !outcome.stderr.is_empty() {
+                combined_output.push_str(&outcome.stderr);
+                combined_output.push('\n');
+            }
+
+            let verdict = if outcome.success {
                 "complete"
             } else {
                 "failed"
@@ -7863,7 +7852,7 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
             .await?;
             command_trials.push(trial);
 
-            if !exit_status.success() {
+            if !outcome.success {
                 break; // stop on first failing command
             }
         }
@@ -8575,6 +8564,170 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         })
     }
 
+    async fn ensure_tool_invocation_allowed(
+        &self,
+        run_id: &str,
+        phase: &str,
+        agent: &str,
+        program: &str,
+        args: &[&str],
+        cwd: &Path,
+    ) -> Result<ToolInvocationRecord> {
+        let run_dir = self.run_dir(run_id);
+        let assessment = assess_tool_invocation(program, args, cwd);
+        let mut approval_state = if assessment.approval_required {
+            "approval_pending".to_string()
+        } else {
+            "auto_approved_low_risk".to_string()
+        };
+        let mut allowed = !assessment.approval_required;
+
+        if assessment.approval_required {
+            if !run_dir.join("tool_transaction.json").exists() {
+                let spec_path = run_dir.join("spec.yaml");
+                let spec_obj = if spec_path.exists() {
+                    Some(spec::load_spec(&spec_path.to_string_lossy())?)
+                } else {
+                    None
+                };
+                let briefing = self
+                    .load_run_briefing(run_id)
+                    .await?
+                    .unwrap_or_else(|| fallback_tool_gateway_briefing(run_id, spec_obj.as_ref()));
+                let spec_id = spec_obj
+                    .as_ref()
+                    .map(|spec| spec.id.clone())
+                    .unwrap_or_else(|| "unknown-spec".to_string());
+                let mut transaction = build_tool_transaction_artifact(
+                    run_id,
+                    &spec_id,
+                    &self.paths.setup,
+                    cwd,
+                    &briefing,
+                );
+                if transaction.approval_state == "operator_review_required" {
+                    transaction.checkpoint_id = Some(format!(
+                        "checkpoint-{run_id}-tool-transaction-approval-required"
+                    ));
+                    transaction.status = "paused_before_privileged_tool_use".to_string();
+                    transaction.residual_risk = format!(
+                        "Invocation gateway paused `{}` in phase `{phase}` because privileged tool/MCP surfaces require operator approval before execution.",
+                        assessment.command
+                    );
+                    self.write_tool_transaction_artifacts(&run_dir, &transaction)
+                        .await?;
+                    if let Some(mut board) = self.load_run_blackboard(run_id).await? {
+                        push_unique(&mut board.artifact_refs, "tool_transaction.json");
+                        push_unique(&mut board.artifact_refs, "tool_transaction.md");
+                        push_unique(
+                            &mut board.open_blockers,
+                            "tool_transaction_approval_required",
+                        );
+                        self.sync_blackboard(&board, Some(&run_dir)).await?;
+                    }
+                    self.materialize_run_checkpoints(run_id).await?;
+                    self.record_decision(
+                        run_id,
+                        "keeper",
+                        phase,
+                        "tool_transaction_gateway",
+                        "pause_for_operator_approval",
+                        &[
+                            "auto_approve_read_only_tools".to_string(),
+                            "reject_privileged_tool_surface".to_string(),
+                        ],
+                        &format!(
+                            "Invocation gateway intercepted `{}` before execution because privileged tool/MCP surfaces require approval.",
+                            assessment.command
+                        ),
+                    )
+                    .await;
+                } else {
+                    self.write_tool_transaction_artifacts(&run_dir, &transaction)
+                        .await?;
+                }
+            }
+
+            let transaction = self.load_tool_transaction_artifact(&run_dir).await?;
+            if matches!(
+                transaction.approval_state.as_str(),
+                "auto_approved" | "operator_approved"
+            ) || matches!(transaction.status.as_str(), "auto_approved" | "approved")
+            {
+                approval_state = transaction.approval_state.clone();
+                allowed = true;
+            } else {
+                approval_state = transaction.approval_state.clone();
+                allowed = false;
+            }
+        }
+
+        let record = ToolInvocationRecord {
+            invocation_id: Uuid::new_v4().to_string(),
+            run_id: run_id.to_string(),
+            phase: phase.to_string(),
+            agent: agent.to_string(),
+            surface_type: assessment.surface_type,
+            tool_name: assessment.tool_name,
+            command: assessment.command,
+            cwd: assessment.cwd,
+            risk: assessment.risk,
+            approval_required: assessment.approval_required,
+            approval_state: approval_state.clone(),
+            allowed,
+            reasons: assessment.reasons,
+            started_at: Utc::now().to_rfc3339(),
+            completed_at: if allowed {
+                None
+            } else {
+                Some(Utc::now().to_rfc3339())
+            },
+            success: if allowed { None } else { Some(false) },
+            exit_code: None,
+            stdout_preview: None,
+            stderr_preview: if allowed {
+                None
+            } else {
+                Some(format!(
+                    "Invocation blocked by Keeper until the tool transaction is approved ({approval_state})."
+                ))
+            },
+        };
+        self.append_tool_invocation_record(run_id, record.clone())
+            .await?;
+        if !allowed {
+            self.record_event(
+                run_id,
+                None,
+                phase,
+                "keeper",
+                "blocked",
+                &format!(
+                    "Blocked tool invocation `{}` pending tool transaction approval",
+                    record.command
+                ),
+                &self.run_log_path(run_id),
+            )
+            .await?;
+        }
+        Ok(record)
+    }
+
+    async fn finalize_tool_invocation_record(
+        &self,
+        run_id: &str,
+        invocation: &mut ToolInvocationRecord,
+        outcome: &CommandOutcome,
+    ) -> Result<()> {
+        invocation.completed_at = Some(Utc::now().to_rfc3339());
+        invocation.success = Some(outcome.success);
+        invocation.exit_code = outcome.code;
+        invocation.stdout_preview = preview_text(&outcome.stdout, 400);
+        invocation.stderr_preview = preview_text(&outcome.stderr, 400);
+        self.append_tool_invocation_record(run_id, invocation.clone())
+            .await
+    }
+
     async fn run_visible_validation(
         &self,
         run_id: &str,
@@ -9024,6 +9177,20 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         args: &[&str],
         cwd: &Path,
     ) -> Result<CommandOutcome> {
+        let mut invocation = self
+            .ensure_tool_invocation_allowed(run_id, phase, agent, program, args, cwd)
+            .await?;
+        if !invocation.allowed {
+            return Ok(CommandOutcome {
+                success: false,
+                code: None,
+                stdout: String::new(),
+                stderr: invocation.stderr_preview.clone().unwrap_or_else(|| {
+                    "Invocation blocked pending tool transaction approval.".to_string()
+                }),
+            });
+        }
+
         let mut child = Command::new(program)
             .args(args)
             .current_dir(cwd)
@@ -9088,12 +9255,15 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         }
 
         let status = child.wait().await?;
-        Ok(CommandOutcome {
+        let outcome = CommandOutcome {
             success: status.success(),
             code: status.code(),
             stdout: stdout_buf.trim().to_string(),
             stderr: stderr_buf.trim().to_string(),
-        })
+        };
+        self.finalize_tool_invocation_record(run_id, &mut invocation, &outcome)
+            .await?;
+        Ok(outcome)
     }
 
     async fn write_command_trial_report(
@@ -11202,6 +11372,38 @@ Return JSON only.",
         Ok(())
     }
 
+    async fn write_tool_invocation_artifacts(
+        &self,
+        run_dir: &Path,
+        run_id: &str,
+        records: &[ToolInvocationRecord],
+    ) -> Result<()> {
+        let artifact = ToolInvocationArtifact {
+            run_id: run_id.to_string(),
+            generated_at: Utc::now().to_rfc3339(),
+            invocations: records.to_vec(),
+        };
+        self.write_json_file(&run_dir.join("tool_invocations.json"), &artifact)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("tool_invocations.md"),
+            render_tool_invocation_markdown(&artifact),
+        )
+        .await?;
+        Ok(())
+    }
+
+    async fn load_tool_invocation_artifact(
+        &self,
+        run_dir: &Path,
+    ) -> Result<ToolInvocationArtifact> {
+        let path = run_dir.join("tool_invocations.json");
+        let raw = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("reading {}", path.display()))?;
+        serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+    }
+
     async fn load_tool_transaction_artifact(
         &self,
         run_dir: &Path,
@@ -11211,6 +11413,38 @@ Return JSON only.",
             .await
             .with_context(|| format!("reading {}", path.display()))?;
         serde_json::from_str(&raw).with_context(|| format!("parsing {}", path.display()))
+    }
+
+    async fn append_tool_invocation_record(
+        &self,
+        run_id: &str,
+        record: ToolInvocationRecord,
+    ) -> Result<()> {
+        let run_dir = self.run_dir(run_id);
+        let mut artifact = if run_dir.join("tool_invocations.json").exists() {
+            self.load_tool_invocation_artifact(&run_dir).await?
+        } else {
+            ToolInvocationArtifact {
+                run_id: run_id.to_string(),
+                generated_at: Utc::now().to_rfc3339(),
+                invocations: Vec::new(),
+            }
+        };
+        artifact
+            .invocations
+            .retain(|existing| existing.invocation_id != record.invocation_id);
+        artifact.invocations.push(record);
+        artifact
+            .invocations
+            .sort_by(|left, right| left.started_at.cmp(&right.started_at));
+        self.write_tool_invocation_artifacts(&run_dir, run_id, &artifact.invocations)
+            .await?;
+        if let Some(mut board) = self.load_run_blackboard(run_id).await? {
+            push_unique(&mut board.artifact_refs, "tool_invocations.json");
+            push_unique(&mut board.artifact_refs, "tool_invocations.md");
+            self.sync_blackboard(&board, Some(&run_dir)).await?;
+        }
+        Ok(())
     }
 
     async fn load_transaction_boundary_artifact(
@@ -11285,7 +11519,7 @@ Return JSON only.",
                 transaction.status = "approved".to_string();
                 transaction.closed_at = Some(Utc::now().to_rfc3339());
                 transaction.residual_risk =
-                    "Privileged MCP/tool surfaces were approved for this run. Re-run or resume the blocked run to use them under this approval context."
+                    "Privileged MCP/tool surfaces were approved for this run. If visible validation has already completed, Harkonnen will resume hidden scenarios and artifact packaging under this approval context."
                         .to_string();
                 transaction.rollback_note =
                     "Tool transactions are authorization boundaries; no filesystem rollback is available for mere approval. Revoke by rejecting a later checkpoint or disabling the surface in setup.".to_string();
@@ -11306,6 +11540,42 @@ Return JSON only.",
                     "Operator approved privileged MCP/tool surfaces for this run.",
                 )
                 .await;
+                let validation_ready = run_dir.join("validation.json").exists();
+                let hidden_already_written = run_dir.join("hidden_scenarios.json").exists();
+                if validation_ready && !hidden_already_written {
+                    if let Err(error) = self
+                        .resume_hidden_artifacts_after_tool_approval(run_id)
+                        .await
+                    {
+                        self.update_run_status(run_id, "tool_transaction_resume_error")
+                            .await?;
+                        self.record_decision(
+                            run_id,
+                            "keeper",
+                            "tools",
+                            "tool_transaction_resume",
+                            "resume_error",
+                            &[
+                                "retry_hidden_scenarios".to_string(),
+                                "pause_after_tool_approval".to_string(),
+                            ],
+                            &format!(
+                                "Tool transaction was approved, but hidden-scenario/artifact continuation failed: {error}"
+                            ),
+                        )
+                        .await;
+                        self.audit_checkpoint_activity(
+                            run_id,
+                            "tools",
+                            "keeper",
+                            "warning",
+                            &format!(
+                                "Tool transaction approved; continuation failed before hidden scenarios/artifacts: {error}"
+                            ),
+                        )
+                        .await?;
+                    }
+                }
             }
             TransactionCheckpointDecision::Reject => {
                 transaction.approval_state = "operator_rejected".to_string();
@@ -12011,7 +12281,579 @@ Return JSON only.",
         )
         .await;
 
+        if self
+            .ensure_tool_transaction_resume_allowed(
+                run_id,
+                run_dir,
+                spec_obj,
+                staged_product,
+                briefing,
+                &mut blackboard,
+            )
+            .await?
+        {
+            self.resume_hidden_artifacts_after_transaction(
+                run_id,
+                run_dir,
+                spec_obj,
+                target_source,
+                briefing,
+                staged_product,
+                &validation,
+            )
+            .await?;
+        }
+
         Ok(validation)
+    }
+
+    async fn ensure_tool_transaction_resume_allowed(
+        &self,
+        run_id: &str,
+        run_dir: &Path,
+        spec_obj: &Spec,
+        staged_product: &Path,
+        briefing: &CoobieBriefing,
+        blackboard: &mut BlackboardState,
+    ) -> Result<bool> {
+        let existing = if run_dir.join("tool_transaction.json").exists() {
+            Some(self.load_tool_transaction_artifact(run_dir).await?)
+        } else {
+            None
+        };
+        if let Some(transaction) = existing {
+            if matches!(
+                transaction.approval_state.as_str(),
+                "auto_approved" | "operator_approved"
+            ) || matches!(transaction.status.as_str(), "auto_approved" | "approved")
+            {
+                return Ok(true);
+            }
+            push_unique(
+                &mut blackboard.open_blockers,
+                "tool_transaction_approval_required",
+            );
+            self.sync_blackboard(blackboard, Some(run_dir)).await?;
+            self.materialize_run_checkpoints(run_id).await?;
+            return Ok(false);
+        }
+
+        let mut transaction = build_tool_transaction_artifact(
+            run_id,
+            &spec_obj.id,
+            &self.paths.setup,
+            staged_product,
+            briefing,
+        );
+        self.write_tool_transaction_artifacts(run_dir, &transaction)
+            .await?;
+        push_unique(&mut blackboard.artifact_refs, "tool_transaction.json");
+        push_unique(&mut blackboard.artifact_refs, "tool_transaction.md");
+
+        if transaction.approval_state == "operator_review_required" {
+            push_unique(
+                &mut blackboard.open_blockers,
+                "tool_transaction_approval_required",
+            );
+            self.sync_blackboard(blackboard, Some(run_dir)).await?;
+            self.materialize_run_checkpoints(run_id).await?;
+            transaction.checkpoint_id = Some(format!(
+                "checkpoint-{run_id}-tool-transaction-approval-required"
+            ));
+            transaction.status = "paused_before_privileged_tool_use".to_string();
+            transaction.residual_risk =
+                "Approved implementation transaction reached post-validation continuation, but privileged tool/MCP surfaces require operator approval before hidden scenarios and artifact work."
+                    .to_string();
+            self.write_tool_transaction_artifacts(run_dir, &transaction)
+                .await?;
+            self.update_run_status(run_id, "tool_transaction_required_after_validation")
+                .await?;
+            self.record_decision(
+                run_id,
+                "keeper",
+                "tools",
+                "tool_transaction_boundary",
+                "pause_for_operator_approval",
+                &[
+                    "auto_approve_read_only_tools".to_string(),
+                    "reject_privileged_tool_surface".to_string(),
+                ],
+                &format!(
+                    "Post-transaction continuation paused because {} privileged surface(s) require approval: {}",
+                    transaction.approval_blockers.len(),
+                    transaction.approval_blockers.join("; ")
+                ),
+            )
+            .await;
+            self.package_artifacts(run_id).await?;
+            return Ok(false);
+        }
+
+        self.record_decision(
+            run_id,
+            "keeper",
+            "tools",
+            "tool_transaction_boundary",
+            "auto_approve_read_only_tools",
+            &[
+                "pause_for_operator_approval".to_string(),
+                "reject_privileged_tool_surface".to_string(),
+            ],
+            "Post-transaction continuation found no privileged MCP/tool surfaces, so hidden scenarios and artifacts can resume.",
+        )
+        .await;
+        self.sync_blackboard(blackboard, Some(run_dir)).await?;
+        Ok(true)
+    }
+
+    async fn resume_hidden_artifacts_after_tool_approval(&self, run_id: &str) -> Result<()> {
+        let run_dir = self.run_dir(run_id);
+        let spec_path = run_dir.join("spec.yaml");
+        if !spec_path.exists() {
+            bail!("run {run_id} is missing spec.yaml; cannot resume hidden scenarios");
+        }
+        let spec_obj = spec::load_spec(&spec_path.to_string_lossy())?;
+        let target_source = self
+            .target_source_for_run(run_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("target_source.json missing for run {run_id}"))?;
+        let briefing = self
+            .load_run_briefing(run_id)
+            .await?
+            .ok_or_else(|| anyhow::anyhow!("coobie_briefing.json missing for run {run_id}"))?;
+        let validation =
+            read_optional_json_file::<ValidationSummary>(&run_dir.join("validation.json"))?
+                .ok_or_else(|| anyhow::anyhow!("validation.json missing for run {run_id}"))?;
+        let staged_product = self.paths.workspaces.join(run_id).join("product");
+        self.resume_hidden_artifacts_after_transaction(
+            run_id,
+            &run_dir,
+            &spec_obj,
+            &target_source,
+            &briefing,
+            &staged_product,
+            &validation,
+        )
+        .await
+    }
+
+    async fn resume_hidden_artifacts_after_transaction(
+        &self,
+        run_id: &str,
+        run_dir: &Path,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        briefing: &CoobieBriefing,
+        _staged_product: &Path,
+        validation: &ValidationSummary,
+    ) -> Result<()> {
+        let profiles = agents::load_profiles(&self.paths.factory.join("agents").join("profiles"))?;
+        let mut agent_executions =
+            read_optional_json_file::<Vec<AgentExecution>>(&run_dir.join("agent_executions.json"))?
+                .unwrap_or_default();
+        let mut phase_attributions = self.list_phase_attributions_for_run(run_id).await?;
+        let memory_context = MemoryContextBundle::default();
+        let log_path = self.run_log_path(run_id);
+        let mut blackboard =
+            self.load_run_blackboard(run_id)
+                .await?
+                .unwrap_or_else(|| BlackboardState {
+                    run_id: run_id.to_string(),
+                    current_phase: "hidden_scenarios".to_string(),
+                    active_goal: "Resume hidden scenarios after transaction approval".to_string(),
+                    ..Default::default()
+                });
+
+        let twin_episode = self
+            .start_episode(
+                run_id,
+                "twin",
+                "Provision local twin environment after transaction approval",
+            )
+            .await?;
+        blackboard.current_phase = "twin".to_string();
+        blackboard.active_goal =
+            "Provision local twin environment after transaction approval".to_string();
+        claim_agent(&mut blackboard, "ash", "prepare resumed twin environment");
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+        self.update_run_status(run_id, "twin").await?;
+        let twin_start = self
+            .record_event(
+                run_id,
+                Some(&twin_episode),
+                "twin",
+                "ash",
+                "running",
+                "Provisioning local twin environment after transaction approval",
+                &log_path,
+            )
+            .await?;
+        let twin = self.ash_provision_twin(run_id, spec_obj, run_dir).await?;
+        self.write_json_file(&run_dir.join("twin.json"), &twin)
+            .await?;
+        push_unique(&mut blackboard.artifact_refs, "twin.json");
+        if let Some(narrative) = self
+            .ash_twin_narrative(spec_obj, target_source, &twin, briefing)
+            .await
+        {
+            let _ = tokio::fs::write(run_dir.join("twin_narrative.md"), &narrative).await;
+            push_unique(&mut blackboard.artifact_refs, "twin_narrative.md");
+        }
+        self.write_agent_execution(
+            &profiles,
+            "ash",
+            "Provision a safe local twin environment for resumed hidden scenario work.",
+            &format!("Provisioned {} twin service(s).", twin.services.len()),
+            &serde_json::to_string_pretty(&twin)?,
+            "twin",
+            &twin_episode,
+            spec_obj,
+            target_source,
+            run_dir,
+            &mut agent_executions,
+        )
+        .await?;
+        let twin_end = self
+            .record_event(
+                run_id,
+                Some(&twin_episode),
+                "twin",
+                "ash",
+                "complete",
+                &format!("Provisioned {} twin service(s)", twin.services.len()),
+                &log_path,
+            )
+            .await?;
+        self.finish_episode(&twin_episode, "success", Some(1.0))
+            .await?;
+        self.record_phase_attribution(
+            run_id,
+            &twin_episode,
+            "twin",
+            "ash",
+            "success",
+            Some(1.0),
+            &memory_context,
+            briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            run_dir,
+        )
+        .await?;
+        self.link_events(
+            twin_start.event_id,
+            twin_end.event_id,
+            "contributed_to",
+            1.0,
+        )
+        .await?;
+        release_agent(&mut blackboard, "ash");
+        push_unique(&mut blackboard.resolved_items, "twin");
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+
+        let hidden_episode = self
+            .start_episode(
+                run_id,
+                "hidden_scenarios",
+                "Resume hidden scenarios after transaction approval",
+            )
+            .await?;
+        blackboard.current_phase = "hidden_scenarios".to_string();
+        blackboard.active_goal = "Resume hidden scenarios after transaction approval".to_string();
+        claim_agent(
+            &mut blackboard,
+            "sable",
+            "evaluate hidden scenarios after transaction",
+        );
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+        self.update_run_status(run_id, "hidden_scenarios").await?;
+        let hidden_start = self
+            .record_event(
+                run_id,
+                Some(&hidden_episode),
+                "hidden_scenarios",
+                "sable",
+                "running",
+                "Evaluating hidden scenarios after transaction approval",
+                &log_path,
+            )
+            .await?;
+        let predicted_final_status = if validation.passed {
+            "completed"
+        } else {
+            "completed_with_issues"
+        };
+        let events_so_far = self.list_run_events(run_id).await?;
+        let run_attempt = self.run_attempt_number(run_id).await?;
+        let hidden_definitions =
+            scenarios::load_hidden_scenarios(&self.paths.scenarios, &spec_obj.id)?;
+        let hidden_scenarios = if hidden_definitions.is_empty() {
+            HiddenScenarioSummary {
+                passed: true,
+                results: vec![HiddenScenarioEvaluation {
+                    scenario_id: "resume-no-hidden-definitions".to_string(),
+                    title: "No hidden scenarios configured".to_string(),
+                    passed: true,
+                    details: "No protected hidden scenarios were configured for this spec during transaction resume.".to_string(),
+                    checks: vec![HiddenScenarioCheckResult {
+                        kind: "scenario_store".to_string(),
+                        passed: true,
+                        details: "No hidden scenario definition matched the spec id.".to_string(),
+                    }],
+                }],
+            }
+        } else {
+            scenarios::evaluate_hidden_scenarios(
+                &hidden_definitions,
+                predicted_final_status,
+                run_attempt,
+                &events_so_far,
+                validation,
+                &twin,
+                &agent_executions,
+                run_dir,
+            )
+        };
+        self.write_json_file(&run_dir.join("hidden_scenarios.json"), &hidden_scenarios)
+            .await?;
+        push_unique(&mut blackboard.artifact_refs, "hidden_scenarios.json");
+        self.write_agent_execution(
+            &profiles,
+            "sable",
+            "Execute hidden scenarios after an approved implementation transaction.",
+            &format!("Hidden scenarios passed: {}", hidden_scenarios.passed),
+            &serde_json::to_string_pretty(&hidden_scenarios)?,
+            "hidden_scenarios",
+            &hidden_episode,
+            spec_obj,
+            target_source,
+            run_dir,
+            &mut agent_executions,
+        )
+        .await?;
+        let hidden_outcome = if hidden_scenarios.passed {
+            "success"
+        } else {
+            "failure"
+        };
+        let hidden_end = self
+            .record_event(
+                run_id,
+                Some(&hidden_episode),
+                "hidden_scenarios",
+                "sable",
+                if hidden_scenarios.passed {
+                    "complete"
+                } else {
+                    "warning"
+                },
+                &format!(
+                    "Transaction hidden-scenario continuation finished: {} scenario(s)",
+                    hidden_scenarios.results.len()
+                ),
+                &log_path,
+            )
+            .await?;
+        self.finish_episode(
+            &hidden_episode,
+            hidden_outcome,
+            Some(if hidden_scenarios.passed { 1.0 } else { 0.5 }),
+        )
+        .await?;
+        self.record_phase_attribution(
+            run_id,
+            &hidden_episode,
+            "hidden_scenarios",
+            "sable",
+            hidden_outcome,
+            Some(if hidden_scenarios.passed { 1.0 } else { 0.5 }),
+            &memory_context,
+            briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            run_dir,
+        )
+        .await?;
+        self.link_events(
+            hidden_start.event_id,
+            hidden_end.event_id,
+            "contributed_to",
+            if hidden_scenarios.passed { 1.0 } else { 0.5 },
+        )
+        .await?;
+        release_agent(&mut blackboard, "sable");
+        if hidden_scenarios.passed {
+            push_unique(&mut blackboard.resolved_items, "hidden_scenarios");
+            remove_blocker(&mut blackboard, "hidden_scenarios_failed");
+        } else {
+            push_unique(&mut blackboard.open_blockers, "hidden_scenarios_failed");
+        }
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+
+        let artifacts_episode = self
+            .start_episode(
+                run_id,
+                "artifacts",
+                "Package artifacts after transaction continuation",
+            )
+            .await?;
+        blackboard.current_phase = "artifacts".to_string();
+        blackboard.active_goal =
+            "Refresh artifact bundle after transaction continuation".to_string();
+        claim_agent(&mut blackboard, "flint", "prepare resumed artifact bundle");
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+        self.update_run_status(run_id, "artifacts").await?;
+        let artifacts_start = self
+            .record_event(
+                run_id,
+                Some(&artifacts_episode),
+                "artifacts",
+                "flint",
+                "running",
+                "Packaging artifacts after transaction continuation",
+                &log_path,
+            )
+            .await?;
+        self.write_agent_execution(
+            &profiles,
+            "flint",
+            "Collect resumed transaction outputs, logs, and evaluation evidence into the artifact bundle.",
+            "Prepared resumed bundle contents for packaging.",
+            &list_run_directory(run_dir)?.join("\n"),
+            "artifacts",
+            &artifacts_episode,
+            spec_obj,
+            target_source,
+            run_dir,
+            &mut agent_executions,
+        )
+        .await?;
+        if let Err(error) = self
+            .write_exploration_log(run_id, spec_obj, target_source, run_dir)
+            .await
+        {
+            tracing::warn!("exploration log write failed during transaction resume: {error}");
+        } else {
+            push_unique(&mut blackboard.artifact_refs, "exploration_log.md");
+            push_unique(&mut blackboard.artifact_refs, "exploration_log.json");
+            push_unique(
+                &mut blackboard.artifact_refs,
+                "dead_end_registry_snapshot.json",
+            );
+        }
+        self.package_artifacts(run_id).await?;
+        let generated_docs = self
+            .flint_generate_docs(run_id, spec_obj, target_source, run_dir, briefing)
+            .await?;
+        for artifact in &generated_docs {
+            push_unique(&mut blackboard.artifact_refs, artifact);
+        }
+        let artifacts_end = self
+            .record_event(
+                run_id,
+                Some(&artifacts_episode),
+                "artifacts",
+                "flint",
+                "complete",
+                "Artifact bundle refreshed after transaction continuation",
+                &log_path,
+            )
+            .await?;
+        self.finish_episode(&artifacts_episode, "success", Some(1.0))
+            .await?;
+        self.record_phase_attribution(
+            run_id,
+            &artifacts_episode,
+            "artifacts",
+            "flint",
+            "success",
+            Some(1.0),
+            &memory_context,
+            briefing,
+            &agent_executions,
+            &mut phase_attributions,
+            run_dir,
+        )
+        .await?;
+        self.link_events(
+            artifacts_start.event_id,
+            artifacts_end.event_id,
+            "contributed_to",
+            1.0,
+        )
+        .await?;
+        release_agent(&mut blackboard, "flint");
+        push_unique(&mut blackboard.resolved_items, "artifacts");
+        self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+
+        let factory_episode = crate::models::FactoryEpisode {
+            run_id: run_id.to_string(),
+            product: target_source.label.clone(),
+            spec_id: spec_obj.id.clone(),
+            features: spec_obj.acceptance_criteria.clone(),
+            agent_events: self.list_run_events(run_id).await.unwrap_or_default(),
+            tool_events: vec![],
+            phase_attributions: phase_attributions.clone(),
+            twin_env: Some(twin.clone()),
+            validation: Some(validation.clone()),
+            scenarios: Some(hidden_scenarios.clone()),
+            decision: None,
+            created_at: Utc::now(),
+        };
+        if let Err(error) = self.coobie.ingest_episode(&factory_episode).await {
+            tracing::warn!("Coobie ingest failed during transaction continuation: {error}");
+        } else if let Ok(report) = self.coobie.emit_report(run_id, &spec_obj.id).await {
+            let report_response = crate::coobie::render_coobie_report_response(&report);
+            let _ = self
+                .write_json_file(&run_dir.join("causal_report.json"), &report)
+                .await;
+            let _ =
+                tokio::fs::write(run_dir.join("coobie_report_response.md"), &report_response).await;
+            let _ = tokio::fs::write(run_dir.join("causal_summary.md"), &report_response).await;
+            push_unique(&mut blackboard.artifact_refs, "causal_report.json");
+            push_unique(&mut blackboard.artifact_refs, "coobie_report_response.md");
+            push_unique(&mut blackboard.artifact_refs, "causal_summary.md");
+            self.sync_blackboard(&blackboard, Some(run_dir)).await?;
+        }
+
+        if let Err(error) = self.ash_teardown_twin(&twin, run_dir).await {
+            let _ = self
+                .record_event(
+                    run_id,
+                    None,
+                    "twin",
+                    "ash",
+                    "warning",
+                    &format!("Twin teardown skipped after transaction continuation: {error}"),
+                    &log_path,
+                )
+                .await;
+        }
+        self.write_run_timing_artifact(run_id, run_dir).await?;
+        self.package_artifacts(run_id).await?;
+        let final_status = if validation.passed && hidden_scenarios.passed {
+            "completed"
+        } else {
+            "completed_with_issues"
+        };
+        self.update_run_status(run_id, final_status).await?;
+        self.record_decision(
+            run_id,
+            "keeper",
+            "artifacts",
+            "transaction_continuation",
+            final_status,
+            &[
+                "pause_after_validation".to_string(),
+                "retry_hidden_scenarios".to_string(),
+            ],
+            &format!(
+                "Transaction continuation completed hidden scenarios and artifacts: validation_passed={}, hidden_passed={}.",
+                validation.passed, hidden_scenarios.passed
+            ),
+        )
+        .await;
+        Ok(())
     }
 
     async fn attach_transaction_artifacts_to_blackboard(&self, run_id: &str) -> Result<()> {
@@ -23634,18 +24476,7 @@ fn build_tool_transaction_artifact(
 
     for command in planned_host_command_surfaces(staged_product) {
         if command_available(&command) {
-            requested_surfaces.push(ToolSurfaceAssessment {
-                name: command.clone(),
-                surface_type: "host_command".to_string(),
-                command: command.clone(),
-                aliases: vec!["external_process".to_string()],
-                risk: "medium".to_string(),
-                approval_required: true,
-                reasons: vec![
-                    "host command executes an external process outside the model context"
-                        .to_string(),
-                ],
-            });
+            requested_surfaces.push(assess_host_command_surface(&command));
         }
     }
 
@@ -23699,6 +24530,136 @@ fn build_tool_transaction_artifact(
         operator_guidance: None,
         approved_by: None,
         approved_at: None,
+    }
+}
+
+fn assess_host_command_surface(command: &str) -> ToolSurfaceAssessment {
+    let normalized = command.trim().to_ascii_lowercase();
+    if matches!(
+        normalized.as_str(),
+        "cargo" | "go" | "python" | "python3" | "pytest" | "make" | "npm" | "pnpm" | "yarn"
+    ) {
+        return ToolSurfaceAssessment {
+            name: command.to_string(),
+            surface_type: "host_command".to_string(),
+            command: command.to_string(),
+            aliases: vec!["local_build_runner".to_string()],
+            risk: "low".to_string(),
+            approval_required: false,
+            reasons: vec![
+                "local build/test tool surface; final approval is enforced per invocation"
+                    .to_string(),
+            ],
+        };
+    }
+
+    ToolSurfaceAssessment {
+        name: command.to_string(),
+        surface_type: "host_command".to_string(),
+        command: command.to_string(),
+        aliases: vec!["external_process".to_string()],
+        risk: "high".to_string(),
+        approval_required: true,
+        reasons: vec![
+            "host command executes an external process outside the model context".to_string(),
+        ],
+    }
+}
+
+fn assess_tool_invocation(program: &str, args: &[&str], cwd: &Path) -> ToolInvocationAssessment {
+    let program_lower = program.trim().to_ascii_lowercase();
+    let args_joined = args.join(" ");
+    let args_lower = args_joined.to_ascii_lowercase();
+    let command = if args.is_empty() {
+        program.to_string()
+    } else {
+        format!("{program} {args_joined}")
+    };
+    let mut reasons = vec!["host command executes an external process".to_string()];
+    let mut approval_required = true;
+    let mut risk = "medium".to_string();
+
+    if matches!(
+        program_lower.as_str(),
+        "true" | "false" | "pwd" | "echo" | "printf"
+    ) {
+        approval_required = false;
+        risk = "low".to_string();
+        reasons = vec!["read-only local shell primitive".to_string()];
+    }
+
+    if program_lower == "git" {
+        let read_only = args_lower.contains("rev-parse")
+            || args_lower.contains("status")
+            || args_lower.contains("diff")
+            || args_lower.contains("log")
+            || args_lower.contains("show");
+        if read_only {
+            approval_required = false;
+            risk = "low".to_string();
+            reasons = vec!["read-only repository metadata command".to_string()];
+        } else {
+            reasons.push("git invocation may mutate repository state".to_string());
+        }
+    }
+
+    let local_build_like = matches!(
+        program_lower.as_str(),
+        "cargo" | "go" | "python" | "python3" | "pytest" | "make" | "npm" | "pnpm" | "yarn"
+    ) && (args_lower.contains("build")
+        || args_lower.contains("test")
+        || args_lower.contains("check")
+        || args_lower.contains("compileall")
+        || args_lower.contains("-m build")
+        || args_lower.contains("run build")
+        || args_lower.contains("run test"));
+    if local_build_like {
+        approval_required = false;
+        risk = "low".to_string();
+        reasons =
+            vec!["local build/test invocation; invocation gateway auto-approved it".to_string()];
+    }
+
+    if args_lower.contains("install")
+        || args_lower.contains("add")
+        || args_lower.contains("publish")
+        || args_lower.contains("push")
+        || args_lower.contains("deploy")
+        || args_lower.contains("login")
+        || args_lower.contains("pull")
+    {
+        risk = "high".to_string();
+        reasons.push("arguments may write remotely or change runtime dependencies".to_string());
+    }
+    if matches!(
+        program_lower.as_str(),
+        "docker" | "npm" | "pnpm" | "yarn" | "npx"
+    ) {
+        reasons.push(
+            "tool can reach containers, package registries, or external package hooks".to_string(),
+        );
+    }
+    if matches!(
+        program_lower.as_str(),
+        "cargo" | "go" | "python" | "python3" | "pytest" | "make" | "npm" | "pnpm" | "yarn"
+    ) && (args_lower.contains("test")
+        || args_lower.contains("check")
+        || args_lower.contains("build")
+        || args_lower.contains("compileall"))
+    {
+        reasons.push(
+            "command runs local build or validation logic inside the staged workspace".to_string(),
+        );
+    }
+
+    ToolInvocationAssessment {
+        surface_type: "host_command".to_string(),
+        tool_name: program.to_string(),
+        command,
+        cwd: cwd.display().to_string(),
+        risk,
+        approval_required,
+        reasons,
     }
 }
 
@@ -24048,6 +25009,112 @@ fn render_tool_transaction_markdown(transaction: &ToolTransactionArtifact) -> St
         transaction.rollback_note,
         transaction.residual_risk,
     )
+}
+
+fn render_tool_invocation_markdown(artifact: &ToolInvocationArtifact) -> String {
+    let invocations = if artifact.invocations.is_empty() {
+        "- none".to_string()
+    } else {
+        artifact
+            .invocations
+            .iter()
+            .map(|record| {
+                format!(
+                    "- `{}` phase={} agent={} risk={} approval_required={} approval_state={} allowed={} success={} exit_code={} reasons={}",
+                    record.command,
+                    record.phase,
+                    record.agent,
+                    record.risk,
+                    record.approval_required,
+                    record.approval_state,
+                    record.allowed,
+                    record
+                        .success
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "pending".to_string()),
+                    record
+                        .exit_code
+                        .map(|value| value.to_string())
+                        .unwrap_or_else(|| "n/a".to_string()),
+                    if record.reasons.is_empty() {
+                        "none".to_string()
+                    } else {
+                        record.reasons.join("; ")
+                    }
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!(
+        "# Tool Invocation Gateway\n\n\
+         - Run: {}\n\
+         - Generated: {}\n\
+         - Invocation count: {}\n\n\
+         ## Invocations\n{}\n",
+        artifact.run_id,
+        artifact.generated_at,
+        artifact.invocations.len(),
+        invocations,
+    )
+}
+
+fn preview_text(value: &str, limit: usize) -> Option<String> {
+    let trimmed = value.trim();
+    if trimmed.is_empty() {
+        return None;
+    }
+    let mut chars = trimmed.chars();
+    let mut preview = chars.by_ref().take(limit).collect::<String>();
+    if chars.next().is_some() {
+        preview.push_str("...");
+    }
+    Some(preview)
+}
+
+fn fallback_tool_gateway_briefing(run_id: &str, spec: Option<&Spec>) -> CoobieBriefing {
+    CoobieBriefing {
+        spec_id: spec
+            .map(|value| value.id.clone())
+            .unwrap_or_else(|| "unknown-spec".to_string()),
+        product: run_id.to_string(),
+        query_terms: Vec::new(),
+        domain_signals: Vec::new(),
+        prior_report_count: 0,
+        memory_hits: Vec::new(),
+        core_memory_hits: Vec::new(),
+        project_memory_hits: Vec::new(),
+        resume_packet_summary: Vec::new(),
+        resume_packet_risks: Vec::new(),
+        stale_memory_mitigation_plan: Vec::new(),
+        exploration_citations: Vec::new(),
+        strategy_register_citations: Vec::new(),
+        mitigation_history_citations: Vec::new(),
+        evidence_pattern_exemplar_citations: Vec::new(),
+        evidence_causal_exemplar_citations: Vec::new(),
+        nearest_evidence_window_citations: Vec::new(),
+        pattern_matching_focus: Vec::new(),
+        causal_chain_focus: Vec::new(),
+        forge_evidence_citations: Vec::new(),
+        preferred_forge_outcome_citations: Vec::new(),
+        preferred_forge_commands: Vec::new(),
+        relevant_lessons: Vec::new(),
+        prior_causes: Vec::new(),
+        project_components: Vec::new(),
+        scenario_blueprint: None,
+        project_memory_root: None,
+        application_risks: Vec::new(),
+        environment_risks: Vec::new(),
+        regulatory_considerations: Vec::new(),
+        operator_model_context: None,
+        project_interview_context: None,
+        soul_identity_context: None,
+        recommended_guardrails: Vec::new(),
+        required_checks: Vec::new(),
+        open_questions: Vec::new(),
+        coobie_response: "Invocation gateway fallback briefing".to_string(),
+        generated_at: Utc::now(),
+    }
 }
 
 fn pearl_hierarchy_for_causal_link(link_type: &str) -> PearlHierarchyLevel {
@@ -25802,6 +26869,21 @@ mod tests {
             .any(|blocker| blocker.contains("filesystem")));
         assert!(render_tool_transaction_markdown(&artifact).contains("workspace_write"));
         let _ = std::fs::remove_dir_all(staged);
+    }
+
+    #[test]
+    fn tool_invocation_auto_approves_local_build_commands() {
+        let assessment =
+            assess_tool_invocation("cargo", &["test", "--quiet"], Path::new("/tmp/workspace"));
+        assert!(!assessment.approval_required);
+        assert_eq!(assessment.risk, "low");
+    }
+
+    #[test]
+    fn tool_invocation_requires_review_for_dependency_or_remote_mutation() {
+        let assessment = assess_tool_invocation("npm", &["install"], Path::new("/tmp/workspace"));
+        assert!(assessment.approval_required);
+        assert_eq!(assessment.risk, "high");
     }
 
     #[test]

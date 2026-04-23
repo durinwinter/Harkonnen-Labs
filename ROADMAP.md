@@ -248,24 +248,101 @@ Full design: `factory/context/briefing-scope-design.md` (BriefingScope) and `fac
 
 ---
 
-## Phase 5b — Memory Infrastructure (Qdrant + OCR)
+## Phase 5b — Memory Infrastructure, MCP Prompts + Rust-Native Servers
 
-**Unlocks:** Semantic recall at scale and document ingest completeness. The SQLite vector store is sufficient for current run volume, but it becomes the bottleneck as the memory corpus grows. This phase also creates the clean module structure that TypeDB's semantic layer will build on in Phase 6.
+**Unlocks:** Four things that must land before TypeDB (Phase 6) is viable: semantic recall at scale (Qdrant), document ingest completeness (OCR), a clean module structure for the memory layer, and a live MCP prompt surface that makes Coobie briefings and Sable isolation accessible from any Claude Code session — not just from the Rust orchestrator.
+
+This phase also eliminates the three `npx` Node.js MCP server processes in favour of a single compiled Rust binary, closing the last non-Rust runtime dependency in the hot path.
 
 **What to build:**
 
-- **Qdrant integration** — add `src/coobie/qdrant.rs` implementing the semantic index over extracted text and memory summaries. Payload metadata: `org`, `role`, `product`, `spec_id`, `run_id`, `agent`, `memory_type`, `tags`, `created_at`. Qdrant replaces the SQLite vector store for long-term semantic memory (keep SQLite as the short-term and episodic store). Bootstrap script at `scripts/bootstrap-coobie-memory-stack.sh` already exists.
-- **OCR pipeline** — add Tesseract-backed OCR for scanned PDFs and images. Current extractors handle text-forward formats but cannot read scanned documents. Wire through the existing `memory ingest` path: detect image-only PDFs, invoke `tesseract`, write extracted text sidecar alongside the imported asset.
-- **Memory module refactor** — split the growing `src/memory.rs` into the module tree described in COOBIE_SPEC: `src/memory/mod.rs`, `working.rs`, `episodic.rs`, `semantic.rs`, `causal.rs`, `consolidation.rs`, `blackboard.rs`, `retrieval.rs`, `extraction.rs`. Migrate Phase 5-C's `BriefingScope` into `src/memory/briefing.rs` during this refactor. No behavior change otherwise; this is a maintainability gate before TypeDB lands.
+### Memory module refactor
+
+Split the growing `src/memory.rs` into the module tree described in COOBIE_SPEC:
+
+```text
+src/memory/
+  mod.rs          # re-exports; MemoryStore trait
+  working.rs      # short-term blackboard (SQLite-backed)
+  episodic.rs     # run episodes, briefing_scope field
+  semantic.rs     # SemanticMemory trait; SQLite vector impl now, Qdrant in this phase
+  causal.rs       # causal links, failure patterns
+  consolidation.rs
+  blackboard.rs
+  retrieval.rs    # build_scoped_briefing() migrates here from src/coobie.rs
+  extraction.rs
+  briefing.rs     # BriefingScope enum + scoped retrieval (migrated from Phase 5-C)
+```
+
+No behaviour change. This is the maintainability gate that lets TypeDB's `SemanticMemory` implementation slot in cleanly in Phase 6.
+
+### Qdrant integration
+
+Add `src/memory/semantic_qdrant.rs` implementing the `SemanticMemory` trait from COOBIE_SPEC against a Qdrant instance. Payload metadata fields: `org`, `role`, `product`, `spec_id`, `run_id`, `agent`, `memory_type`, `tags`, `created_at`. Qdrant replaces the SQLite vector store for long-term semantic memory; SQLite remains the short-term and episodic store. Bootstrap script at `scripts/bootstrap-coobie-memory-stack.sh` already exists.
+
+### OCR pipeline
+
+Add Tesseract-backed OCR for scanned PDFs and images. Current extractors handle text-forward formats but cannot read scanned documents. Wire through the existing `memory ingest` path: detect image-only PDFs, invoke `tesseract`, write extracted text sidecar alongside the imported asset. No new CLI surface; the existing `memory ingest` command gains silent OCR support.
+
+### MCP prompts — live dynamic briefings from `mcp_server.rs`
+
+The MCP protocol's `prompts` primitive lets a server expose named templates that Claude Code renders as slash commands, but unlike the static files in `.claude/skills/`, MCP prompts are **dynamically hydrated** — the server pulls live data before returning the rendered text. This is the right layer for Coobie briefings, Sable isolation context, and Scout preflight packages, because they all require live SQLite and memory state.
+
+Add a `prompts` handler to `src/mcp_server.rs` exposing:
+
+| Prompt name | Arguments | What it returns |
+| --- | --- | --- |
+| `coobie/briefing` | `run_id`, `phase`, `keywords` | Full `BriefingPackage` text from `build_scoped_briefing()` with live memory hits |
+| `sable/eval-setup` | `run_id` | Sable-scoped context: scenario patterns, run artifacts, isolation confirmation — no Mason content |
+| `scout/preflight` | `spec_id`, `run_id` | Scout-scoped intent package: spec history, prior ambiguities, operator model posture |
+| `keeper/policy-check` | `action`, `context` | Policy decision context: relevant guardrails, prior decisions, risk tolerances |
+
+Each prompt handler calls the same `build_scoped_briefing()` function used by the orchestrator — same scoping rules, same isolation guarantees, same memory retrieval chain — but the output is returned to Claude Code's context window rather than passed to the orchestrator. This means an operator can invoke `/mcp coobie/briefing run_id=abc phase=mason` in any Claude Code session and get a live, correctly scoped briefing without starting a factory run.
+
+The Sable prompt handler enforces the same `SablePreflight` scope filter as the orchestrator path: any retrieved hit tagged `implementation_notes`, `mason_plan`, `edit_rationale`, or `fix_patterns` is dropped before the prompt is returned.
+
+### Rust-native MCP server consolidation (`rmcp`)
+
+Replace the three `npx @modelcontextprotocol/server-*` processes (filesystem, memory, sqlite) with a single `harkonnen mcp serve` invocation backed by the `rmcp` crate (Anthropic's official Rust MCP SDK). The consolidated server:
+
+- Exposes the same tool aliases (`filesystem_read`, `workspace_write`, `artifact_writer`, `memory_store`, `metadata_query`, `db_read`) so no harkonnen.toml changes are needed at the agent-routing level
+- Serves the new `prompts` surface (see above) over the same transport
+- Removes Node.js / `npx` from the runtime dependency list entirely
+- Uses `sqlx` directly for SQLite access rather than shelling out to a Node sqlite server
+
+`harkonnen.toml` is updated to replace the three `npx` server entries with a single self-server entry pointing at `harkonnen mcp serve --transport sse`. The three old entries are removed from `common_mcp_templates` in `src/cli.rs`; the self-server config block becomes the default for all setups.
+
+### `llm.rs` multi-provider extension
+
+Extend `src/llm.rs` with a unified multi-provider completion interface to back the `SubAgentBackend` variants introduced in Phase 5-C without shelling out to external CLIs:
+
+```rust
+pub enum ProviderBackend {
+    Anthropic { model: String },   // reqwest → messages API
+    OpenAi    { model: String, base_url: Option<String> },  // reqwest → chat completions
+    Gemini    { model: String },   // reqwest → generateContent
+}
+
+pub async fn complete(backend: &ProviderBackend, messages: &[Message]) -> Result<String>
+```
+
+Each variant is a typed `reqwest` call to the provider's REST API. `SubAgentBackend::CodexPlanAgent` routes through `ProviderBackend::OpenAi` (model: `o4-mini` or `gpt-4o`) rather than spawning the codex CLI process. `SubAgentBackend::GeminiAgent` routes through `ProviderBackend::Gemini`. The existing `SubAgentBackend::DirectLlm` path continues to use the current `llm.rs` call site unchanged — this is additive, not a rewrite.
 
 **Benchmark gate:**
 
-- Hold additional benchmark report polish until the narrow end-to-end Harkonnen pass is complete; use the existing native adapters as guardrails rather than expanding coverage mid-pass.
-- re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
+- Re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
 - `LongMemEval` and `LoCoMo` re-run to confirm semantic recall quality does not regress
-- re-run `StreamingQA` to confirm belief-update accuracy does not regress after the module refactor
+- Re-run `StreamingQA` to confirm belief-update accuracy does not regress after the module refactor
+- MCP prompt round-trip test: `coobie/briefing` for a known run returns a briefing containing at least one memory hit and zero items tagged with Mason-scoped categories
 
-**Done when:** Qdrant is serving semantic queries for long-term memory, OCR-scanned PDFs can be ingested, and `src/memory.rs` is split into the COOBIE_SPEC module tree with `BriefingScope` in its final home.
+**Done when:**
+
+- `src/memory.rs` is split into the COOBIE_SPEC module tree with `BriefingScope` in `src/memory/briefing.rs`
+- Qdrant is serving semantic queries for long-term memory
+- OCR-scanned PDFs can be ingested via `memory ingest`
+- `mcp_server.rs` serves all four named prompts; `/mcp coobie/briefing` works in a live Claude Code session and returns a scoped, isolation-correct briefing
+- The three `npx` MCP server entries are replaced by `harkonnen mcp serve` in `harkonnen.toml`; Node.js is no longer required at runtime
+- `llm.rs` exposes `ProviderBackend` with Anthropic, OpenAI, and Gemini variants; `SubAgentBackend::CodexPlanAgent` routes through `ProviderBackend::OpenAi` with no subprocess spawn
 
 ---
 
@@ -405,6 +482,177 @@ and the integration-governance design in [the-soul-of-ai/07-Governed-Integration
 - Φ post-learning drop detection wired (quarantine trigger, not yet a published score)
 
 **Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; D* and SSA are instrumented and streaming; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; and policy-level revision is slower, more conservative, and explicitly reviewable.
+
+---
+
+## Phase 9 — Cross-Machine Pack Coordination (Zenoh + Buffa)
+
+**Unlocks:** The full nine-agent pack split across home-linux and work-windows
+operating as one coherent factory. Today all routing is intra-process or
+intra-machine. Phase 9 makes machine boundaries transparent: Scout on
+home-linux can dispatch Mason on work-windows; Coobie's briefing travels over a
+wire; run events stream to both machines in real time; and Calvin Archive
+continuity holds across the boundary.
+
+The transport choice is **Zenoh** (pub/sub with shmem, TCP, TLS, and QUIC
+backends; clean Rust SDK; keyexpr routing maps directly to the Labrador topic
+hierarchy). The wire format is **Buffa** (Anthropic's pure-Rust protobuf with
+zero-copy `MessageView<'a>`; no `protoc` binary required; editions support for
+forward-compatible schema evolution). Both are Rust-native — no new runtime
+dependencies.
+
+This phase is the point established in Phase 5b: Zenoh and Buffa become worth
+their complexity overhead only when agents genuinely span machines. Before this
+phase opens, the single-machine setup should be complete and stable.
+
+### Proto schema (`factory/proto/`)
+
+Define Buffa proto schema for all cross-machine wire types:
+
+```proto
+// factory/proto/labrador.proto
+message SubAgentInput  { ... }   // Phase 5-C types on the wire
+message SubAgentResult { ... }
+message RunEvent       { ... }   // phase transitions, checkpoint signals
+message PackChatMessage { ... }  // operator chat delivery
+message BriefingPackage { ... }  // Coobie briefing over the wire
+message CheckpointNotification { ... }
+message MemoryHit      { ... }   // single retrieval hit
+```
+
+Buffa `MessageView<'a>` is used on the receive path (zero-copy from wire);
+owned types are used for construction and serialisation. Proto schema lives in
+`factory/proto/`; generated Rust types land in `src/transport/proto.rs` via a
+`build.rs` step that invokes `buffa-build`.
+
+### Zenoh transport layer (`src/transport/`)
+
+```text
+src/transport/
+  mod.rs          # PackTransport trait
+  zenoh.rs        # ZenohTransport — one Zenoh session per Harkonnen instance
+  local.rs        # LocalTransport (tokio channels) — existing in-process path
+  proto.rs        # generated Buffa types (from build.rs)
+```
+
+**Key-expression convention:**
+
+```text
+harkonnen/{setup_name}/agent/{agent_name}/input
+harkonnen/{setup_name}/agent/{agent_name}/result
+harkonnen/{setup_name}/run/{run_id}/event
+harkonnen/{setup_name}/chat/{thread_id}/message
+harkonnen/{setup_name}/memory/briefing/{run_id}
+```
+
+`setup_name` scopes all traffic to the originating machine, preventing
+cross-contamination between home-linux and work-windows sessions on the same
+LAN.
+
+**Transport selection:** the `PackTransport` trait has two implementations —
+`ZenohTransport` for cross-machine and `LocalTransport` (tokio channels) for
+the existing intra-process path. `SubAgentDispatcher` gains a
+`RemoteAgent { machine: String }` backend that routes through
+`ZenohTransport`. All existing `DirectLlm` / `ClaudeCodeAgent` call sites are
+unchanged.
+
+### `harkonnen.toml` remote agent routing
+
+Extend `SetupConfig` with a `[remote_machines]` section:
+
+```toml
+[remote_machines.work-windows]
+zenoh_endpoint = "tcp/192.168.1.x:7447"
+agents         = ["mason", "piper", "bramble", "ash", "flint"]
+
+[remote_machines.home-linux]
+zenoh_endpoint = "tcp/192.168.1.y:7447"
+agents         = ["scout", "sable", "keeper", "coobie"]
+```
+
+`SubAgentDispatcher` resolution order gains a fourth step:
+
+1. Agent profile `dispatch.<task>`
+2. `[sub_agents.<name>]` in harkonnen.toml
+3. Check `[remote_machines.*].agents` — if the target agent is listed on a
+   remote machine, wrap in `RemoteAgent { machine }` and route through Zenoh
+4. `[sub_agents] default_mode`
+
+No change to agent profiles or skill files.
+
+### PackChat distributed mode
+
+`src/chat.rs` gains a Zenoh-backed publisher/subscriber alongside the existing
+SQLite store. Messages written on work-windows are published to
+`harkonnen/{setup}/chat/{thread_id}/message` and received by home-linux in real
+time without polling. SQLite remains the durable store; Zenoh is the delivery
+layer. The MCP `post_chat_message` and `list_chat_messages` tools continue to
+work unchanged — the Zenoh subscription fires a write-through to the local
+SQLite replica.
+
+### Calvin Archive cross-machine consistency
+
+Write authority for the Calvin Archive stays on the machine that owns Coobie
+(home-linux by default). Remote machines receive a read-only event stream:
+
+- Run episodes published on `harkonnen/{setup}/memory/episode/{run_id}` by the
+  orchestrator after each run
+- Home-linux Coobie subscribes, consolidates, and writes to the archive
+- Work-windows receives a `soul.json` snapshot over Zenoh on each archive
+  update so remote agents boot with current continuity state
+- `harkonnen archive status` gains a `--remote` flag that queries the Zenoh
+  session for each machine's last-seen snapshot timestamp
+
+Identity continuity invariant: the Calvin Archive on home-linux is the single
+source of truth. Remote machines consume its projections; they do not write to
+it.
+
+### `llm.rs` provider routing across machines
+
+When `SubAgentBackend::RemoteAgent` dispatches a `BriefingConstruction` task to
+a remote machine, the receiving `ZenohTransport` handler deserialises the
+`SubAgentInput`, calls the appropriate `ProviderBackend` (from the Phase 5b
+`llm.rs` extension) using the remote machine's API keys, and publishes the
+`SubAgentResult` back. API keys never cross the wire — each machine uses its
+own configured credentials. This is the correct credential isolation model for
+a home/work split where API billing accounts differ.
+
+### `setup check` cross-machine status
+
+`harkonnen setup check` gains a cross-machine section:
+
+```text
+Remote Machines:
+  [ok   ] work-windows   tcp/192.168.1.x:7447   agents: mason, piper, bramble, ash, flint
+  [UNREACHABLE] ...
+```
+
+Reachability is determined by a Zenoh ping on the configured endpoint. If a
+remote machine is unreachable, the dispatcher falls back to `DirectLlm` on the
+local machine for that agent's tasks and logs a `remote_fallback` event in
+`agent_traces`.
+
+**Benchmark gate:**
+
+- Round-trip latency benchmark: `SubAgentInput` → remote machine → `SubAgentResult` over Zenoh, measured at p50/p95/p99 over 100 runs
+- Buffa encode/decode throughput for `BriefingPackage` (the largest message type) vs. serde_json baseline — confirm the zero-copy view path delivers measurable improvement at briefing size
+- PackChat delivery latency: message posted on work-windows appears in home-linux `list_chat_messages` within 100ms under normal LAN conditions
+- Calvin Archive consistency check: after 10 cross-machine runs, `soul.json` on both machines matches within one snapshot cycle
+
+**Done when:**
+
+- A run can start on home-linux (Scout, Coobie, Keeper) and dispatch
+  implementation phases to work-windows (Mason, Bramble) transparently via
+  Zenoh, with the same `start_run` API call and no operator configuration
+  beyond `[remote_machines]` in harkonnen.toml
+- PackChat messages are delivered cross-machine in real time; SQLite replicas
+  on both machines stay in sync
+- Calvin Archive write authority is on home-linux; work-windows receives
+  `soul.json` snapshots and uses them for agent boot continuity
+- `harkonnen setup check` reports remote machine reachability and falls back
+  gracefully if a remote machine is offline
+- Buffa proto schema covers all cross-machine wire types; no `serde_json`
+  serialisation on the hot path for `SubAgentInput`/`SubAgentResult`
 
 ---
 

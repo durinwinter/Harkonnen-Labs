@@ -521,6 +521,20 @@ The soul package includes `soul.json` as a manifest with version, integrity hash
 
 ---
 
+## Phase 7b — Continuous Learning v2 & Memory Compaction
+
+**Unlocks:** Formalized instinct-to-skill pipeline and token-aware memory persistence, mapping the `everything-claude-code` extraction strategies into the Harkonnen native coordination loop before launching Phase 8.
+
+**What to build:**
+
+- **Instinct Extractor (Continuous Learning):** Passively observe tool usage success on the coordination bus. Store victorious problem-solving sequences as episodic "instincts" with confidence scores.
+- **Skill Clustering ("Evolve" loop):** A periodic synthesis pass that compresses raw instincts into reusable, semantic "skills" broadcasted back to agents.
+- **Strategic Context Compaction:** Hydrate agent sessions efficiently, handling background summarization of working memory while preserving causal invariants to prevent context-window bloat over long runs.
+
+**Done when:** Harkonnen can automatically identify patterns and evolve skills from raw operator usage on the hot path, and long-running sessions strategically compact their history without losing structural context.
+
+---
+
 ## Phase 8 — The Calvin Archive And Governed Integration
 
 **Unlocks:** A persisted intelligence layer that does not merely remember, but

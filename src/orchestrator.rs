@@ -163,6 +163,18 @@ struct CommandTrialRecord {
     stderr: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, Default)]
+pub struct MemoryCandidateProcessSummary {
+    pub run_id: Option<String>,
+    pub scanned: usize,
+    pub captured_openbrain: usize,
+    pub calvin_promotions: usize,
+    pub held_for_review: usize,
+    pub ignored: usize,
+    pub duplicates: usize,
+    pub errors: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct CommandTrialReport {
     run_id: String,
@@ -15854,6 +15866,200 @@ Return JSON only.",
         Ok(lessons)
     }
 
+    // ── Phase 5-D — PackChat memory distillation chain ──────────────────────
+
+    pub async fn list_memory_candidates_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<crate::chat::MemoryCandidate>> {
+        self.chat.list_memory_candidates_for_run(run_id).await
+    }
+
+    pub async fn process_memory_candidates(
+        &self,
+        run_id: Option<&str>,
+        limit: usize,
+    ) -> Result<MemoryCandidateProcessSummary> {
+        let limit = limit.clamp(1, 200);
+        let candidates = self
+            .chat
+            .list_pending_memory_candidates(run_id, limit)
+            .await?;
+        let mut summary = MemoryCandidateProcessSummary {
+            run_id: run_id.map(str::to_string),
+            scanned: candidates.len(),
+            ..Default::default()
+        };
+
+        for candidate in candidates {
+            let dedupe_key = candidate
+                .dedupe_key
+                .clone()
+                .filter(|key| !key.trim().is_empty())
+                .unwrap_or_else(|| memory_candidate_dedupe_key(&candidate));
+            if candidate.sensitivity_label != "normal" {
+                self.chat
+                    .update_memory_candidate_processing(
+                        &candidate.candidate_id,
+                        "held_for_review",
+                        None,
+                        None,
+                        Some(&dedupe_key),
+                        None,
+                    )
+                    .await?;
+                summary.held_for_review += 1;
+                continue;
+            }
+
+            let distilled = distill_memory_candidate(&candidate);
+            match candidate.retention_class.as_str() {
+                "shared_recall" => {
+                    if self
+                        .openbrain_duplicate_exists(&candidate.candidate_id, &dedupe_key)
+                        .await?
+                    {
+                        self.chat
+                            .update_memory_candidate_processing(
+                                &candidate.candidate_id,
+                                "duplicate_openbrain",
+                                Some(&distilled),
+                                None,
+                                Some(&dedupe_key),
+                                None,
+                            )
+                            .await?;
+                        summary.duplicates += 1;
+                        continue;
+                    }
+
+                    if let Some(open_brain) = self.open_brain.as_ref() {
+                        match open_brain.capture_thought(&distilled, None).await {
+                            Ok(()) => {
+                                self.chat
+                                    .update_memory_candidate_processing(
+                                        &candidate.candidate_id,
+                                        "captured_openbrain",
+                                        Some(&distilled),
+                                        Some(&format!("openbrain:{}", candidate.candidate_id)),
+                                        Some(&dedupe_key),
+                                        None,
+                                    )
+                                    .await?;
+                                summary.captured_openbrain += 1;
+                            }
+                            Err(error) => {
+                                summary.errors.push(format!(
+                                    "{}: OB1 capture failed: {}",
+                                    candidate.candidate_id, error
+                                ));
+                            }
+                        }
+                    } else {
+                        self.chat
+                            .update_memory_candidate_processing(
+                                &candidate.candidate_id,
+                                "waiting_openbrain",
+                                Some(&distilled),
+                                None,
+                                Some(&dedupe_key),
+                                None,
+                            )
+                            .await?;
+                        summary.held_for_review += 1;
+                    }
+                }
+                "calvin_candidate" => {
+                    let contract = build_calvin_promotion_contract(&candidate, &distilled);
+                    self.enqueue_calvin_promotion_candidate(&candidate, contract.clone())
+                        .await?;
+                    self.chat
+                        .update_memory_candidate_processing(
+                            &candidate.candidate_id,
+                            "promotion_pending",
+                            Some(&distilled),
+                            None,
+                            Some(&dedupe_key),
+                            Some(&contract),
+                        )
+                        .await?;
+                    summary.calvin_promotions += 1;
+                }
+                _ => {
+                    self.chat
+                        .update_memory_candidate_processing(
+                            &candidate.candidate_id,
+                            "ignored_ephemeral",
+                            Some(&distilled),
+                            None,
+                            Some(&dedupe_key),
+                            None,
+                        )
+                        .await?;
+                    summary.ignored += 1;
+                }
+            }
+        }
+
+        Ok(summary)
+    }
+
+    async fn openbrain_duplicate_exists(
+        &self,
+        candidate_id: &str,
+        dedupe_key: &str,
+    ) -> Result<bool> {
+        let row = sqlx::query(
+            r#"
+            SELECT 1 FROM memory_candidates
+            WHERE candidate_id != ?1
+              AND status = 'captured_openbrain'
+              AND dedupe_key = ?2
+            LIMIT 1
+            "#,
+        )
+        .bind(candidate_id)
+        .bind(dedupe_key)
+        .fetch_optional(&self.pool)
+        .await?;
+        Ok(row.is_some())
+    }
+
+    async fn enqueue_calvin_promotion_candidate(
+        &self,
+        candidate: &crate::chat::MemoryCandidate,
+        contract: serde_json::Value,
+    ) -> Result<()> {
+        let Some(run_id) = candidate.run_id.as_deref() else {
+            return Ok(());
+        };
+        let candidate_id = format!("calvin-promotion-{}", candidate.candidate_id);
+        if self.candidate_exists(&candidate_id).await? {
+            return Ok(());
+        }
+        let label = format!(
+            "[calvin] {} {}",
+            candidate.agent.as_deref().unwrap_or("packchat"),
+            candidate
+                .message_id
+                .as_deref()
+                .unwrap_or(candidate.candidate_id.as_str())
+        );
+        let consolidation = ConsolidationCandidate {
+            candidate_id,
+            run_id: run_id.to_string(),
+            kind: "calvin_promotion".to_string(),
+            status: "pending".to_string(),
+            content_json: contract,
+            edited_json: None,
+            confidence: candidate.importance_score,
+            label,
+            created_at: Utc::now(),
+            reviewed_at: None,
+        };
+        self.insert_consolidation_candidate(&consolidation).await
+    }
+
     // ── Phase 5 — Consolidation Workbench ─────────────────────────────────────
 
     /// Generate `ConsolidationCandidate` rows for a run without promoting
@@ -26906,6 +27112,109 @@ fn build_stakeholder_alignment_summary(
     })
 }
 
+fn distill_memory_candidate(candidate: &crate::chat::MemoryCandidate) -> String {
+    let content = candidate
+        .raw_payload
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            candidate
+                .raw_payload
+                .get("content_preview")
+                .and_then(serde_json::Value::as_str)
+        })
+        .unwrap_or_default()
+        .trim();
+    let content = if content.is_empty() {
+        candidate
+            .distilled_content
+            .as_deref()
+            .unwrap_or("PackChat event with no textual content")
+    } else {
+        content
+    };
+    let agent = candidate.agent.as_deref().unwrap_or("packchat");
+    let run = candidate.run_id.as_deref().unwrap_or("no-run");
+    let thread = candidate.thread_id.as_deref().unwrap_or("no-thread");
+    format!(
+        "{} [source: PackChat thread={}, run={}, agent={}, candidate={}]",
+        content.trim(),
+        thread,
+        run,
+        agent,
+        candidate.candidate_id
+    )
+}
+
+fn memory_candidate_dedupe_key(candidate: &crate::chat::MemoryCandidate) -> String {
+    let content = candidate
+        .raw_payload
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            candidate
+                .raw_payload
+                .get("content_preview")
+                .and_then(serde_json::Value::as_str)
+        })
+        .unwrap_or_else(|| candidate.distilled_content.as_deref().unwrap_or_default());
+    normalize_text_key(content)
+}
+
+fn normalize_text_key(content: &str) -> String {
+    let mut out = String::with_capacity(content.len());
+    let mut prev_space = false;
+    for ch in content.chars() {
+        let mapped = if ch.is_ascii_alphanumeric() {
+            ch.to_ascii_lowercase()
+        } else {
+            ' '
+        };
+        if mapped == ' ' {
+            if !prev_space && !out.is_empty() {
+                out.push(' ');
+            }
+            prev_space = true;
+        } else {
+            out.push(mapped);
+            prev_space = false;
+        }
+    }
+    out.split_whitespace()
+        .take(80)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn build_calvin_promotion_contract(
+    candidate: &crate::chat::MemoryCandidate,
+    distilled: &str,
+) -> serde_json::Value {
+    let mut contract = candidate
+        .calvin_contract_json
+        .clone()
+        .unwrap_or_else(|| serde_json::json!({}));
+    if !contract.is_object() {
+        contract = serde_json::json!({});
+    }
+    contract["schema"] = serde_json::Value::String("harkonnen.calvin.promotion.v1".to_string());
+    contract["candidate_id"] = serde_json::Value::String(candidate.candidate_id.clone());
+    contract["source_event_id"] = serde_json::Value::String(candidate.source_event_id.clone());
+    contract["distilled_content"] = serde_json::Value::String(distilled.to_string());
+    contract["retention_class"] = serde_json::Value::String(candidate.retention_class.clone());
+    contract["sensitivity_label"] = serde_json::Value::String(candidate.sensitivity_label.clone());
+    contract["recommended_governance_outcome"] =
+        serde_json::Value::String("quarantine".to_string());
+    contract["preservation_note"] = serde_json::Value::String(
+        "Promotion is a governed proposal. Calvin canonical state must not be mutated until an operator or Meta-Governor accepts, modifies, rejects, or quarantines it.".to_string(),
+    );
+    contract["evidence_refs"] = candidate.evidence_refs.clone();
+    contract["causality"] = candidate.causality_json.clone();
+    contract["pathos_score"] = serde_json::json!(candidate.importance_score);
+    contract["chamber_targets"] = serde_json::json!(["mythos", "episteme", "praxis"]);
+    contract
+}
+
 fn phase_to_calvin_chamber(phase: &str) -> crate::calvin_client::Chamber {
     match phase {
         "memory" => crate::calvin_client::Chamber::Episteme,
@@ -28436,6 +28745,7 @@ mod tests {
             }),
             calvin_archive: Default::default(),
             twilight_bark: Default::default(),
+            open_brain: Default::default(),
         };
         let staged = std::env::temp_dir().join(format!("harkonnen-tool-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&staged).expect("create staged dir");

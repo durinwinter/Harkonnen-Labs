@@ -594,9 +594,11 @@ pub async fn handle_memory(command: MemoryCommands, app: AppContext) -> Result<(
                 }
                 None => {
                     println!(
-                        "Semantic embedding unavailable — memory init complete without embeddings."
+                        "Local semantic embedding unavailable — memory init complete without local vectors."
                     );
-                    println!("Embeddings will be generated automatically on the next `cargo run`.");
+                    println!(
+                        "Open Brain is the default shared recall path when OPEN_BRAIN_MCP_URL is configured."
+                    );
                 }
             }
         }

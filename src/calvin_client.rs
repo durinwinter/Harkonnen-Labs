@@ -151,6 +151,16 @@ impl CalvinClient {
         Ok(())
     }
 
+    pub async fn update_agent_status(&self, agent_name: &str, status: &str) -> Result<()> {
+        self.client
+            .patch(format!("{}/agents/{agent_name}/status", self.base_url))
+            .json(&serde_json::json!({"status": status}))
+            .send()
+            .await
+            .context("PATCH /agents/{agent_name}/status")?;
+        Ok(())
+    }
+
     pub async fn get_kernel_traits(&self, agent_name: &str) -> Result<Vec<String>> {
         let resp = self
             .client

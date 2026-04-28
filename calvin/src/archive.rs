@@ -238,11 +238,13 @@ impl ArchiveStore {
             .driver
             .transaction(&self.db_name, TransactionType::Read)
             .await?;
-        // Active beliefs: not yet superseded
+        // Active beliefs scoped to the named agent via the stabilizes relation.
+        // Without the stabilizes join, beliefs from other agent-self instances leak in.
         let tql = format!(
             r#"match
                 $a isa agent_self, has name "{agent_name}";
                 $b isa belief, has narrative_summary $ns, has confidence $c;
+                (source: $b, target: $a) isa stabilizes;
                 not {{ (prior: $b) isa revised_into; }};
                select $ns, $c;
                sort $c desc;
@@ -323,14 +325,41 @@ impl ArchiveStore {
         let lower = adaptation_summary.to_lowercase();
         for trait_name in &high_confidence_traits {
             let tl = trait_name.to_lowercase();
+            // Literal negation prefixes
             if lower.contains(&format!("not {tl}"))
                 || lower.contains(&format!("remove {tl}"))
                 || lower.contains(&format!("eliminate {tl}"))
+                // Semantic negation patterns (basic_heuristic; Phase 6 upgrades to embedding classifier)
+                || lower.contains(&format!("avoid {tl}"))
+                || lower.contains(&format!("without {tl}"))
+                || lower.contains(&format!("less {tl}"))
+                || lower.contains(&format!("deprioritise {tl}"))
+                || lower.contains(&format!("deprioritize {tl}"))
+                || lower.contains(&format!("reduce {tl}"))
+                || lower.contains(&format!("replace {tl}"))
+                || lower.contains(&format!("instead of {tl}"))
+                || lower.contains(&format!("abandon {tl}"))
+                || lower.contains(&format!("drop {tl}"))
             {
                 return Ok(false);
             }
         }
         Ok(true)
+    }
+
+    pub(crate) async fn update_agent_status(&self, agent_name: &str, status: &str) -> Result<()> {
+        let tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Write)
+            .await?;
+        let tql = format!(
+            r#"match $a isa agent_self, has name "{agent_name}", has status $s;
+               delete has $s of $a;
+               insert has status "{status}" of $a;"#
+        );
+        tx.query(&tql).await.context("update_agent_status query")?;
+        tx.commit().await?;
+        Ok(())
     }
 
     pub(crate) async fn entity_counts(&self) -> Result<serde_json::Value> {

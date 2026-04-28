@@ -1,0 +1,103 @@
+---
+id: openziti-memory-chain
+title: OpenZiti service profile for Twilight Bark, Open Brain, and Calvin
+status: phase-5-d-default
+
+purpose: >
+  Define the zero-trust trust boundary for the PackChat memory chain:
+  Twilight Bark transports conversation events, Harkonnen distills them,
+  Open Brain stores shared semantic recall, and Calvin receives governed
+  promotion contracts.
+
+identity_roles:
+  operator_console:
+    description: Human-operated Pack Board or CLI session.
+    attributes: ["#operator", "#packchat-client", "#harkonnen-api-client"]
+  harkonnen_distiller:
+    description: Harkonnen process that owns memory candidate processing.
+    attributes: ["#harkonnen", "#memory-writer", "#calvin-promoter"]
+  twilight_daemon:
+    description: Twilight Bark daemon node binding the PackChat service.
+    attributes: ["#twilight-daemon", "#packchat-host"]
+  openbrain_server:
+    description: OB1/Open Brain MCP service host.
+    attributes: ["#openbrain-host"]
+  calvin_archive:
+    description: Calvin Archive host.
+    attributes: ["#calvin-host"]
+  remote_agent:
+    description: Approved agent runtime allowed to participate in PackChat and recall.
+    attributes: ["#agent-runtime", "#packchat-client", "#recall-reader"]
+
+services:
+  twilight-bark.packchat:
+    host_roles: ["#packchat-host"]
+    dial_roles: ["#packchat-client", "#memory-writer"]
+    posture_roles: ["#enrolled-device"]
+    notes: >
+      Live PackChat event bus. Agents may dial to publish and subscribe.
+      Only Twilight daemon identities bind the service.
+
+  openbrain.mcp:
+    host_roles: ["#openbrain-host"]
+    dial_roles: ["#recall-reader", "#memory-writer"]
+    write_roles: ["#memory-writer"]
+    posture_roles: ["#enrolled-device"]
+    notes: >
+      Shared semantic recall. Read access can be broader than write access.
+      Harkonnen distiller is the default writer for captured thoughts.
+
+  calvin.archive:
+    host_roles: ["#calvin-host"]
+    dial_roles: ["#calvin-promoter", "#operator"]
+    write_roles: ["#calvin-promoter"]
+    posture_roles: ["#enrolled-device", "#mfa-operator"]
+    notes: >
+      Narrow governed continuity surface. Remote agents should not write
+      directly; they produce PackChat evidence that Harkonnen promotes.
+
+  harkonnen.api:
+    host_roles: ["#harkonnen"]
+    dial_roles: ["#harkonnen-api-client", "#operator"]
+    posture_roles: ["#enrolled-device"]
+    notes: >
+      Run control, candidate review, Pack Board, and approval workflow.
+
+policy_rules:
+  - name: separate-dial-from-bind
+    rule: >
+      Every service must have separate Dial and Bind service policies.
+      Binding a service never implies permission to dial other services.
+
+  - name: calvin-write-is-narrow
+    rule: >
+      Only identities with #calvin-promoter may write Calvin promotion
+      contracts. Agent runtimes submit evidence through PackChat instead.
+
+  - name: openbrain-write-is-mediated
+    rule: >
+      Remote agents may read Open Brain recall when authorized, but durable
+      capture_thought writes should come from the Harkonnen distiller unless
+      an operator explicitly grants a writer identity.
+
+  - name: posture-for-privileged-writers
+    rule: >
+      Calvin promoters and Open Brain writers should require enrolled-device
+      posture checks. Operator identities should require MFA posture checks
+      for Calvin archive access where supported.
+
+candidate_flow:
+  - step: packchat-event
+    service: twilight-bark.packchat
+    writer: "#packchat-client"
+    reader: "#memory-writer"
+  - step: memory-candidate
+    service: harkonnen.api
+    writer: "#memory-writer"
+  - step: shared-recall
+    service: openbrain.mcp
+    writer: "#memory-writer"
+    reader: "#recall-reader"
+  - step: governed-promotion
+    service: calvin.archive
+    writer: "#calvin-promoter"

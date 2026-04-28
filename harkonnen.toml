@@ -80,6 +80,18 @@ surface      = "vscode"
 enabled     = true
 harmony_url = "http://127.0.0.1:7171"
 
+# Open Brain (OB1) is the default cross-client memory substrate. It replaces
+# Harkonnen's old default local vector store path; local fastembed/ORT is now
+# opt-in via `--features local-embeddings`.
+[open_brain]
+enabled = true
+# Preferred: set OPEN_BRAIN_MCP_URL to the full MCP connection URL, including
+# ?key=... if your OB1 deployment uses query-param auth.
+connection_url_env = "OPEN_BRAIN_MCP_URL"
+access_key_env = "OPEN_BRAIN_ACCESS_KEY"
+search_limit = 8
+search_threshold = 0.5
+
 # Optional distributed PackChat binding. When enabled, Harkonnen still writes
 # factory/logs/packchat-bus.jsonl, and also publishes versioned PackChat
 # envelopes to the local Twilight Bark daemon.

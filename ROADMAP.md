@@ -3,9 +3,10 @@
 **Primary goal: structural coordination and trustworthy run governance on the hot path.**
 The fastest reasonable path: v1-A (Keeper-backed lease enforcement) → v1-B
 (memory invalidation persistence) → v1-D (operator context MVP) → Phase 2
-(testable harness) → Phase 5-C (context gating, no new infra) → Phase 5b
-(Qdrant, memory refactor) → Phase 6 (TypeDB) → Phase 7 (causal corpus) →
-Phase 8 (Calvin Archive).
+(testable harness) → Phase 5-C (context gating, no new infra) → Phase 5-D
+(PackChat conversation memory chain) → Phase 5b (OB1 memory abstraction,
+MCP prompts, OCR, memory refactor) → Phase 6 (TypeDB) → Phase 7 (causal
+corpus) → Phase 8 (Calvin Archive).
 Phase 10 (docs, DevBench, benchmark suites) follows the coordination path rather
 than interrupting it. Live twin provisioning is permanently deferred unless a
 product explicitly requires running service virtualization. Phase 2's real test
@@ -64,11 +65,12 @@ The factory needs a clear line from coordination authority to durable continuity
 3. **v1-D** — operator context MVP. Runs should stop starting from scratch when operator posture is already known.
 4. **Phase 2** — Bramble real test execution. This is the testable harness. `validation_passed` means nothing until it reflects real test output rather than stubs.
 5. **Phase 5-C** — per-phase context gating. Once roles and leases are real, irrelevant context becomes the next quality drag.
-6. **Phase 5b** — Qdrant, OCR, and memory refactor. This prepares the semantic layer without displacing the hot-path coordination authority.
-7. **Phase 6** — TypeDB semantic layer for cross-run typed causal queries.
-8. **Phase 7** — causal attribution corpus so the deeper continuity layer opens with real evidence.
-9. **Phase 8** — the Calvin Archive: persisted identity, governed integration, D*/SSA streaming. This remains the long-horizon destination, but no longer blocks coordination-first engineering.
-10. **Phase 10** — documentation, DevBench, benchmark suites. Important for external claims and usability but not on the current critical path.
+6. **Phase 5-D** — PackChat conversation memory chain. Twilight Bark conversations become durable memory candidates, Coobie distills them, OB1 stores shared recall, and Calvin receives only governed promotion contracts.
+7. **Phase 5b** — OB1 memory abstraction, OCR, MCP prompts, and memory refactor. This prepares the semantic layer without returning to the fragile local vector-store default.
+8. **Phase 6** — TypeDB semantic layer for cross-run typed causal queries.
+9. **Phase 7** — causal attribution corpus so the deeper continuity layer opens with real evidence.
+10. **Phase 8** — the Calvin Archive: persisted identity, governed integration, D*/SSA streaming. This remains the long-horizon destination, but no longer blocks coordination-first engineering.
+11. **Phase 10** — documentation, DevBench, benchmark suites. Important for external claims and usability but not on the current critical path.
 
 Parallel tracks (Compiled State Synthesis, External Integrations, Operator Model, Hosted/Team, Calvin Archive Visualizer) advance independently of the above sequence and do not block it.
 
@@ -271,11 +273,94 @@ Full design: `factory/context/briefing-scope-design.md` (BriefingScope) and `fac
 
 ---
 
+## Phase 5-D — PackChat Memory Distillation Chain
+
+**Unlocks:** The full conversation-to-continuity path. Twilight Bark carries live PackChat events, Harkonnen persists them as memory candidates, Coobie distills them into durable thoughts, Open Brain (OB1) stores shared semantic recall, and Calvin receives only governed promotion contracts.
+
+This is now the critical memory slice. It replaces the old assumption that the next step must be a larger local vector store. The local fastembed/SQLite vector store remains opt-in; OB1 is the shared recall default.
+
+### Calvin Archive sidecar correctness (pre-5-D gate)
+
+End-to-end integration tests (`tests/e2e_integration.rs`, 2026-04-28) confirmed two correctness bugs in the live Calvin sidecar that must be fixed before Phase 5-D activates the full Twilight → Calvin write path. They are small targeted fixes, not design changes.
+
+**Fix 1 — `get_active_beliefs` must be agent-scoped** (`archive.rs:241`).
+The current TypeQL query returns all beliefs not yet superseded globally. When more than one `agent_self` exists the query leaks foreign beliefs into any named agent's result set. Fix: add a `stabilizes` join before the `not { (prior: $b) isa revised_into; }` clause:
+
+```typeql
+match
+  $a isa agent_self, has name "{agent_name}";
+  $b isa belief, has narrative_summary $ns, has confidence $c;
+  (source: $b, target: $a) isa stabilizes;
+  not { (prior: $b) isa revised_into; };
+select $ns, $c;
+sort $c desc;
+limit 20;
+```
+
+**Fix 2 — `check_adaptation_safe` must cover semantic negation patterns** (`archive.rs:323`).
+The current implementation matches only literal `"not {trait}"`, `"remove {trait}"`, and `"eliminate {trait}"` substrings. Phrasings like `"avoid cooperative behaviour"`, `"deprioritise truth-seeking"`, or `"replace pack-awareness with solo efficiency"` all pass the check despite semantically negating core Labrador invariants. Fix: expand the pattern set to include at minimum `avoid`, `deprioritise`/`deprioritize`, `replace … with`, and `without {trait}` as negative signals; mark the check as `basic_heuristic` and plan a semantic classifier upgrade in Phase 6.
+
+**E2E test gate:** both fixes are covered by `calvin::beliefs_scoped_to_named_agent` and `calvin::adaptation_safety_catches_semantic_negation` in `tests/e2e_integration.rs`. These two tests must pass before Phase 5-D is considered open.
+
+### Data path
+
+```text
+Twilight Bark / PackChat envelope
+  -> memory_candidates table
+  -> Coobie distillation worker
+  -> Open Brain capture_thought
+  -> Open Brain search_thoughts in briefings
+  -> Calvin promotion contract
+```
+
+### What to build
+
+- `memory_candidates` table keyed by `candidate_id`, with `source_event_id`, `thread_id`, `run_id`, `agent_runtime_id`, `operation`, `raw_payload`, `importance_score`, `retention_class`, `sensitivity_label`, `evidence_refs`, `causality`, `status`, and timestamps.
+- PackChat/Twilight ingest hook that writes candidate rows idempotently from local PackChat messages and remote Twilight Bark envelopes.
+- Coobie distillation worker that groups nearby conversation fragments, summarizes memory-worthy content, dedupes against recent candidates and OB1 recall, classifies retention as `ephemeral`, `working`, `shared_recall`, or `calvin_candidate`, and preserves provenance.
+- OB1 writer path using `OpenBrainClient::capture_thought` for `shared_recall` candidates. Captured content must include source thread/run/event provenance and tags, but not raw secrets or unapproved sensitive payloads.
+- OB1 reader path already started by `OpenBrainClient::search_thoughts`; complete the ranking so OB1 hits sit beside repo-local memory, PackChat recency, and Calvin-approved facts in targeted Coobie briefings.
+- Calvin promotion contract for `calvin_candidate` rows. The contract includes proposed chamber targets, evidence refs, inference posture, confidence, Pathos score, preservation note, and recommended governance outcome: `accept`, `modify`, `reject`, or `quarantine`.
+- Operator review surface in the Consolidation Workbench for memory candidates and Calvin promotions. OB1 shared recall may be automatic for low-risk approved classes; Calvin promotion remains governed.
+- **Automatic candidate processing on run close.** `process_memory_candidates(run_id)` must be called automatically when a run is closed, not only on manual operator trigger. Wire the call into the `close_run` handler in `src/cli.rs` (or `api.rs`) immediately after the `run_record.status` is set to `"closed"`. Failures during processing must mark candidates as `retry_pending` rather than silently discarding them; a background retry task should poll for `retry_pending` rows. E2E test: `memory_candidates::run_close_triggers_candidate_processing`.
+- **Twilight ingest loop write-back to Calvin.** `spawn_twilight_ingest_loop()` in `chat.rs` currently ingests wire envelopes into the `memory_candidates` SQLite table but never forwards the `archive_contract` to the Calvin REST API. After ingesting each envelope, check `archive_contract.schema == "harkonnen.calvin.ingress.v1"`; if present and a `CalvinClient` is configured, call `calvin_client.record_experience()` with the fields mapped from `CalvinIngressEvent`. The `causation_id` from `PackChatWireEnvelope.causality` must also be forwarded: when non-null, call a subsequent write to record a `causally_contributed_to` link between the cause episode UUID and the effect episode UUID in Calvin (Pearl level: `Associational` by default; upgrade to `Interventional` after Coobie confirms the causal direction). E2E tests: `twilight::twilight_ingest_loop_writes_to_calvin`, `memory_candidates::causation_id_written_to_calvin_causal_graph`.
+- **Complete chamber mapping for all six chambers.** The `PackChatBusEventKind` → `chamber-label` mapping in `chat.rs` covers only four of the six Calvin Archive chambers (Mythos, Ethos, Logos, Praxis). Add the two missing kinds: `BeliefRevised` → `"episteme"` and `DriftDetected` → `"pathos"`. `BeliefRevised` events carry a `belief_id` and revised summary that should be forwarded as a `BeliefRevision` to the Calvin `/runs/{id}/beliefs` endpoint rather than as a generic experience. `DriftDetected` events carry a `lab_ness_score` and should record an experience in the Pathos chamber with `salience-weight` set from the drift magnitude. E2E test: `twilight::chamber_mapping_covers_all_six_chambers`.
+- **Zenoh presence TTL watcher → Calvin agent status.** When a Twilight agent presence entry expires (no heartbeat for TTL duration), the corresponding `agent_self` entity in Calvin remains indefinitely `"active"`. Add a Zenoh subscriber to the `twilight/{tenant}/+/presence/+` wildcard topic; on TTL expiry (heartbeat gap > presence TTL), call the Calvin API to update `agent_self.status` to `"offline"`. On re-registration, set status back to `"active"`. This keeps the Calvin continuity graph accurate without requiring manual intervention. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status`.
+
+### OpenZiti service profile
+
+Define the distributed trust model before broad deployment:
+
+| Service | Dial | Bind | Access posture |
+| --- | --- | --- | --- |
+| `twilight-bark.packchat` | approved agent runtimes, Pack Board | Twilight daemon nodes | Pack conversation and event bus |
+| `openbrain.mcp` | Harkonnen distiller, approved recall clients | OB1 server | Shared recall; write permission narrower than read |
+| `calvin.archive` | Coobie/Harkonnen archive writer, operator console | Calvin host | Governed archive write path |
+| `harkonnen.api` | operator console, approved integrations | Harkonnen host | Run control and review UI |
+
+OpenZiti Dial and Bind policies should be separate. Privileged writers should carry posture checks where available: enrolled identity, expected OS, MFA for operators, and known process checks for daemons. Remote agents can read OB1 recall through policy, but only the Harkonnen distiller writes Calvin promotion contracts by default.
+
+### Benchmark / product gate
+
+- **E2E integration test suite green:** all tests in `tests/e2e_integration.rs` pass, including the six gap tests that are currently failing (`calvin::beliefs_scoped_to_named_agent`, `calvin::adaptation_safety_catches_semantic_negation`, `twilight::twilight_ingest_loop_writes_to_calvin`, `twilight::chamber_mapping_covers_all_six_chambers`, `twilight::agent_presence_expiry_updates_calvin_agent_status`, `memory_candidates::run_close_triggers_candidate_processing`).
+- A PackChat thread with at least five messages produces one or more memory candidates.
+- A candidate marked `shared_recall` is captured in OB1 and later retrieved by `search_thoughts` during a targeted briefing.
+- A candidate marked `calvin_candidate` produces a structured promotion contract without directly mutating Calvin canonical state.
+- Candidate dedupe prevents repeated chat phrasing from producing duplicate OB1 thoughts.
+- Sensitivity labels prevent secrets and high-risk payloads from being sent to OB1 without review.
+- Closing a run automatically triggers candidate processing; zero `retry_pending` candidates remain after a clean run close.
+- A `causation_id`-bearing wire envelope produces a `causally_contributed_to` link in the Calvin causal graph.
+- OpenZiti policy documentation exists for all four services, including Dial/Bind identity roles.
+
+**Done when:** a live PackChat/Twilight conversation can become a distilled OB1 memory with provenance, the memory can improve a later briefing, identity-relevant material is routed to Calvin as a governed promotion proposal rather than as unstructured prose, and all six E2E integration gap tests pass.
+
+---
+
 ## Phase 5b — Memory Infrastructure, MCP Prompts + Rust-Native Servers
 
-**Unlocks:** Four things that must land before TypeDB (Phase 6) is viable: semantic recall at scale (Qdrant), document ingest completeness (OCR), a clean module structure for the memory layer, and a live MCP prompt surface that makes Coobie briefings and Sable isolation accessible from any Claude Code session — not just from the Rust orchestrator.
+**Unlocks:** Four things that must land before TypeDB (Phase 6) is viable: a clean memory module structure, document ingest completeness (OCR), a live MCP prompt surface, and an OB1-backed memory abstraction that keeps shared recall available across Claude, ChatGPT, Codex, Cursor, Twilight-connected agents, and Harkonnen itself.
 
-This phase also eliminates the three `npx` Node.js MCP server processes in favour of a single compiled Rust binary, closing the last non-Rust runtime dependency in the hot path.
+This phase also eliminates Harkonnen's remaining local `npx` MCP helper processes in favour of a single compiled Rust binary where Harkonnen owns the tool surface. OB1 itself may still be reached through its MCP endpoint or a `supergateway` bridge; that is an external service boundary, not a Harkonnen hot-path runtime dependency.
 
 **What to build:**
 
@@ -288,7 +373,9 @@ src/memory/
   mod.rs          # re-exports; MemoryStore trait
   working.rs      # short-term blackboard (SQLite-backed)
   episodic.rs     # run episodes, briefing_scope field
-  semantic.rs     # SemanticMemory trait; SQLite vector impl now, Qdrant in this phase
+  semantic.rs     # SemanticMemory trait; OB1 default impl, local vector fallback optional
+  semantic_openbrain.rs # Open Brain (OB1) MCP-backed shared recall implementation
+  semantic_local.rs     # optional fastembed/OpenAI-compatible local vector fallback
   causal.rs       # causal links, failure patterns
   consolidation.rs
   blackboard.rs
@@ -298,11 +385,11 @@ src/memory/
   context_budget.rs  # phase_defaults(), ContextSection, token counting utilities
 ```
 
-No behaviour change. This is the maintainability gate that lets TypeDB's `SemanticMemory` implementation slot in cleanly in Phase 6.
+No behaviour change beyond preserving OB1 as the default semantic recall path. This is the maintainability gate that lets TypeDB's typed causal query implementation slot in cleanly in Phase 6.
 
-### Qdrant integration
+### Open Brain (OB1) semantic integration
 
-Add `src/memory/semantic_qdrant.rs` implementing the `SemanticMemory` trait from COOBIE_SPEC against a Qdrant instance. Payload metadata fields: `org`, `role`, `product`, `spec_id`, `run_id`, `agent`, `memory_type`, `tags`, `created_at`. Qdrant replaces the SQLite vector store for long-term semantic memory; SQLite remains the short-term and episodic store. Bootstrap script at `scripts/bootstrap-coobie-memory-stack.sh` already exists.
+Add `src/memory/semantic_openbrain.rs` implementing the `SemanticMemory` trait against Open Brain via the existing `OpenBrainClient`. Payload metadata fields: `org`, `role`, `product`, `spec_id`, `run_id`, `thread_id`, `source_event_id`, `agent`, `memory_type`, `tags`, `sensitivity_label`, `created_at`. OB1 replaces the local vector store as the default long-term semantic memory. SQLite remains the short-term, episodic, causal, and review store. The fastembed/SQLite vector path remains available as `semantic_local.rs` behind `--features local-embeddings`, and Qdrant becomes an optional accelerator only if a future deployment needs local high-volume vector serving.
 
 ### Scanned document ingestion (`pdfium-render` + Claude vision)
 
@@ -414,23 +501,24 @@ Each variant is a typed `reqwest` call to the provider's REST API. `SubAgentBack
 
 **Benchmark gate:**
 
-- Re-run `FRAMES` after Qdrant lands to confirm multi-hop recall improves over the SQLite vector baseline
+- Re-run `FRAMES` after OB1 lands as the default semantic recall path to confirm multi-hop recall improves over the SQLite/local-vector baseline
 - `LongMemEval` and `LoCoMo` re-run to confirm semantic recall quality does not regress
 - Re-run `StreamingQA` to confirm belief-update accuracy does not regress after the module refactor
 - MCP prompt round-trip test: `coobie/briefing` for a known run returns a briefing containing at least one memory hit and zero items tagged with Mason-scoped categories
 - Token budget enforcement test: `coobie/briefing` called with `max_tokens=500` returns ≤ 500 tokens of ranked content with required sections present regardless of budget
-- `memory_pull` latency: p95 round-trip under 200ms on home-linux against the live SQLite + Qdrant stack
+- `memory_pull` latency: p95 round-trip under 500ms on home-linux against SQLite + OB1, with local-cache hits under 200ms when available
 - Context utilization baseline: record `utilization_rate` for 10 runs across Scout, Mason, and Sable scopes; establish the floor before Phase 7 causal corpus work begins
 
 **Done when:**
 
 - `src/memory.rs` is split into the COOBIE_SPEC module tree; `BriefingScope` and `ContextTarget` live in `src/memory/briefing.rs`; `phase_defaults()` and token budget utilities in `src/memory/context_budget.rs`
 - `build_targeted_briefing()` is the sole briefing entry point; no call site uses the old `build_preflight_briefing` or `build_scoped_briefing`
-- Qdrant is serving semantic queries for long-term memory
+- OB1 is serving semantic queries for long-term shared recall through the `SemanticMemory` abstraction
+- local fastembed/SQLite vectors remain opt-in and compile-disabled by default
 - OCR-scanned PDFs can be ingested via `memory ingest`
 - `mcp_server.rs` serves all four named prompts with `ContextTarget` budget enforcement; `memory_pull` tool is live; `/mcp coobie/briefing` works in a Claude Code session and respects `max_tokens`
 - Episode records include `ContextUtilization` with `utilization_rate`; 10-run baseline collected
-- The three `npx` MCP server entries are replaced by `harkonnen mcp serve` in `harkonnen.toml`; Node.js is no longer required at runtime
+- Harkonnen-owned local MCP helper entries are replaced by `harkonnen mcp serve` in `harkonnen.toml`; Node.js is no longer required for Harkonnen's local helper surface
 - `llm.rs` exposes `ProviderBackend` with Anthropic, OpenAI, and Gemini variants; `SubAgentBackend::CodexPlanAgent` routes through `ProviderBackend::OpenAi` with no subprocess spawn
 
 ---
@@ -451,6 +539,7 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 - Write-back: after Phase 5 consolidation approval, promoted lessons and causal links written to TypeDB as well as the file store
 - Query surface: `POST /api/coobie/query` routes natural-language causal questions through Coobie's retrieval chain
 - Coobie's briefing builder calls TypeDB for cross-run pattern queries before preflight
+- **Semantic adaptation safety classifier** — upgrade `check_adaptation_safe` in `archive.rs` from heuristic string-matching to an embedding-based classifier. Represent each Labrador kernel trait as a vector; score the proposed adaptation summary against the negation-space of each trait using cosine similarity. Flag any adaptation that scores above a configurable negation threshold as unsafe regardless of literal phrasing. This replaces the `basic_heuristic` marker added in the Phase 5-D correctness fix. E2E test: `calvin::adaptation_safety_catches_semantic_negation` (currently passing with the mock; the real TypeDB path must pass the same assertion).
 - **GAIA Level 3 adapter** — maps GAIA's multi-step tool-use tasks to Harkonnen's factory run format; routes sub-tasks to the appropriate Labrador rather than a single generalist. Requires the TypeDB query surface to be live.
 - **AgentBench adapters** — OS, database, and web environments, each mapped to a Labrador role.
 
@@ -1152,7 +1241,8 @@ Benchmarks advance in lockstep with implementation phases. Each phase ships with
 | v1 | Decision audit completeness, memory supersession accuracy (StreamingQA), WrongAnswer classification rate |
 | Phase 2 | SWE-bench Verified readiness, LiveCodeBench, Aider Polyglot |
 | Phase 5-C | Briefing scope log per run (correctness verification, not a scored benchmark) |
-| Phase 5b | FRAMES re-run (Qdrant), LongMemEval / LoCoMo regression check |
+| Phase 5-D | PackChat-to-OB1 candidate capture and retrieval smoke; Calvin promotion contract smoke |
+| Phase 5b | FRAMES re-run (OB1 default recall), LongMemEval / LoCoMo regression check |
 | Phase 6 | GAIA Level 3, AgentBench, TypeDB vs SQL causal recall comparison |
 | Phase 7 | E-CARE, causal attribution accuracy (top-1 / top-3) |
 | Phase 8 | D* drift score, SSA baseline, quarantine resolution quality, schema revision stability |
@@ -1168,7 +1258,7 @@ Benchmarks advance in lockstep with implementation phases. Each phase ships with
 
 #### vs Mem0 / MindPalace / Zep
 
-- `FRAMES` — multi-hop factual recall; Mem0 publishes here. Native adapter live. Requires Phase 5b Qdrant for best results.
+- `FRAMES` — multi-hop factual recall; Mem0 publishes here. Native adapter live. Re-run after OB1 becomes the default shared recall path and compare against the local-vector baseline.
 - `StreamingQA` — belief-update accuracy; no competitor tracks this. Phase v1-B.
 - `HELMET` — retrieval precision/recall. Native adapter live.
 - `LongMemEval` — long-term assistant memory. Native adapter live.
@@ -1236,7 +1326,7 @@ Every reportable benchmark claim should include:
 - Coobie causal streaks and cross-run pattern detection
 - Coobie Phase 3 preflight guidance (spec-scoped cause history → required checks)
 - Coobie Palace (`src/coobie_palace.rs`) — den-based compound recall, patrol, scents
-- Semantic memory (fastembed or OpenAI-compatible embeddings + SQLite vector store, hybrid retrieval)
+- Semantic memory (Open Brain / OB1 by default; fastembed or OpenAI-compatible embeddings + SQLite vector store optional)
 - Causal feedback loop (causal reports + Sable rationale written back to project memory)
 - Keeper coordination API (claims, heartbeats, conflict detection, release)
 - Pack Board React UI (PackChat panel, Attribution Board, Factory Floor, Memory Board)

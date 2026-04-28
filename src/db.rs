@@ -524,6 +524,73 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS memory_candidates (
+            candidate_id      TEXT PRIMARY KEY,
+            source_event_id   TEXT NOT NULL UNIQUE,
+            thread_id         TEXT,
+            run_id            TEXT,
+            spec_id           TEXT,
+            message_id        TEXT,
+            agent_runtime_id  TEXT,
+            agent             TEXT,
+            role              TEXT NOT NULL DEFAULT 'system',
+            operation         TEXT NOT NULL,
+            raw_payload       TEXT NOT NULL DEFAULT '{}',
+            distilled_content TEXT,
+            dedupe_key        TEXT,
+            importance_score  REAL NOT NULL DEFAULT 0.0,
+            retention_class   TEXT NOT NULL DEFAULT 'working',
+            sensitivity_label TEXT NOT NULL DEFAULT 'normal',
+            evidence_refs     TEXT NOT NULL DEFAULT '[]',
+            causality_json    TEXT NOT NULL DEFAULT '{}',
+            status            TEXT NOT NULL DEFAULT 'pending',
+            openbrain_ref     TEXT,
+            calvin_contract_json TEXT,
+            created_at        TEXT NOT NULL,
+            processed_at      TEXT
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    ensure_column(
+        &pool,
+        "memory_candidates",
+        "dedupe_key",
+        "ALTER TABLE memory_candidates ADD COLUMN dedupe_key TEXT",
+    )
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_memory_candidates_run_status
+        ON memory_candidates (run_id, status, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_memory_candidates_thread_status
+        ON memory_candidates (thread_id, status, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_memory_candidates_dedupe_status
+        ON memory_candidates (dedupe_key, status)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // ── Operator Model Activation tables ──────────────────────────────────────
 
     sqlx::query(

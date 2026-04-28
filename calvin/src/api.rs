@@ -27,6 +27,7 @@ pub(crate) fn router(state: Arc<CalvinState>) -> Router {
         .route("/agents/:name/traits", get(get_traits))
         .route("/agents/:name/beliefs", get(get_beliefs))
         .route("/agents/:name/check", post(check_adaptation))
+        .route("/agents/:name/status", patch(patch_agent_status))
         .route("/agents/:name/metrics", get(get_metrics))
         .route("/telemetry", post(write_event))
         .route("/telemetry/batch", post(write_events_batch))
@@ -179,6 +180,26 @@ async fn check_adaptation(
         .await
     {
         Ok(safe) => Json(CheckAdaptationResponse { safe }).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct PatchAgentStatusRequest {
+    status: String,
+}
+
+async fn patch_agent_status(
+    State(state): State<Arc<CalvinState>>,
+    Path(name): Path<String>,
+    Json(req): Json<PatchAgentStatusRequest>,
+) -> impl IntoResponse {
+    match state.archive.update_agent_status(&name, &req.status).await {
+        Ok(()) => StatusCode::OK.into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),

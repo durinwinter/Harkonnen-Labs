@@ -1,13 +1,15 @@
 name: memory
 description: >
-  Persistent key-value memory store via MCP.
-  Backs memory_store and metadata_query tool aliases for Coobie.
-  Replaces AnythingLLM for Claude-only setups (work-windows) and as a
-  lightweight alternative on home-linux when document RAG is not needed.
+  Open Brain (OB1) shared memory via MCP.
+  Backs memory_store and metadata_query tool aliases for Coobie while keeping
+  recall available across Claude, ChatGPT, Codex, Cursor, and Twilight-connected
+  agents.
 command: npx
 args:
   - "-y"
-  - "@modelcontextprotocol/server-memory"
+  - "supergateway"
+  - "--streamableHttp"
+  - "${OPEN_BRAIN_MCP_URL}"
 tool_aliases:
   - memory_store
   - metadata_query
@@ -16,8 +18,6 @@ platforms:
   - windows
   - darwin
 notes: >
-  Requires Node.js. State is stored in the MCP server process memory by
-  default — for persistence across restarts configure MEMORY_FILE_PATH
-  env var to point at a JSON file inside factory/memory/.
-  For richer document RAG (large corpora, semantic search) prefer
-  AnythingLLM on setups that have Docker available.
+  Requires Node.js and OPEN_BRAIN_MCP_URL set to the OB1 MCP connection URL.
+  OB1 stores thoughts in its shared database with vector search, so Harkonnen
+  no longer needs the ORT-backed local fastembed path by default.

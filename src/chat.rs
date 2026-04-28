@@ -144,6 +144,10 @@ pub enum PackChatBusEventKind {
     ThreadRosterSynced,
     MessageAppended,
     CheckpointResolved,
+    /// A belief was revised during a run; routes to the Episteme chamber in Calvin.
+    BeliefRevised,
+    /// Identity drift was detected; routes to the Pathos chamber in Calvin.
+    DriftDetected,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -226,6 +230,33 @@ pub struct CalvinIngressEvent {
 pub struct CalvinEvidenceRef {
     pub ref_type: String,
     pub id: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct MemoryCandidate {
+    pub candidate_id: String,
+    pub source_event_id: String,
+    pub thread_id: Option<String>,
+    pub run_id: Option<String>,
+    pub spec_id: Option<String>,
+    pub message_id: Option<String>,
+    pub agent_runtime_id: Option<String>,
+    pub agent: Option<String>,
+    pub role: String,
+    pub operation: String,
+    pub raw_payload: Value,
+    pub distilled_content: Option<String>,
+    pub dedupe_key: Option<String>,
+    pub importance_score: f64,
+    pub retention_class: String,
+    pub sensitivity_label: String,
+    pub evidence_refs: Value,
+    pub causality_json: Value,
+    pub status: String,
+    pub openbrain_ref: Option<String>,
+    pub calvin_contract_json: Option<Value>,
+    pub created_at: chrono::DateTime<Utc>,
+    pub processed_at: Option<chrono::DateTime<Utc>>,
 }
 
 impl PackChatWireEnvelope {
@@ -429,6 +460,12 @@ impl ChatStore {
             }
             PackChatBusEventKind::CheckpointResolved => {
                 format!("chat/{}/checkpoint", thread.thread_id)
+            }
+            PackChatBusEventKind::BeliefRevised => {
+                format!("chat/{}/belief", thread.thread_id)
+            }
+            PackChatBusEventKind::DriftDetected => {
+                format!("chat/{}/drift", thread.thread_id)
             }
         };
         PackChatBusEvent {
@@ -716,6 +753,8 @@ impl ChatStore {
             .execute(&self.pool)
             .await?;
 
+        self.capture_memory_candidate_from_event(event).await?;
+
         Ok(())
     }
 
@@ -848,7 +887,11 @@ impl ChatStore {
             created_at: now,
         };
         if let Ok(Some(thread)) = self.get_thread(thread_id).await {
-            self.publish_bus_event(self.build_message_event(&thread, &message));
+            let event = self.build_message_event(&thread, &message);
+            if let Err(error) = self.capture_memory_candidate_from_event(&event).await {
+                tracing::warn!("packchat memory candidate capture failed: {}", error);
+            }
+            self.publish_bus_event(event);
         }
         Ok(message)
     }
@@ -875,6 +918,181 @@ impl ChatStore {
                 created_at: parse_dt(r.get("created_at")),
             })
             .collect())
+    }
+
+    pub async fn list_memory_candidates_for_run(
+        &self,
+        run_id: &str,
+    ) -> Result<Vec<MemoryCandidate>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                   agent_runtime_id, agent, role, operation, raw_payload, distilled_content, dedupe_key,
+                   importance_score, retention_class, sensitivity_label, evidence_refs,
+                   causality_json, status, openbrain_ref, calvin_contract_json, created_at,
+                   processed_at
+            FROM memory_candidates
+            WHERE run_id = ?1
+            ORDER BY created_at ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        rows.into_iter().map(parse_memory_candidate).collect()
+    }
+
+    pub async fn list_pending_memory_candidates(
+        &self,
+        run_id: Option<&str>,
+        limit: usize,
+    ) -> Result<Vec<MemoryCandidate>> {
+        let rows = if let Some(run_id) = run_id {
+            sqlx::query(
+                r#"
+                SELECT candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                       agent_runtime_id, agent, role, operation, raw_payload, distilled_content, dedupe_key,
+                       importance_score, retention_class, sensitivity_label, evidence_refs,
+                       causality_json, status, openbrain_ref, calvin_contract_json, created_at,
+                       processed_at
+                FROM memory_candidates
+                WHERE run_id = ?1 AND status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT ?2
+                "#,
+            )
+            .bind(run_id)
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                       agent_runtime_id, agent, role, operation, raw_payload, distilled_content, dedupe_key,
+                       importance_score, retention_class, sensitivity_label, evidence_refs,
+                       causality_json, status, openbrain_ref, calvin_contract_json, created_at,
+                       processed_at
+                FROM memory_candidates
+                WHERE status = 'pending'
+                ORDER BY created_at ASC
+                LIMIT ?1
+                "#,
+            )
+            .bind(limit as i64)
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        rows.into_iter().map(parse_memory_candidate).collect()
+    }
+
+    pub async fn update_memory_candidate_processing(
+        &self,
+        candidate_id: &str,
+        status: &str,
+        distilled_content: Option<&str>,
+        openbrain_ref: Option<&str>,
+        dedupe_key: Option<&str>,
+        calvin_contract_json: Option<&Value>,
+    ) -> Result<()> {
+        sqlx::query(
+            r#"
+            UPDATE memory_candidates
+            SET status = ?2,
+                distilled_content = COALESCE(?3, distilled_content),
+                openbrain_ref = COALESCE(?4, openbrain_ref),
+                dedupe_key = COALESCE(?5, dedupe_key),
+                calvin_contract_json = COALESCE(?6, calvin_contract_json),
+                processed_at = ?7
+            WHERE candidate_id = ?1
+            "#,
+        )
+        .bind(candidate_id)
+        .bind(status)
+        .bind(distilled_content)
+        .bind(openbrain_ref)
+        .bind(dedupe_key)
+        .bind(
+            calvin_contract_json
+                .map(serde_json::to_string)
+                .transpose()?,
+        )
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(())
+    }
+
+    async fn capture_memory_candidate_from_event(&self, event: &PackChatBusEvent) -> Result<()> {
+        if event.kind != PackChatBusEventKind::MessageAppended {
+            return Ok(());
+        }
+        let Some(message_id) = event.message_id.as_deref() else {
+            return Ok(());
+        };
+        let content = event.content.as_deref().unwrap_or(&event.content_preview);
+        if content.trim().is_empty() {
+            return Ok(());
+        }
+
+        let retention_class = classify_memory_retention(event, content);
+        let sensitivity_label = classify_memory_sensitivity(content);
+        let importance_score = score_memory_importance(event, content, &retention_class);
+        let evidence_refs = memory_candidate_evidence_refs(event);
+        let causality_json = serde_json::to_value(PackChatCausality {
+            correlation_id: event
+                .run_id
+                .clone()
+                .or_else(|| event.thread_id.clone())
+                .or_else(|| event.checkpoint_id.clone()),
+            causation_id: event.checkpoint_id.clone(),
+        })?;
+        let calvin_contract = build_calvin_ingress_event(event)
+            .map(|contract| serde_json::to_value(contract))
+            .transpose()?;
+
+        sqlx::query(
+            r#"
+            INSERT OR IGNORE INTO memory_candidates
+                (candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                 agent_runtime_id, agent, role, operation, raw_payload, distilled_content,
+                 dedupe_key,
+                 importance_score, retention_class, sensitivity_label, evidence_refs,
+                 causality_json, status, openbrain_ref, calvin_contract_json, created_at,
+                 processed_at)
+            VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, NULL, ?12,
+                    ?13, ?14, ?15, ?16, ?17, 'pending', NULL, ?18, ?19, NULL)
+            "#,
+        )
+        .bind(format!("memcand-{message_id}"))
+        .bind(&event.event_id)
+        .bind(&event.thread_id)
+        .bind(&event.run_id)
+        .bind(&event.spec_id)
+        .bind(message_id)
+        .bind(&event.agent_runtime_id)
+        .bind(&event.agent)
+        .bind(event.role.as_deref().unwrap_or("system"))
+        .bind("packchat.message_appended")
+        .bind(serde_json::to_string(event)?)
+        .bind(memory_candidate_dedupe_key(content))
+        .bind(importance_score)
+        .bind(retention_class)
+        .bind(sensitivity_label)
+        .bind(serde_json::to_string(&evidence_refs)?)
+        .bind(serde_json::to_string(&causality_json)?)
+        .bind(
+            calvin_contract
+                .map(|value| serde_json::to_string(&value))
+                .transpose()?,
+        )
+        .bind(event.emitted_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(())
     }
 
     // ── Checkpoints ───────────────────────────────────────────────────────────
@@ -1651,6 +1869,14 @@ fn default_thread_metadata() -> Value {
 }
 
 fn build_calvin_ingress_event(event: &PackChatBusEvent) -> Option<CalvinIngressEvent> {
+    // BeliefRevised and DriftDetected are handled by dedicated Calvin endpoints
+    // (revise_belief and update_agent_status). They do not produce generic experience records.
+    if matches!(
+        event.kind,
+        PackChatBusEventKind::BeliefRevised | PackChatBusEventKind::DriftDetected
+    ) {
+        return None;
+    }
     if event.kind != PackChatBusEventKind::MessageAppended {
         return None;
     }
@@ -1707,12 +1933,125 @@ fn build_calvin_ingress_event(event: &PackChatBusEvent) -> Option<CalvinIngressE
     })
 }
 
+fn classify_memory_retention(event: &PackChatBusEvent, content: &str) -> &'static str {
+    let normalized = normalize_retrieval_text(content);
+    if event.checkpoint_id.is_some()
+        || normalized.contains("calvin")
+        || normalized.contains("identity")
+        || normalized.contains("belief")
+        || normalized.contains("policy")
+        || normalized.contains("contract")
+        || normalized.contains("decision")
+        || normalized.contains("archive")
+    {
+        return "calvin_candidate";
+    }
+    if normalized.contains("remember this")
+        || normalized.contains("remember that")
+        || normalized.contains("i prefer")
+        || normalized.contains("my preference")
+        || normalized.contains("default")
+        || event.role.as_deref() == Some("operator") && looks_like_operator_fact(&normalized)
+    {
+        return "shared_recall";
+    }
+    "working"
+}
+
+fn classify_memory_sensitivity(content: &str) -> &'static str {
+    let normalized = normalize_retrieval_text(content);
+    if normalized.contains("password")
+        || normalized.contains("secret")
+        || normalized.contains("api key")
+        || normalized.contains("token")
+        || normalized.contains("private key")
+        || normalized.contains("credential")
+    {
+        "sensitive_review"
+    } else {
+        "normal"
+    }
+}
+
+fn memory_candidate_dedupe_key(content: &str) -> String {
+    normalize_retrieval_text(content)
+        .split_whitespace()
+        .take(80)
+        .collect::<Vec<_>>()
+        .join(" ")
+}
+
+fn score_memory_importance(event: &PackChatBusEvent, content: &str, retention_class: &str) -> f64 {
+    let mut score: f64 = match retention_class {
+        "calvin_candidate" => 0.9,
+        "shared_recall" => 0.75,
+        _ => 0.35,
+    };
+    if event.role.as_deref() == Some("operator") {
+        score += 0.1;
+    }
+    if content.chars().count() > 240 {
+        score += 0.05;
+    }
+    score.min(1.0)
+}
+
+fn looks_like_operator_fact(normalized: &str) -> bool {
+    [
+        "i am",
+        "im",
+        "i was",
+        "i have",
+        "i had",
+        "i work",
+        "i live",
+        "i like",
+        "i love",
+        "my favorite",
+        "my name",
+        "my job",
+        "my project",
+        "we use",
+        "we prefer",
+    ]
+    .iter()
+    .any(|pattern| normalized.contains(pattern))
+}
+
+fn memory_candidate_evidence_refs(event: &PackChatBusEvent) -> Value {
+    let mut refs = vec![serde_json::json!({
+        "ref_type": "packchat_event",
+        "id": event.event_id,
+    })];
+    if let Some(message_id) = event.message_id.as_ref() {
+        refs.push(serde_json::json!({
+            "ref_type": "packchat_message",
+            "id": message_id,
+        }));
+    }
+    if let Some(thread_id) = event.thread_id.as_ref() {
+        refs.push(serde_json::json!({
+            "ref_type": "packchat_thread",
+            "id": thread_id,
+        }));
+    }
+    Value::Array(refs)
+}
+
 fn calvin_chamber_for_packchat_event(event: &PackChatBusEvent) -> &'static str {
-    match event.role.as_deref() {
-        Some("operator") => "pathos",
-        Some("agent") => "praxis",
-        Some("system") => "logos",
-        _ => "episteme",
+    // Event kind takes priority — specific event kinds map directly to chambers.
+    match event.kind {
+        PackChatBusEventKind::ThreadOpened => "mythos",
+        PackChatBusEventKind::ThreadRosterSynced => "ethos",
+        PackChatBusEventKind::BeliefRevised => "episteme",
+        PackChatBusEventKind::DriftDetected => "pathos",
+        PackChatBusEventKind::CheckpointResolved => "praxis",
+        // MessageAppended: fall through to role-based routing for the Logos default.
+        PackChatBusEventKind::MessageAppended => match event.role.as_deref() {
+            Some("agent") => "praxis",
+            Some("system") => "logos",
+            _ => "logos",
+        },
     }
 }
 
@@ -1940,6 +2279,45 @@ fn parse_chat_thread(row: sqlx::sqlite::SqliteRow) -> Result<ChatThread> {
     })
 }
 
+fn parse_memory_candidate(row: sqlx::sqlite::SqliteRow) -> Result<MemoryCandidate> {
+    Ok(MemoryCandidate {
+        candidate_id: row.get("candidate_id"),
+        source_event_id: row.get("source_event_id"),
+        thread_id: row.get("thread_id"),
+        run_id: row.get("run_id"),
+        spec_id: row.get("spec_id"),
+        message_id: row.get("message_id"),
+        agent_runtime_id: row.get("agent_runtime_id"),
+        agent: row.get("agent"),
+        role: row.get("role"),
+        operation: row.get("operation"),
+        raw_payload: row
+            .get::<Option<String>, _>("raw_payload")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default(),
+        distilled_content: row.get("distilled_content"),
+        dedupe_key: row.get("dedupe_key"),
+        importance_score: row.get("importance_score"),
+        retention_class: row.get("retention_class"),
+        sensitivity_label: row.get("sensitivity_label"),
+        evidence_refs: row
+            .get::<Option<String>, _>("evidence_refs")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_else(|| Value::Array(Vec::new())),
+        causality_json: row
+            .get::<Option<String>, _>("causality_json")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default(),
+        status: row.get("status"),
+        openbrain_ref: row.get("openbrain_ref"),
+        calvin_contract_json: row
+            .get::<Option<String>, _>("calvin_contract_json")
+            .and_then(|value| serde_json::from_str(&value).ok()),
+        created_at: parse_dt(row.get("created_at")),
+        processed_at: row.get::<Option<String>, _>("processed_at").map(parse_dt),
+    })
+}
+
 fn parse_thread_kind(value: String) -> Result<ChatThreadKind> {
     match value.as_str() {
         "general" => Ok(ChatThreadKind::General),
@@ -2040,6 +2418,14 @@ mod tests {
         );
         assert!(excerpt.contains("Business Administration"));
         assert!(excerpt.starts_with("...") || excerpt.ends_with("..."));
+    }
+
+    #[test]
+    fn memory_candidate_dedupe_key_ignores_punctuation_and_case() {
+        assert_eq!(
+            memory_candidate_dedupe_key("Remember this: OB1 is default!"),
+            memory_candidate_dedupe_key("remember this ob1 is default")
+        );
     }
 
     #[test]
@@ -2148,6 +2534,7 @@ mod tests {
         .execute(&pool)
         .await
         .expect("messages table");
+        create_memory_candidates_table(&pool).await;
 
         let store = ChatStore::new(pool.clone());
         let event = PackChatBusEvent {
@@ -2185,5 +2572,123 @@ mod tests {
             .expect("messages");
         assert_eq!(messages.len(), 1);
         assert_eq!(messages[0].content, "remote hello from Twilight");
+        let candidates = store
+            .list_memory_candidates_for_run("run-remote")
+            .await
+            .expect("memory candidates");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].message_id.as_deref(), Some("msg-remote"));
+    }
+
+    #[tokio::test]
+    async fn append_message_creates_shared_recall_candidate() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_threads (
+                thread_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                spec_id TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                thread_kind TEXT NOT NULL DEFAULT 'general',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("threads table");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_messages (
+                message_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES chat_threads(thread_id),
+                role TEXT NOT NULL,
+                agent TEXT,
+                agent_runtime_id TEXT,
+                content TEXT NOT NULL,
+                checkpoint_id TEXT,
+                created_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("messages table");
+        create_memory_candidates_table(&pool).await;
+
+        let store = ChatStore::new(pool.clone());
+        store
+            .open_thread(&OpenThreadRequest {
+                run_id: Some("run-candidate".to_string()),
+                spec_id: Some("spec-candidate".to_string()),
+                title: Some("Candidate Test".to_string()),
+                thread_kind: ChatThreadKind::Run,
+                metadata_json: None,
+            })
+            .await
+            .expect("open thread");
+        let thread = store
+            .list_threads(Some("run-candidate"), Some(&ChatThreadKind::Run), 1)
+            .await
+            .expect("threads")
+            .remove(0);
+        store
+            .append_message(
+                &thread.thread_id,
+                "operator",
+                Some("coobie"),
+                None,
+                "remember this: Open Brain is the default shared recall path",
+                None,
+            )
+            .await
+            .expect("append");
+
+        let candidates = store
+            .list_memory_candidates_for_run("run-candidate")
+            .await
+            .expect("candidates");
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.retention_class == "shared_recall"));
+    }
+
+    async fn create_memory_candidates_table(pool: &SqlitePool) {
+        sqlx::query(
+            r#"
+            CREATE TABLE memory_candidates (
+                candidate_id TEXT PRIMARY KEY,
+                source_event_id TEXT NOT NULL UNIQUE,
+                thread_id TEXT,
+                run_id TEXT,
+                spec_id TEXT,
+                message_id TEXT,
+                agent_runtime_id TEXT,
+                agent TEXT,
+                role TEXT NOT NULL DEFAULT 'system',
+                operation TEXT NOT NULL,
+                raw_payload TEXT NOT NULL DEFAULT '{}',
+                distilled_content TEXT,
+                dedupe_key TEXT,
+                importance_score REAL NOT NULL DEFAULT 0.0,
+                retention_class TEXT NOT NULL DEFAULT 'working',
+                sensitivity_label TEXT NOT NULL DEFAULT 'normal',
+                evidence_refs TEXT NOT NULL DEFAULT '[]',
+                causality_json TEXT NOT NULL DEFAULT '{}',
+                status TEXT NOT NULL DEFAULT 'pending',
+                openbrain_ref TEXT,
+                calvin_contract_json TEXT,
+                created_at TEXT NOT NULL,
+                processed_at TEXT
+            )
+            "#,
+        )
+        .execute(pool)
+        .await
+        .expect("memory candidates table");
     }
 }

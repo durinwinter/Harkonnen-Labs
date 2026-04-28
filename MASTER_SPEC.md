@@ -11,7 +11,7 @@ For source docs still referenced individually: [09-Identity-Continuity.md](the-s
 
 ### What This System Is
 
-A local-first, spec-driven, causally-aware AI software factory. Humans define intent and judge outcomes. A pack of nine specialist agents executes with discipline. Coobie remembers what worked. The Calvin Archive preserves who the agents are as they learn.
+A local-first, spec-driven, causally-aware AI software factory. Humans define intent and judge outcomes. A pack of nine specialist agents executes with discipline. Twilight Bark carries pack conversations across runtimes. Open Brain (OB1) provides shared semantic recall. Coobie decides what should be remembered. The Calvin Archive preserves who the agents are as they learn.
 
 The factory separates three things that most AI systems collapse together:
 
@@ -60,12 +60,16 @@ Multi-Agent Execution (Scout → Mason → Piper → Bramble → Sable → Ash �
 Validation (visible tests + hidden scenarios)
    ↓
 Artifact Production
+  ↓
+PackChat / Twilight Bark Conversation Capture
    ↓
-Episodic Capture + Causal Analysis (Coobie)
+Memory Distillation + Causal Analysis (Coobie)
+   ↓
+Open Brain Shared Recall
    ↓
 Operator-Reviewed Consolidation
    ↓
-Structured Memory + Soul Graph Update
+Calvin Archive Promotion + Soul Graph Update
    ↓
 Better Next Run
 ```
@@ -94,6 +98,7 @@ src/                    Rust CLI (cargo run -- <command>)
   llm.rs                LLM request/response types and provider routing
   memory.rs             File-backed memory store, init, reindex, retrieve
   models.rs             Shared data types (Spec, RunRecord, EpisodeRecord, etc.)
+  openbrain.rs          Open Brain (OB1) MCP client for shared semantic recall
   operator_model.rs     Operator model interview, layers, and artifact generation
   orchestrator.rs       AppContext, run lifecycle, all Labrador phase methods
   pidgin.rs             Inter-agent message format and handoff protocol
@@ -187,6 +192,8 @@ cargo run -- setup check
 | Orchestrator | Coordinate runs, phase handoffs, retries, state transitions | Live |
 | Agent Role System | Nine specialist agents with bounded tools and permissions | Live |
 | Memory System (Coobie) | Six-layer memory: working, episodic, semantic, causal, blackboard, consolidation | Live (partially) |
+| Open Brain (OB1) | Default shared semantic recall across AI clients via MCP | Default when `OPEN_BRAIN_MCP_URL` is configured |
+| Twilight Bark PackChat Binding | Distributed PackChat envelope transport for conversations, checkpoints, and agent events | Initial bridge live; distillation chain planned |
 | Calvin Archive | Typed autobiographical and identity continuity archive for persisted agents | Planned (Phase 8) |
 | Hidden Scenario System | Protected behavioral evaluation isolated from implementation agents | Live |
 | Digital Twin Environment | Simulated external systems for safe integration evaluation | Partial |
@@ -286,7 +293,7 @@ Coobie manages six distinct layers — not one undifferentiated note pile:
 | --- | --- | --- | --- |
 | Working Memory | Current run state, active hypotheses, blockers — token-budgeted, ephemeral | SQLite row / in-process state | Live |
 | Episodic Memory | Ordered execution traces (state → action → result) with phase attribution | Append-only SQLite + JSONL per run | Live |
-| Semantic Memory | Stable facts, patterns, invariants — hybrid vector + keyword retrieval | fastembed + SQLite vector store | Live |
+| Semantic Memory | Stable facts, patterns, invariants — shared recall first, local vector fallback optional | Open Brain (OB1) MCP by default; fastembed + SQLite vector store opt-in | Live (OB1 search path default; local embeddings optional) |
 | Causal Memory | Intervention-aware cause/effect with streak detection and cross-run patterns | SQLite causal_links + petgraph | Live |
 | Team Blackboard | Four named slices (Mission, Action, Evidence, Memory) for pack coordination | SQLite + per-run board.json | Live |
 | Dog Runtime Registry | Canonical dog role plus live runtime instances (`mason#codex`, `mason#claude`, etc.) linked to PackChat threads | SQLite + blackboard sync | Live |
@@ -310,12 +317,48 @@ Palace output injects into preflight briefing `required_checks`, `guardrails`, a
 
 ### Memory Persistence Stack
 
-- **Filesystem** (`factory/memory/`) — canonical source of truth for durable memory documents
+- **Filesystem** (`factory/memory/`) — canonical source of truth for repo-local durable memory documents
 - **SQLite** — structured run state, episode records, causal links, chat threads, consolidation candidates
-- **fastembed + SQLite vector store** — hybrid vector + keyword retrieval for semantic memory
-- **Qdrant** (Phase 5b) — semantic acceleration for long-term memory at scale
+- **Open Brain (OB1) MCP** — default shared semantic recall and "remember this" memory substrate across AI clients and Twilight-connected agents
+- **fastembed + SQLite vector store** — optional local hybrid vector + keyword retrieval fallback (`--features local-embeddings` or external embedding provider)
+- **Qdrant** (optional future accelerator) — only if local high-volume vector serving is needed; not the default memory substrate
 - **TypeDB 3.x** (Phase 6) — durable semantic graph for typed causal queries; not the hot path
 - **AnythingLLM** (home-linux optional) — local retrieval accelerator for imported documents
+
+### PackChat -> Open Brain -> Calvin Chain
+
+Harkonnen's memory spine is a four-stage pipeline, not a direct chat-log dump:
+
+```text
+Twilight Bark / PackChat
+  -> Harkonnen memory candidate queue
+  -> Coobie distillation and classification
+  -> Open Brain shared semantic recall
+  -> Calvin Archive governed promotion
+```
+
+**Twilight Bark / PackChat** is the live transport layer. PackChat messages, checkpoint replies, task events, agent observations, and cross-runtime coordination updates move as versioned envelopes. The transport may be local SQLite/JSONL during development or Twilight Bark over Zenoh/OpenZiti in distributed mode, but the contract is the same: append-only event identity, thread identity, runtime identity, causality metadata, and evidence references.
+
+**Memory candidates** are the raw ingress boundary. Harkonnen should persist candidate rows before summarization so nothing depends on a successful LLM call. Candidate metadata includes `candidate_id`, `source_event_id`, `thread_id`, `run_id`, `agent_runtime_id`, `operation`, `created_at`, `importance_score`, `retention_class`, `sensitivity_label`, `evidence_refs`, and `causality`.
+
+**Coobie distillation** decides what survives. The distiller converts conversation fragments into structured memory proposals: a concise thought, provenance, confidence, sensitivity, tags, and a recommended destination. Most events remain ephemeral. Useful operating facts go to OB1. Identity-relevant, belief-revising, high-Pathos, policy-changing, or causally significant items become Calvin promotion candidates.
+
+**Open Brain (OB1)** is the default shared recall layer. Harkonnen calls `capture_thought` for durable distilled memories and `search_thoughts` when assembling context. OB1 answers "what should connected AI clients remember and retrieve semantically?" It is not canonical truth and does not supersede Calvin.
+
+**Calvin Archive** is the governed continuity layer. Calvin receives structured promotion contracts, not loose chat prose. Promotion candidates must carry evidence, inference posture, preservation notes, chamber targets, and an integration recommendation: `accept`, `modify`, `reject`, or `quarantine`.
+
+### OpenZiti Trust Boundary
+
+OpenZiti is the zero-trust connective tissue for the distributed version of the chain. Harkonnen should define separate services and policies for each trust surface:
+
+| OpenZiti service | Dial identities | Bind identities | Notes |
+| --- | --- | --- | --- |
+| `twilight-bark.packchat` | approved agent runtimes, operator console | Twilight daemon nodes | Live conversation bus |
+| `openbrain.mcp` | Harkonnen memory distiller, approved recall clients | OB1 server | Shared semantic recall |
+| `calvin.archive` | Harkonnen/Coobie archive writer, operator console | Calvin Archive host | Governed write surface; narrowest access |
+| `harkonnen.api` | operator console, approved integrations | Harkonnen host | Run control and Pack Board API |
+
+Service policies should separate Dial from Bind authority. Posture checks should be used for privileged memory writers and Calvin archive writers where available: expected OS, enrolled identity, MFA for operators, and process checks for known daemon binaries. Remote agents may read OB1 recall through policy, but only the Harkonnen distiller should write Calvin promotion contracts by default.
 
 ### Rust Traits (stable interfaces)
 
@@ -439,7 +482,7 @@ revision history, and diagnostic legibility.
 
 ### Core Entities
 
-`soul`, `agent-self`, `experience`, `observation`, `belief`, `evidence`, `inference-pattern`, `uncertainty-state`, `trust-anchor`, `interpretive-frame`, `value-commitment`, `trait`, `wound`, `adaptation`, `reflection`, `schema`, `integration-candidate`, `quarantine-entry`, `integration-policy`, `causal-pattern`, `behavioral-signature`, `relationship-anchor`, `spec-context`, `run`, `artifact`, `summary-view`, `continuity-snapshot`
+`soul`, `agent-self`, `experience`, `observation`, `belief`, `evidence`, `inference-pattern`, `uncertainty-state`, `trust-anchor`, `interpretive-frame`, `value-commitment`, `trait`, `wound`, `adaptation`, `reflection`, `schema`, `memory-candidate`, `openbrain-thought-ref`, `integration-candidate`, `quarantine-entry`, `integration-policy`, `causal-pattern`, `behavioral-signature`, `relationship-anchor`, `spec-context`, `run`, `artifact`, `summary-view`, `continuity-snapshot`
 
 ### API Surface
 
@@ -448,6 +491,9 @@ create_soul(name)
 create_self(soul_id, self_name)
 record_experience(self_id, experience_input)
 record_observation(self_id, observation_input)
+record_memory_candidate(candidate_input)
+capture_openbrain_thought(candidate_id)
+propose_calvin_promotion(candidate_id, promotion_input)
 form_belief(self_id, belief_input, evidence_ids, inference_pattern_id)
 revise_belief(prior_belief_id, new_belief_input, reason)
 record_reflection(self_id, reflection_input, target_ids)
@@ -768,13 +814,25 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 
 ---
 
-### Phase 5b — Memory Infrastructure (Qdrant + OCR)
+### Phase 5-D — PackChat Memory Distillation Chain
 
-- Qdrant integration for long-term semantic memory
+- Durable memory candidate queue fed by PackChat/Twilight Bark envelopes
+- Coobie distiller: summarize, dedupe, score importance, classify retention, attach provenance
+- Open Brain writer: `capture_thought` for accepted shared-recall candidates
+- Open Brain reader: `search_thoughts` integrated into targeted Coobie briefings
+- Calvin promotion contract: identity-, belief-, policy-, and high-Pathos candidates become governed archive proposals
+- OpenZiti service profile for `twilight-bark.packchat`, `openbrain.mcp`, `calvin.archive`, and `harkonnen.api`
+
+**Done when:** a PackChat conversation can produce a durable memory candidate, the candidate can be distilled into an OB1 thought with provenance, the thought can be retrieved in a later briefing, and a Calvin-worthy candidate can be emitted as a structured promotion contract without writing ungoverned prose directly into the archive.
+
+### Phase 5b — Memory Infrastructure (OB1 + OCR + MCP Prompts)
+
+- Open Brain (OB1) is the default long-term semantic recall substrate
+- Qdrant/local vectors remain optional accelerators, not the default path
 - OCR pipeline via Tesseract for scanned PDFs and images
 - Memory module refactor: split `src/memory.rs` into the COOBIE_SPEC module tree
 
-**Done when:** Qdrant serves semantic queries, OCR-scanned PDFs can be ingested, and `src/memory.rs` is split into the module tree.
+**Done when:** OB1 serves shared semantic queries through the Harkonnen memory abstraction, OCR-scanned PDFs can be ingested, MCP prompts expose scoped briefings, and `src/memory.rs` is split into the module tree.
 
 ---
 
@@ -899,7 +957,7 @@ Benchmark wiring advances with implementation phases, but the current engineerin
 | --- | --- | --- |
 | LongMemEval | Long-term assistant memory, temporal reasoning, belief updates | Native adapter live |
 | LoCoMo | Long-horizon dialogue memory | Native adapter live |
-| FRAMES | Multi-hop factual recall (Mem0 publishes here) | Native adapter live; Qdrant needed for best results |
+| FRAMES | Multi-hop factual recall (Mem0 publishes here) | Native adapter live; OB1 default recall path should be measured against local-vector baseline |
 | StreamingQA | Belief-update accuracy when facts change | Native adapter live; persisted-history smoke published on `lm-studio-local` |
 | HELMET | Retrieval precision/recall | Native adapter live |
 
@@ -943,7 +1001,8 @@ Benchmark wiring advances with implementation phases, but the current engineerin
 | Phase 2 | SWE-bench Verified readiness, LiveCodeBench, Aider Polyglot |
 | Phase 10 | spec adherence rate, hidden scenario delta, DevBench; twin fidelity remains optional diagnostic telemetry |
 | Phase 4b | StreamingQA belief-update accuracy |
-| Phase 5b | FRAMES re-run (Qdrant), LongMemEval / LoCoMo regression check |
+| Phase 5-D | PackChat-to-OB1 candidate capture and retrieval smoke; Calvin promotion contract smoke |
+| Phase 5b | FRAMES re-run (OB1 default recall), LongMemEval / LoCoMo regression check |
 | Phase 6 | GAIA Level 3, AgentBench |
 | Phase 7 | E-CARE, causal attribution accuracy |
 | Phase 8 | unjustified drift, quarantine resolution quality, schema revision stability, stress / hysteresis recovery quality, kernel preservation across adaptation events |

@@ -110,6 +110,7 @@ Live features:
 * Cross-phase causal graph — episode-to-episode links record `phase_sequence` and `failure_triggered` relationships
 * Pearl hierarchy labels — Coobie hypotheses and causal graph edges are tagged associational, interventional, or counterfactual
 * Multi-hop retrieval chain — query responses now trace hop-by-hop memory retrieval depth and supporting evidence
+* Open Brain (OB1) shared recall — Harkonnen can pull semantic thought matches from the shared OB1 MCP memory layer when `OPEN_BRAIN_MCP_URL` is configured
 * Memory invalidation / fact-update tracking — superseded facts are surfaced as stale rather than silently overwritten
 * Causal feedback loop — Sable's scenario rationale is written back to project memory as evidence
 
@@ -133,7 +134,8 @@ PackChat shifts the factory from pure autonomous orchestration to **supervised a
 
 * **SQLite** → episodic memory, run state, chat threads, phase attributions, causal links
 * **Filesystem** → specs, artifacts, evidence, Coobie memory (`factory/memory/*.md`)
-* **fastembed / OpenAI-compatible embeddings + SQLite vector store** → hybrid semantic + keyword retrieval (live)
+* **Open Brain (OB1) MCP memory** → default shared semantic recall across AI clients
+* **fastembed / OpenAI-compatible embeddings + SQLite vector store** → optional local hybrid semantic + keyword retrieval (`--features local-embeddings` or an embedding provider)
 * **(Planned / Optional) TypeDB 3.x service** → durable semantic graph + typed relational queries, not the hot-path store
 * **(Phase 8) Three-tier identity stack** — TimescaleDB hypertables (behavioral telemetry, stress accumulation), TypeDB (Calvin Archive ontology, six chambers), Materialize streaming SQL (real-time `D*` drift monitoring via SUBSCRIBE). See [the-soul-of-ai/08-Identity-Continuity.md](the-soul-of-ai/08-Identity-Continuity.md) for the full data architecture.
   The soul package remains the boot-time identity surface, but the Calvin Archive is the canonical continuity substrate underneath it: `SOUL.md` declares the kernel, the archive proves its continuity.
@@ -501,7 +503,8 @@ Harkonnen Labs is an **active development system**. Phases 1, 4, 4b, 5, and the 
 | Pearl hierarchy labeling in hypotheses and causal links | Live |
 | Multi-hop retrieval + retrieval-depth tracing | Live |
 | Consolidation Workbench | Live |
-| Hybrid semantic + keyword retrieval (fastembed / OpenAI-compatible) | Live |
+| Open Brain shared recall via MCP | Default |
+| Hybrid semantic + keyword retrieval (fastembed / OpenAI-compatible) | Optional |
 | Pack Board React UI (PackChat, Attribution Board, Factory Floor, Memory Board, Workbench) | Live |
 | Keeper coordination API (claims, heartbeats, conflict detection, lease mirror in SQLite) | Live |
 | Canonical dog runtime registry (`agent_runtime_state` + PackChat runtime roster) | Live |

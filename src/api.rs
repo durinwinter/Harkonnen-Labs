@@ -787,6 +787,10 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
             "/api/runs/:id/consolidation/candidates/:cid/edit",
             post(post_candidate_edit),
         )
+        .route(
+            "/api/runs/:id/memory/candidates",
+            get(get_memory_candidates).post(post_process_memory_candidates),
+        )
         .route("/api/chat", post(post_chat))
         .route("/api/coobie/query", post(post_coobie_query))
         .route("/api/agents/:id/chat", post(post_agent_chat))
@@ -1352,25 +1356,32 @@ async fn post_run_consolidate(
         // If candidates exist and some are kept, only promote those.
         // Otherwise fall back to the legacy auto-promote path so old clients
         // that call /consolidate directly still work.
-        Ok(Some(_)) => match app.promote_kept_candidates(&id).await {
-            Ok(new_lessons) => match build_memory_board(&app, &id).await {
-                Ok(Some(memory_board)) => (
-                    StatusCode::OK,
-                    Json(ConsolidateRunResponse {
-                        run_id: id,
-                        total_new_lessons: new_lessons.len(),
-                        new_lessons,
-                        memory_board,
-                    }),
-                )
-                    .into_response(),
-                Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Ok(Some(_)) => {
+            if let Err(error) = app.process_memory_candidates(Some(&id), 100).await {
+                tracing::warn!(run_id = %id, error = %error, "memory candidate processing skipped before consolidation");
+            }
+            match app.promote_kept_candidates(&id).await {
+                Ok(new_lessons) => match build_memory_board(&app, &id).await {
+                    Ok(Some(memory_board)) => (
+                        StatusCode::OK,
+                        Json(ConsolidateRunResponse {
+                            run_id: id,
+                            total_new_lessons: new_lessons.len(),
+                            new_lessons,
+                            memory_board,
+                        }),
+                    )
+                        .into_response(),
+                    Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+                    Err(error) => {
+                        (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
+                    }
+                },
                 Err(error) => {
                     (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response()
                 }
-            },
-            Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
-        },
+            }
+        }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
@@ -1391,6 +1402,12 @@ struct CandidatesResponse {
 #[derive(Debug, Deserialize)]
 struct EditCandidateRequest {
     content: serde_json::Value,
+}
+
+#[derive(Debug, Deserialize)]
+struct ProcessMemoryCandidatesRequest {
+    #[serde(default)]
+    limit: Option<usize>,
 }
 
 /// `GET /api/runs/:id/consolidation/candidates` — list all candidates.
@@ -1521,6 +1538,61 @@ async fn post_candidate_edit(
                 Json(serde_json::json!({"status": "kept", "candidate_id": cid})),
             )
                 .into_response(),
+            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn get_memory_candidates(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app.list_memory_candidates_for_run(&id).await {
+            Ok(candidates) => {
+                let total = candidates.len();
+                let pending = candidates.iter().filter(|c| c.status == "pending").count();
+                let captured_openbrain = candidates
+                    .iter()
+                    .filter(|c| c.status == "captured_openbrain")
+                    .count();
+                let promotion_pending = candidates
+                    .iter()
+                    .filter(|c| c.status == "promotion_pending")
+                    .count();
+                (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "run_id": id,
+                        "total": total,
+                        "pending": pending,
+                        "captured_openbrain": captured_openbrain,
+                        "promotion_pending": promotion_pending,
+                        "candidates": candidates,
+                    })),
+                )
+                    .into_response()
+            }
+            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn post_process_memory_candidates(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+    Json(body): Json<ProcessMemoryCandidatesRequest>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app
+            .process_memory_candidates(Some(&id), body.limit.unwrap_or(50))
+            .await
+        {
+            Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
@@ -5018,7 +5090,14 @@ async fn post_chat_message(
     };
 
     match dispatch_message(&app.chat, &app.paths, &thread, &req).await {
-        Ok(response) => (StatusCode::OK, Json(response)).into_response(),
+        Ok(response) => {
+            if let Some(run_id) = thread.run_id.as_deref() {
+                if let Err(error) = app.process_memory_candidates(Some(run_id), 10).await {
+                    tracing::warn!(run_id = %run_id, error = %error, "memory candidate processing skipped after PackChat post");
+                }
+            }
+            (StatusCode::OK, Json(response)).into_response()
+        }
         Err(e) => (StatusCode::INTERNAL_SERVER_ERROR, e.to_string()).into_response(),
     }
 }

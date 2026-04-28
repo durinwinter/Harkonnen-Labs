@@ -35,7 +35,11 @@ impl OpenBrainClient {
 
         if !connection_url.contains("key=") {
             if let Ok(key) = std::env::var(&config.access_key_env) {
-                let separator = if connection_url.contains('?') { '&' } else { '?' };
+                let separator = if connection_url.contains('?') {
+                    '&'
+                } else {
+                    '?'
+                };
                 connection_url = format!("{connection_url}{separator}key={key}");
             }
         }
@@ -124,4 +128,3 @@ fn extract_text_content(value: &Value) -> Vec<String> {
         })
         .unwrap_or_default()
 }
-

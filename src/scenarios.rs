@@ -581,6 +581,7 @@ pub async fn sable_generate_and_evaluate(
     agent_executions: &[AgentExecution],
     sable_context: Option<&str>,
     run_dir: &Path,
+    isolation_prefix: Option<&str>,
 ) -> Option<(HiddenScenarioSummary, String)> {
     let provider = llm::build_provider("sable", "claude-opus", setup)?;
 
@@ -599,7 +600,7 @@ pub async fn sable_generate_and_evaluate(
     let spec_yaml = serde_yaml::to_string(spec).unwrap_or_default();
     let validation_summary = serde_json::to_string_pretty(validation).unwrap_or_default();
 
-    let system = "You are Sable, a hidden scenario evaluator for a software factory. \
+    let sable_core_system = "You are Sable, a hidden scenario evaluator for a software factory. \
 Your job is to generate adversarial but fair hidden scenarios that verify a run did what the spec actually asked — \
 not just that it didn't crash. \
 Respond with a single raw JSON object only. No prose, no markdown fences. \
@@ -616,6 +617,12 @@ Generate 2-4 scenarios. Each scenario should have 1-3 checks. \
 Only reference artifacts that are listed in AVAILABLE ARTIFACTS. \
 Only reference agents listed in AGENTS THAT RAN. \
 Be adversarial: check that the spec's core acceptance criteria are actually met, not just that the pipeline ran.";
+    // Prepend isolation firewall when dispatched through SubAgentDispatcher.
+    let system = if let Some(prefix) = isolation_prefix {
+        format!("{prefix}\n\n{sable_core_system}")
+    } else {
+        sable_core_system.to_string()
+    };
 
     let user = format!(
         "SPEC:\n```yaml\n{spec_yaml}```\n\n\

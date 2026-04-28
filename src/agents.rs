@@ -21,6 +21,10 @@ pub struct AgentProfile {
     #[serde(default)]
     pub disallowed_tools: Vec<String>,
     pub personality_file: String,
+    /// Per-task dispatch preferences from the profile's `dispatch:` block.
+    /// Takes priority over `[sub_agents.*]` in harkonnen.toml.
+    #[serde(default)]
+    pub dispatch: HashMap<String, crate::setup::SubAgentTaskConfig>,
 }
 
 pub fn load_profiles(dir: &Path) -> Result<HashMap<String, AgentProfile>> {

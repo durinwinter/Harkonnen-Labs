@@ -139,26 +139,54 @@ impl ArchiveStore {
     }
 
     pub(crate) async fn record_experience(&self, exp: &ArchiveExperience) -> Result<()> {
-        let id = Uuid::new_v4().to_string();
+        let id = exp
+            .episode_id
+            .clone()
+            .filter(|value| !value.trim().is_empty())
+            .unwrap_or_else(|| Uuid::new_v4().to_string());
         let chamber_tag = format!("{:?}", exp.chamber).to_lowercase();
         let tx = self
             .driver
             .transaction(&self.db_name, TransactionType::Write)
             .await?;
-        let tql = format!(
-            r#"insert $e isa experience,
+        let tql = if exp.run_id.trim().is_empty() {
+            format!(
+                r#"insert $e isa experience,
                 has uuid "{id}",
                 has narrative_summary "{summary}",
                 has scope "{scope}",
                 has provider-name "{provider}",
                 has model-name "{model}",
                 has chamber-label "{chamber}";"#,
-            summary = escape_tql(&exp.narrative_summary),
-            scope = exp.scope,
-            provider = exp.provider,
-            model = exp.model,
-            chamber = chamber_tag,
-        );
+                id = escape_tql(&id),
+                summary = escape_tql(&exp.narrative_summary),
+                scope = escape_tql(&exp.scope),
+                provider = escape_tql(&exp.provider),
+                model = escape_tql(&exp.model),
+                chamber = chamber_tag,
+            )
+        } else {
+            format!(
+                r#"match
+                $run isa run_record, has uuid "{run_id}";
+               insert
+                $e isa experience,
+                    has uuid "{id}",
+                    has narrative_summary "{summary}",
+                    has scope "{scope}",
+                    has provider-name "{provider}",
+                    has model-name "{model}",
+                    has chamber-label "{chamber}";
+                (experience: $e, run: $run) isa belongs_to_run;"#,
+                run_id = escape_tql(&exp.run_id),
+                id = escape_tql(&id),
+                summary = escape_tql(&exp.narrative_summary),
+                scope = escape_tql(&exp.scope),
+                provider = escape_tql(&exp.provider),
+                model = escape_tql(&exp.model),
+                chamber = chamber_tag,
+            )
+        };
         tx.query(&tql).await.context("record_experience query")?;
         tx.commit().await?;
         Ok(())
@@ -347,18 +375,71 @@ impl ArchiveStore {
         Ok(true)
     }
 
-    pub(crate) async fn update_agent_status(&self, agent_name: &str, status: &str) -> Result<()> {
+    pub(crate) async fn record_causal_link(
+        &self,
+        run_id: &str,
+        cause_episode_id: &str,
+        effect_episode_id: &str,
+        pearl_level: &str,
+        confidence: f64,
+    ) -> Result<()> {
         let tx = self
             .driver
             .transaction(&self.db_name, TransactionType::Write)
             .await?;
+        let scope = format!("run:{run_id};pearl:{pearl_level}");
+        // Match the two experience entities by episode_id, then insert the causal link.
         let tql = format!(
-            r#"match $a isa agent_self, has name "{agent_name}", has status $s;
-               delete has $s of $a;
-               insert has status "{status}" of $a;"#
+            r#"match
+                $run isa run_record, has uuid "{run_id}";
+                $cause isa experience, has uuid "{cause_episode_id}";
+                $effect isa experience, has uuid "{effect_episode_id}";
+               insert
+                (cause: $cause, effect: $effect) isa causally_contributed_to,
+                    has confidence {confidence},
+                    has scope "{scope}";"#,
+            run_id = escape_tql(run_id),
+            cause_episode_id = escape_tql(cause_episode_id),
+            effect_episode_id = escape_tql(effect_episode_id),
+            confidence = confidence,
+            scope = escape_tql(&scope),
         );
-        tx.query(&tql).await.context("update_agent_status query")?;
+        tx.query(&tql).await.context("record_causal_link query")?;
         tx.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn update_agent_status(&self, agent_name: &str, status: &str) -> Result<()> {
+        let delete_tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Write)
+            .await?;
+        let delete_tql = format!(
+            r#"match $a isa agent_self, has name "{agent_name}", has status $s;
+               delete has $s of $a;"#,
+            agent_name = escape_tql(agent_name),
+        );
+        delete_tx
+            .query(&delete_tql)
+            .await
+            .context("update_agent_status delete existing status")?;
+        delete_tx.commit().await?;
+
+        let insert_tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Write)
+            .await?;
+        let insert_tql = format!(
+            r#"match $a isa agent_self, has name "{agent_name}";
+               insert has status "{status}" of $a;"#,
+            agent_name = escape_tql(agent_name),
+            status = escape_tql(status),
+        );
+        insert_tx
+            .query(&insert_tql)
+            .await
+            .context("update_agent_status insert status")?;
+        insert_tx.commit().await?;
         Ok(())
     }
 

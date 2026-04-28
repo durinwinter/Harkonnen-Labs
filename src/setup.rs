@@ -17,6 +17,8 @@ pub struct SetupConfig {
     pub twilight_bark: TwilightBarkConfig,
     #[serde(default)]
     pub open_brain: OpenBrainConfig,
+    #[serde(default)]
+    pub sub_agents: SubAgentConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -176,6 +178,55 @@ fn default_open_brain_search_threshold() -> f64 {
     0.5
 }
 
+/// Top-level [sub_agents] section in harkonnen.toml.
+/// Named sub-tables (e.g. [sub_agents.coobie_briefing]) are parsed into `tasks`.
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct SubAgentConfig {
+    /// Default backend when no per-task config exists.
+    /// Values: "direct_llm" | "claude_code_agent" | "codex_plan_agent" | "gemini_agent"
+    #[serde(default = "default_sub_agent_mode")]
+    pub default_mode: String,
+    /// Per-task overrides — e.g. coobie_briefing, sable_evaluation, mason_diagnosis.
+    #[serde(flatten)]
+    pub tasks: HashMap<String, SubAgentTaskConfig>,
+}
+
+fn default_sub_agent_mode() -> String {
+    "direct_llm".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct SubAgentTaskConfig {
+    /// Logical task identifier matching the MASTER_SPEC task names.
+    #[serde(default)]
+    pub task: Option<String>,
+    /// Backend to use for this task.
+    #[serde(default = "default_sub_agent_mode")]
+    pub backend: String,
+    /// Model override for ClaudeCodeAgent / GeminiAgent backends.
+    #[serde(default)]
+    pub model: Option<String>,
+    /// Run this task in an isolated context window (system-prompt enforced).
+    #[serde(default = "default_true")]
+    pub isolation: bool,
+    /// Whether the sub-agent may write to memory/SQLite/Calvin.
+    #[serde(default)]
+    pub memory_write: bool,
+    /// Context paths passed to CodexPlanAgent (relative to repo root).
+    #[serde(default)]
+    pub context_paths: Vec<String>,
+    /// Maximum conversation turns for ClaudeCodeAgent backends.
+    #[serde(default = "default_max_turns")]
+    pub max_turns: u32,
+    /// Additional tools to block in the isolation system prompt (beyond defaults).
+    #[serde(default)]
+    pub disallowed_tools: Vec<String>,
+}
+
+fn default_max_turns() -> u32 {
+    6
+}
+
 #[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpConfig {
     #[serde(default)]
@@ -281,6 +332,7 @@ impl SetupConfig {
             calvin_archive: CalvinConfig::default(),
             twilight_bark: TwilightBarkConfig::default(),
             open_brain: OpenBrainConfig::default(),
+            sub_agents: SubAgentConfig::default(),
         }
     }
 

@@ -24,6 +24,7 @@ pub(crate) fn router(state: Arc<CalvinState>) -> Router {
         .route("/runs/:run_id/experiences", post(record_experience))
         .route("/runs/:run_id/beliefs", post(revise_belief))
         .route("/runs/:run_id/close", patch(close_run))
+        .route("/runs/:run_id/causal-links", post(record_causal_link))
         .route("/agents/:name/traits", get(get_traits))
         .route("/agents/:name/beliefs", get(get_beliefs))
         .route("/agents/:name/check", post(check_adaptation))
@@ -180,6 +181,39 @@ async fn check_adaptation(
         .await
     {
         Ok(safe) => Json(CheckAdaptationResponse { safe }).into_response(),
+        Err(e) => (
+            StatusCode::INTERNAL_SERVER_ERROR,
+            Json(serde_json::json!({"error": e.to_string()})),
+        )
+            .into_response(),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct RecordCausalLinkRequest {
+    cause_episode_id: String,
+    effect_episode_id: String,
+    pearl_level: String,
+    confidence: f64,
+}
+
+async fn record_causal_link(
+    State(state): State<Arc<CalvinState>>,
+    Path(run_id): Path<String>,
+    Json(req): Json<RecordCausalLinkRequest>,
+) -> impl IntoResponse {
+    match state
+        .archive
+        .record_causal_link(
+            &run_id,
+            &req.cause_episode_id,
+            &req.effect_episode_id,
+            &req.pearl_level,
+            req.confidence,
+        )
+        .await
+    {
+        Ok(()) => StatusCode::CREATED.into_response(),
         Err(e) => (
             StatusCode::INTERNAL_SERVER_ERROR,
             Json(serde_json::json!({"error": e.to_string()})),

@@ -51,7 +51,10 @@ entity experience,
   owns scope,
   owns provider-name,
   owns model-name,
-  owns chamber-label;
+  owns chamber-label,
+  plays causally_contributed_to:cause,
+  plays causally_contributed_to:effect,
+  plays belongs_to_run:experience;
 
 entity belief,
   owns uuid @key,
@@ -143,7 +146,8 @@ entity run_record,
   owns status,
   owns provider-name,
   owns model-name,
-  owns outcome-label;
+  owns outcome-label,
+  plays belongs_to_run:run;
 
 # Phase 8-B: quarantine holding area for experiences with uncertain identity safety
 entity quarantine-entry,

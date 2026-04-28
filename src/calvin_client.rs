@@ -151,6 +151,28 @@ impl CalvinClient {
         Ok(())
     }
 
+    pub async fn record_causal_link(
+        &self,
+        run_id: &str,
+        cause_episode_id: &str,
+        effect_episode_id: &str,
+        pearl_level: &str,
+        confidence: f64,
+    ) -> Result<()> {
+        self.client
+            .post(format!("{}/runs/{run_id}/causal-links", self.base_url))
+            .json(&serde_json::json!({
+                "cause_episode_id": cause_episode_id,
+                "effect_episode_id": effect_episode_id,
+                "pearl_level": pearl_level,
+                "confidence": confidence,
+            }))
+            .send()
+            .await
+            .context("POST /runs/{run_id}/causal-links")?;
+        Ok(())
+    }
+
     pub async fn update_agent_status(&self, agent_name: &str, status: &str) -> Result<()> {
         self.client
             .patch(format!("{}/agents/{agent_name}/status", self.base_url))

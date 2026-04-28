@@ -433,8 +433,9 @@ impl ChatStore {
         socket_path: PathBuf,
         agent_name: String,
         agent_role: String,
+        calvin: Option<crate::calvin_client::CalvinClient>,
     ) {
-        spawn_twilight_ingest_loop(self.clone(), socket_path, agent_name, agent_role);
+        spawn_twilight_ingest_loop(self.clone(), socket_path, agent_name, agent_role, calvin);
     }
 
     fn publish_bus_event(&self, event: PackChatBusEvent) {
@@ -669,7 +670,11 @@ impl ChatStore {
             PackChatBusEventKind::MessageAppended => {
                 self.ingest_remote_message(&envelope.event).await
             }
-            PackChatBusEventKind::CheckpointResolved => Ok(()),
+            // These event kinds are handled by the Calvin write-back path in the ingest loop;
+            // they do not need a local SQLite replica record.
+            PackChatBusEventKind::CheckpointResolved
+            | PackChatBusEventKind::BeliefRevised
+            | PackChatBusEventKind::DriftDetected => Ok(()),
         }
     }
 
@@ -957,7 +962,7 @@ impl ChatStore {
                        causality_json, status, openbrain_ref, calvin_contract_json, created_at,
                        processed_at
                 FROM memory_candidates
-                WHERE run_id = ?1 AND status = 'pending'
+                WHERE run_id = ?1 AND status IN ('pending', 'retry_pending')
                 ORDER BY created_at ASC
                 LIMIT ?2
                 "#,
@@ -975,7 +980,7 @@ impl ChatStore {
                        causality_json, status, openbrain_ref, calvin_contract_json, created_at,
                        processed_at
                 FROM memory_candidates
-                WHERE status = 'pending'
+                WHERE status IN ('pending', 'retry_pending')
                 ORDER BY created_at ASC
                 LIMIT ?1
                 "#,
@@ -2135,11 +2140,36 @@ fn spawn_twilight_ingest_loop(
     socket_path: PathBuf,
     agent_name: String,
     agent_role: String,
+    calvin: Option<crate::calvin_client::CalvinClient>,
 ) {
+    use std::collections::HashMap;
     tokio::spawn(async move {
+        // Presence tracker persists across reconnect cycles: agent_id → last seen instant.
+        let mut presence: HashMap<String, std::time::Instant> = HashMap::new();
         loop {
-            if let Err(error) =
-                run_twilight_ingest_once(&store, &socket_path, &agent_name, &agent_role).await
+            // Check for agents whose presence has expired (TTL = 600 s, matching Twilight default).
+            if let Some(ref c) = calvin {
+                let now = std::time::Instant::now();
+                for (agent_id, last_seen) in &presence {
+                    if now.duration_since(*last_seen).as_secs() > 600 {
+                        if let Err(e) = c.update_agent_status(agent_id, "offline").await {
+                            tracing::warn!(agent_id = %agent_id, error = %e, "Calvin agent status update failed");
+                        }
+                    }
+                }
+                // Remove entries that have been marked offline so we don't repeat the call.
+                presence.retain(|_, last_seen| now.duration_since(*last_seen).as_secs() <= 600);
+            }
+
+            if let Err(error) = run_twilight_ingest_once(
+                &store,
+                &socket_path,
+                &agent_name,
+                &agent_role,
+                &mut presence,
+                calvin.as_ref(),
+            )
+            .await
             {
                 tracing::warn!(
                     socket = %socket_path.display(),
@@ -2158,6 +2188,7 @@ fn spawn_twilight_ingest_loop(
     _socket_path: PathBuf,
     _agent_name: String,
     _agent_role: String,
+    _calvin: Option<crate::calvin_client::CalvinClient>,
 ) {
     tracing::warn!("Twilight PackChat ingest loop requires a Unix daemon socket");
 }
@@ -2168,6 +2199,8 @@ async fn run_twilight_ingest_once(
     socket_path: &std::path::Path,
     agent_name: &str,
     agent_role: &str,
+    presence: &mut std::collections::HashMap<String, std::time::Instant>,
+    calvin: Option<&crate::calvin_client::CalvinClient>,
 ) -> Result<()> {
     use tokio::io::{AsyncBufReadExt, BufReader};
     use tokio::net::UnixStream;
@@ -2213,6 +2246,12 @@ async fn run_twilight_ingest_once(
         let input_json = message["input_json"].as_str().unwrap_or("{}");
         let envelope: PackChatWireEnvelope =
             serde_json::from_str(input_json).context("parsing PackChat wire envelope")?;
+
+        // Track agent presence: any message from an agent_id updates last-seen.
+        if let Some(agent_id) = envelope.event.agent.as_deref() {
+            presence.insert(agent_id.to_string(), std::time::Instant::now());
+        }
+
         let outcome = match store.ingest_wire_envelope(&envelope).await {
             Ok(()) => serde_json::json!({"ingested": true, "event_id": envelope.event.event_id}),
             Err(error) => {
@@ -2220,6 +2259,64 @@ async fn run_twilight_ingest_once(
                 serde_json::json!({"ingested": false, "error": error.to_string()})
             }
         };
+
+        // Calvin write-back: if the envelope carries a CalvinIngressEvent and Calvin is
+        // available, record the experience. Also forward causation_id as a causal link.
+        if let Some(ref contract) = envelope.archive_contract {
+            if contract.schema == "harkonnen.calvin.ingress.v1" {
+                if let Some(c) = calvin {
+                    let run_id = contract.run_id.as_deref().unwrap_or("unknown");
+                    let exp = crate::calvin_client::ArchiveExperience {
+                        run_id: run_id.to_string(),
+                        episode_id: envelope.event.message_id.clone(),
+                        provider: envelope
+                            .event
+                            .agent
+                            .as_deref()
+                            .unwrap_or("twilight")
+                            .to_string(),
+                        model: "unknown".to_string(),
+                        narrative_summary: contract.narrative_summary.clone(),
+                        scope: envelope
+                            .event
+                            .agent
+                            .as_deref()
+                            .unwrap_or("remote")
+                            .to_string(),
+                        chamber: match contract.chamber.as_str() {
+                            "mythos" => crate::calvin_client::Chamber::Mythos,
+                            "episteme" => crate::calvin_client::Chamber::Episteme,
+                            "ethos" => crate::calvin_client::Chamber::Ethos,
+                            "pathos" => crate::calvin_client::Chamber::Pathos,
+                            "logos" => crate::calvin_client::Chamber::Logos,
+                            _ => crate::calvin_client::Chamber::Praxis,
+                        },
+                    };
+                    if let Err(e) = c.record_experience(run_id, &exp).await {
+                        tracing::warn!(error = %e, "Calvin experience write-back failed");
+                    }
+
+                    // Forward causation_id as a causal link if present.
+                    if let Some(cause_id) = envelope.causality.causation_id.as_deref() {
+                        if let Some(effect_id) = envelope.event.message_id.as_deref() {
+                            if let Err(e) = c
+                                .record_causal_link(
+                                    run_id,
+                                    cause_id,
+                                    effect_id,
+                                    "Associational",
+                                    0.6,
+                                )
+                                .await
+                            {
+                                tracing::warn!(error = %e, "Calvin causal link write-back failed");
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
         if !task_id.is_empty() {
             write_async_ipc_json(
                 &mut write_half,

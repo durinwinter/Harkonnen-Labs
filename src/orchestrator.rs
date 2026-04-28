@@ -72,6 +72,8 @@ pub struct AppContext {
     pub calvin: Option<crate::calvin_client::CalvinClient>,
     /// Open Brain MCP-backed memory client — default cross-client recall path.
     pub open_brain: Option<crate::openbrain::OpenBrainClient>,
+    /// Sub-agent dispatcher — routes high-context tasks to isolated backends.
+    pub dispatcher: crate::subagent::SubAgentDispatcher,
 }
 
 #[derive(Debug, Clone)]
@@ -983,15 +985,18 @@ impl AppContext {
                 local_packchat_bus
             };
         let chat = crate::chat::ChatStore::with_bus(pool.clone(), packchat_bus);
+        // Calvin must be initialised before the ingest loop so the loop can forward
+        // CalvinIngressEvents from inbound Twilight envelopes to the Calvin archive.
+        let calvin = crate::calvin_client::try_connect(&paths.setup.calvin_archive).await;
         if let Some(socket_path) = twilight_socket_path {
             chat.spawn_twilight_ingest_loop(
                 socket_path,
                 format!("{}-ingest", paths.setup.twilight_bark.agent_name),
                 paths.setup.twilight_bark.agent_role.clone(),
+                calvin.clone(),
             );
         }
         let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
-        let calvin = crate::calvin_client::try_connect(&paths.setup.calvin_archive).await;
         let open_brain = match crate::openbrain::OpenBrainClient::new(&paths.setup.open_brain) {
             Ok(client) => client,
             Err(error) => {
@@ -999,6 +1004,10 @@ impl AppContext {
                 None
             }
         };
+        let dispatcher = crate::subagent::SubAgentDispatcher::new(
+            paths.setup.sub_agents.clone(),
+            paths.setup.clone(),
+        );
         Ok(Self {
             paths,
             pool,
@@ -1012,6 +1021,7 @@ impl AppContext {
             started_at: std::time::Instant::now(),
             calvin,
             open_brain,
+            dispatcher,
         })
     }
 
@@ -1988,6 +1998,7 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, final_status).await;
+                self.try_process_memory_candidates_on_close(run_id).await;
                 self.finalize_blackboard(final_status, &output.run_dir)
                     .await?;
                 self.write_run_timing_artifact(run_id, &output.run_dir)
@@ -2009,6 +2020,7 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, "failed").await;
+                self.try_process_memory_candidates_on_close(run_id).await;
                 let run_dir = self.run_dir(run_id);
                 self.mark_blackboard_failed(&message, &run_dir).await?;
                 let lessons = match self.consolidate_run(run_id, &prepared.spec_obj).await {
@@ -2158,13 +2170,14 @@ impl AppContext {
             .retrieve_coobie_memory_context(target_source, &query_terms)
             .await?;
         let briefing = self
-            .build_coobie_briefing(
+            .dispatch_coobie_briefing(
                 run_id,
                 spec_obj,
                 target_source,
                 &query_terms,
                 &domain_signals,
                 &memory_context,
+                None, // profile_dispatch: loaded from profiles in Phase 5b
             )
             .await?;
         let scout_briefing = build_scoped_briefing(&briefing, BriefingScope::ScoutPreflight);
@@ -3884,6 +3897,10 @@ next_actions={}",
                     "No predefined hidden scenarios for spec '{}' — invoking Sable to generate",
                     spec_obj.id
                 );
+                let sable_isolation = self
+                    .dispatcher
+                    .isolates("sable_evaluation", None)
+                    .then(crate::subagent::sable_isolation_system);
                 match scenarios::sable_generate_and_evaluate(
                     &spec_obj,
                     &self.paths.setup,
@@ -3895,6 +3912,7 @@ next_actions={}",
                     &agent_executions,
                     Some(&render_sable_context_summary(&sable_briefing)),
                     &run_dir,
+                    sable_isolation.as_deref(),
                 )
                 .await
                 {
@@ -11628,12 +11646,83 @@ Return JSON only.",
         }
     }
 
+    /// Dispatch the Coobie briefing construction task.
+    ///
+    /// When the configured backend is `DirectLlm`, calls `build_coobie_briefing`
+    /// inline — behavioral no-op vs. the pre-5-C3 path. When `ClaudeCodeAgent`,
+    /// runs an isolated LLM call using the coobie_briefing_prompt so the
+    /// retrieval trace never inflates the orchestrator's main context window.
+    async fn dispatch_coobie_briefing(
+        &self,
+        run_id: &str,
+        spec_obj: &Spec,
+        target_source: &TargetSourceMetadata,
+        query_terms: &[String],
+        domain_signals: &[String],
+        memory_context: &MemoryContextBundle,
+        profile_dispatch: Option<
+            &std::collections::HashMap<String, crate::setup::SubAgentTaskConfig>,
+        >,
+    ) -> Result<CoobieBriefing> {
+        if self
+            .dispatcher
+            .isolates("coobie_briefing", profile_dispatch)
+        {
+            let keywords: Vec<&str> = query_terms.iter().map(String::as_str).collect();
+            let prompt = crate::subagent::coobie_briefing_prompt(run_id, "preflight", &keywords);
+            let system = Some(crate::subagent::sable_isolation_system());
+            let result = self
+                .dispatcher
+                .dispatch("coobie_briefing", prompt, system, profile_dispatch)
+                .await;
+            tracing::debug!(
+                run_id = %run_id,
+                backend = %result.backend_used,
+                duration_ms = result.duration_ms,
+                tokens = ?result.tokens_used,
+                "coobie_briefing dispatched via sub-agent"
+            );
+            if !result.output.is_empty() {
+                // Parse the isolated output into a CoobieBriefing if possible;
+                // fall back to inline if the parse fails (DirectLlm fallback).
+                if let Ok(b) = serde_json::from_str::<CoobieBriefing>(&result.output) {
+                    return Ok(b);
+                }
+            }
+        }
+        // DirectLlm path (or isolated path fell back): call existing inline implementation.
+        self.build_coobie_briefing(
+            run_id,
+            spec_obj,
+            target_source,
+            query_terms,
+            domain_signals,
+            memory_context,
+        )
+        .await
+    }
+
     async fn try_close_calvin_run(&self, run_id: &str, outcome: &str) {
         let Some(calvin) = self.calvin.as_ref() else {
             return;
         };
         if let Err(error) = calvin.close_run(run_id, outcome).await {
             tracing::warn!(run_id = %run_id, error = %error, "Calvin close_run failed");
+        }
+    }
+
+    async fn try_process_memory_candidates_on_close(&self, run_id: &str) {
+        match self.process_memory_candidates(Some(run_id), 100).await {
+            Ok(summary) => tracing::debug!(
+                run_id = %run_id,
+                scanned = summary.scanned,
+                "memory candidates processed on run close"
+            ),
+            Err(error) => tracing::warn!(
+                run_id = %run_id,
+                error = %error,
+                "memory candidate processing failed on run close; candidates remain pending for retry"
+            ),
         }
     }
 
@@ -28746,6 +28835,7 @@ mod tests {
             calvin_archive: Default::default(),
             twilight_bark: Default::default(),
             open_brain: Default::default(),
+            sub_agents: Default::default(),
         };
         let staged = std::env::temp_dir().join(format!("harkonnen-tool-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&staged).expect("create staged dir");

@@ -541,6 +541,29 @@ assert_kernel_preservation(self_id)
 
 **Level 3 — Meta Compression:** Patterns over patterns (e.g., "Coobie tends to overgeneralize after repeated ambiguity streaks" becomes a tracked epistemic drift pattern).
 
+### DeepCausality Alignment Contract
+
+The Calvin Archive and Coobie causal layer should align with DeepCausality's current math as an executable causal substrate, not only as a vocabulary source.
+
+**Primitive:** treat causal structure as effect propagation, `E2 = f(E1)`. A Calvin `causally_contributed_to` relation is an addressable evidence edge, but a DeepCausality-ready causal pattern must also define the function that maps incoming effect/context into outgoing effect, including its error and audit log behavior.
+
+**Executable unit:** map stable `causal-pattern` records to causaloid definitions. A causaloid should carry a stable ID, description, activation predicate, input projection, context requirements, expected effect, and explanation path. Raw PackChat message causality remains associational until Coobie promotes it into an executable or intervention-backed pattern.
+
+**Context:** model run, spec, agent, time, chamber, evidence, provider/model, OpenZiti identity, and environment posture as explicit contextoids. The context may be static for audited replay or dynamic for live PackChat/Twilight ingestion. Do not hide context inside prose summaries or embedding metadata.
+
+**Composition:** support singleton causaloids, compound patterns, and graph/subgraph reasoning. Palace dens are the current product metaphor for compound causes; the math target is a causaloid graph that can evaluate a whole graph, a named subgraph, or a path between causes.
+
+**Pearl ladder:** keep the existing `Associational / Interventional / Counterfactual` labels, but require promotion evidence:
+- Associational: observed co-occurrence or PackChat `causation_id` without tested intervention.
+- Interventional: an explicit action/change was applied and the downstream outcome changed or was prevented.
+- Counterfactual: the system can compare observed and alternate effect paths, with the intervention site named.
+
+**Governance:** Effect Ethos maps naturally to Keeper and the Calvin Meta-Governor. Proposed actions from causal reasoning must pass identity, policy, and safety checks before becoming Praxis recommendations or automatic interventions.
+
+**Uncertainty and discovery:** confidence alone is insufficient. Future causal-pattern records should carry uncertainty posture, assumption checks, and provenance for whether the pattern was hand-authored, learned from labeled runs, or discovered by a causal-discovery adapter. SURD/MRMR-style discovery belongs in Phase 7 after the typed graph exists.
+
+**Version stance:** Harkonnen currently depends on `deep_causality = "0.3"` for the Phase 1 bridge in `src/coobie.rs`. Before building DeepCausality Phase 2, evaluate migration to the current modular stack (`deep_causality_core`, `deep_causality_ethos`, discovery/tensor/topology crates as needed) instead of extending the old API surface.
+
 ### Rust Module Layout
 
 ```text

@@ -230,7 +230,7 @@ Full design: `factory/context/briefing-scope-design.md` (BriefingScope) and `fac
 
 - **Phase 5-C1 — shipped:** `ContextTarget` metadata for Coobie preflight, budgeted memory-hit shaping, stamped-context section injection tracking, and attribution observability (`briefing_scope`, token budget/usage, hits provided).
 - **Phase 5-C2 — shipped:** distinct Scout, Mason, and Sable briefing projections are now materialized as run artifacts, Scout and Mason now consume their scoped briefings on the hot path, Sable's generated-scenario prompt now receives only the scenario-pure scoped summary, and repo-local prompt support / retriever bundles are filtered by role so hidden-scenario work is not primed with Mason implementation context.
-- **Phase 5-C3 — next critical slice:** `SubAgentDispatcher`, profile/config dispatch resolution, and isolated remote briefing/scenario backends.
+- **Phase 5-C3 — SHIPPED 2026-04-28:** `SubAgentDispatcher` in `src/subagent.rs` with `dispatch()` method and three-tier resolution order (profile `dispatch:` block → `[sub_agents.*]` in harkonnen.toml → `default_mode`). `SubAgentConfig` + `SubAgentTaskConfig` parsed into `SetupConfig`. `dispatch:` field added to `AgentProfile`. `SubAgentDispatcher` added to `AppContext`. Both high-context call sites wired: Coobie briefing construction → `dispatch_coobie_briefing()` (DirectLlm: behavioral no-op; ClaudeCodeAgent: isolated call with clean context window); Sable scenario evaluation → `isolation_prefix` injected into `sable_generate_and_evaluate()` when backend is ClaudeCodeAgent (Sable firewall: drops implementation_notes, mason_plan, edit_rationale from context). All 120 existing tests pass.
 
 **What to build:**
 
@@ -279,28 +279,21 @@ Full design: `factory/context/briefing-scope-design.md` (BriefingScope) and `fac
 
 This is now the critical memory slice. It replaces the old assumption that the next step must be a larger local vector store. The local fastembed/SQLite vector store remains opt-in; OB1 is the shared recall default.
 
-### Calvin Archive sidecar correctness (pre-5-D gate)
+### Calvin Archive sidecar correctness (pre-5-D gate) — **SHIPPED 2026-04-28**
 
-End-to-end integration tests (`tests/e2e_integration.rs`, 2026-04-28) confirmed two correctness bugs in the live Calvin sidecar that must be fixed before Phase 5-D activates the full Twilight → Calvin write path. They are small targeted fixes, not design changes.
+End-to-end integration tests (`tests/e2e_integration.rs`) confirmed and drove two correctness fixes to the live Calvin sidecar.
 
-**Fix 1 — `get_active_beliefs` must be agent-scoped** (`archive.rs:241`).
-The current TypeQL query returns all beliefs not yet superseded globally. When more than one `agent_self` exists the query leaks foreign beliefs into any named agent's result set. Fix: add a `stabilizes` join before the `not { (prior: $b) isa revised_into; }` clause:
+**Fix 1 — `get_active_beliefs` agent-scoped** (`archive.rs:241`) — **done**.
+Added `(source: $b, target: $a) isa stabilizes` join to the TypeQL query. Foreign beliefs from other `agent_self` instances no longer appear in any agent's result set. Test: `calvin::beliefs_scoped_to_named_agent` — green.
 
-```typeql
-match
-  $a isa agent_self, has name "{agent_name}";
-  $b isa belief, has narrative_summary $ns, has confidence $c;
-  (source: $b, target: $a) isa stabilizes;
-  not { (prior: $b) isa revised_into; };
-select $ns, $c;
-sort $c desc;
-limit 20;
-```
+**Fix 2 — `check_adaptation_safe` semantic negation patterns** (`archive.rs:323`) — **done**.
+Expanded the deny-list to `avoid`, `without`, `less`, `deprioritise`/`deprioritize`, `reduce`, `replace`, `instead of`, `abandon`, `drop` in addition to the original `not`/`remove`/`eliminate`. Marked `basic_heuristic`; Phase 6 upgrades to an embedding classifier. Test: `calvin::adaptation_safety_catches_semantic_negation` — green.
 
-**Fix 2 — `check_adaptation_safe` must cover semantic negation patterns** (`archive.rs:323`).
-The current implementation matches only literal `"not {trait}"`, `"remove {trait}"`, and `"eliminate {trait}"` substrings. Phrasings like `"avoid cooperative behaviour"`, `"deprioritise truth-seeking"`, or `"replace pack-awareness with solo efficiency"` all pass the check despite semantically negating core Labrador invariants. Fix: expand the pattern set to include at minimum `avoid`, `deprioritise`/`deprioritize`, `replace … with`, and `without {trait}` as negative signals; mark the check as `basic_heuristic` and plan a semantic classifier upgrade in Phase 6.
+**Fix 3 — PackChat causal-link addressability** (`archive.rs:141`, `archive.rs:350`) — **done**.
+`record_experience` now preserves a caller-supplied `episode_id` as the Calvin `experience.uuid` and links the experience to its `run_record` via `belongs_to_run`. `record_causal_link` now inserts the schema-valid `(cause: $cause, effect: $effect) isa causally_contributed_to` relation instead of attempting to match generated random UUIDs or use non-schema relation syntax. The TypeDB schema now declares `experience` as a player for causal cause/effect and run-link roles, and `run_record` as the run-link role player. This makes PackChat `causation_id -> message_id` links addressable on the real TypeDB path, not only in mocks.
 
-**E2E test gate:** both fixes are covered by `calvin::beliefs_scoped_to_named_agent` and `calvin::adaptation_safety_catches_semantic_negation` in `tests/e2e_integration.rs`. These two tests must pass before Phase 5-D is considered open.
+**Fix 4 — status update upsert semantics** (`archive.rs:379`) — **done**.
+`update_agent_status` no longer requires an existing `status` attribute. It deletes an old status when present, then inserts the requested status, so the Twilight presence TTL watcher can mark newly seeded or statusless agents offline/active without silently doing nothing.
 
 ### Data path
 
@@ -322,10 +315,10 @@ Twilight Bark / PackChat envelope
 - OB1 reader path already started by `OpenBrainClient::search_thoughts`; complete the ranking so OB1 hits sit beside repo-local memory, PackChat recency, and Calvin-approved facts in targeted Coobie briefings.
 - Calvin promotion contract for `calvin_candidate` rows. The contract includes proposed chamber targets, evidence refs, inference posture, confidence, Pathos score, preservation note, and recommended governance outcome: `accept`, `modify`, `reject`, or `quarantine`.
 - Operator review surface in the Consolidation Workbench for memory candidates and Calvin promotions. OB1 shared recall may be automatic for low-risk approved classes; Calvin promotion remains governed.
-- **Automatic candidate processing on run close.** `process_memory_candidates(run_id)` must be called automatically when a run is closed, not only on manual operator trigger. Wire the call into the `close_run` handler in `src/cli.rs` (or `api.rs`) immediately after the `run_record.status` is set to `"closed"`. Failures during processing must mark candidates as `retry_pending` rather than silently discarding them; a background retry task should poll for `retry_pending` rows. E2E test: `memory_candidates::run_close_triggers_candidate_processing`.
-- **Twilight ingest loop write-back to Calvin.** `spawn_twilight_ingest_loop()` in `chat.rs` currently ingests wire envelopes into the `memory_candidates` SQLite table but never forwards the `archive_contract` to the Calvin REST API. After ingesting each envelope, check `archive_contract.schema == "harkonnen.calvin.ingress.v1"`; if present and a `CalvinClient` is configured, call `calvin_client.record_experience()` with the fields mapped from `CalvinIngressEvent`. The `causation_id` from `PackChatWireEnvelope.causality` must also be forwarded: when non-null, call a subsequent write to record a `causally_contributed_to` link between the cause episode UUID and the effect episode UUID in Calvin (Pearl level: `Associational` by default; upgrade to `Interventional` after Coobie confirms the causal direction). E2E tests: `twilight::twilight_ingest_loop_writes_to_calvin`, `memory_candidates::causation_id_written_to_calvin_causal_graph`.
-- **Complete chamber mapping for all six chambers.** The `PackChatBusEventKind` → `chamber-label` mapping in `chat.rs` covers only four of the six Calvin Archive chambers (Mythos, Ethos, Logos, Praxis). Add the two missing kinds: `BeliefRevised` → `"episteme"` and `DriftDetected` → `"pathos"`. `BeliefRevised` events carry a `belief_id` and revised summary that should be forwarded as a `BeliefRevision` to the Calvin `/runs/{id}/beliefs` endpoint rather than as a generic experience. `DriftDetected` events carry a `lab_ness_score` and should record an experience in the Pathos chamber with `salience-weight` set from the drift magnitude. E2E test: `twilight::chamber_mapping_covers_all_six_chambers`.
-- **Zenoh presence TTL watcher → Calvin agent status.** When a Twilight agent presence entry expires (no heartbeat for TTL duration), the corresponding `agent_self` entity in Calvin remains indefinitely `"active"`. Add a Zenoh subscriber to the `twilight/{tenant}/+/presence/+` wildcard topic; on TTL expiry (heartbeat gap > presence TTL), call the Calvin API to update `agent_self.status` to `"offline"`. On re-registration, set status back to `"active"`. This keeps the Calvin continuity graph accurate without requiring manual intervention. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status`.
+- **Automatic candidate processing on run close** — **SHIPPED 2026-04-28**. `try_process_memory_candidates_on_close(run_id)` is now called immediately after `try_close_calvin_run()` at both successful and failed run completion paths in `orchestrator.rs`. Processing failures log a warning and leave candidates as `pending` for manual retry (retry scheduler remains future work). E2E test: `memory_candidates::run_close_triggers_candidate_processing` — green.
+- **Twilight ingest loop write-back to Calvin** — **SHIPPED 2026-04-28**. `run_twilight_ingest_once()` in `chat.rs` now checks each inbound wire envelope for `archive_contract.schema == "harkonnen.calvin.ingress.v1"` and calls `calvin_client.record_experience()` with the mapped `ArchiveExperience`. Non-null `causation_id` values are forwarded as `causally_contributed_to` links via `POST /runs/{id}/causal-links` (Pearl level: `Associational`, carried in the relation scope until Phase 7 adds a dedicated Pearl-level attribute). Calvin is now initialised before the ingest loop spawns so the client is available from the first poll. New endpoints added: `POST /runs/{id}/causal-links` on Calvin, `record_causal_link()` on `CalvinClient`. E2E tests: `twilight::twilight_ingest_loop_writes_to_calvin`, `memory_candidates::causation_id_written_to_calvin_causal_graph` — both green.
+- **Complete chamber mapping for all six chambers** — **SHIPPED 2026-04-28**. Added `BeliefRevised` and `DriftDetected` variants to `PackChatBusEventKind`. `calvin_chamber_for_packchat_event()` now maps by event kind first: `ThreadOpened → mythos`, `ThreadRosterSynced → ethos`, `BeliefRevised → episteme`, `DriftDetected → pathos`, `CheckpointResolved → praxis`, `MessageAppended → logos` (role-refined). All six chambers are now reachable. E2E test: `twilight::chamber_mapping_covers_all_six_chambers` — green.
+- **Agent presence TTL watcher → Calvin agent status** — **SHIPPED 2026-04-28**. `spawn_twilight_ingest_loop()` now maintains a `HashMap<agent_id, Instant>` presence tracker that persists across reconnect cycles. On each loop iteration, agents not seen for > 600 s are marked `"offline"` via `PATCH /agents/{name}/status`. Activity events reset the last-seen timestamp. New endpoint added: `PATCH /agents/{name}/status` on Calvin, `update_agent_status()` on `CalvinClient` and `ArchiveStore`. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status` — green.
 
 ### OpenZiti service profile
 
@@ -342,7 +335,7 @@ OpenZiti Dial and Bind policies should be separate. Privileged writers should ca
 
 ### Benchmark / product gate
 
-- **E2E integration test suite green:** all tests in `tests/e2e_integration.rs` pass, including the six gap tests that are currently failing (`calvin::beliefs_scoped_to_named_agent`, `calvin::adaptation_safety_catches_semantic_negation`, `twilight::twilight_ingest_loop_writes_to_calvin`, `twilight::chamber_mapping_covers_all_six_chambers`, `twilight::agent_presence_expiry_updates_calvin_agent_status`, `memory_candidates::run_close_triggers_candidate_processing`).
+- **E2E integration test suite green — DONE 2026-04-28:** all 20 tests in `tests/e2e_integration.rs` pass. The six gap tests that were failing at roadmap entry are now green: `calvin::beliefs_scoped_to_named_agent`, `calvin::adaptation_safety_catches_semantic_negation`, `twilight::twilight_ingest_loop_writes_to_calvin`, `twilight::chamber_mapping_covers_all_six_chambers`, `twilight::agent_presence_expiry_updates_calvin_agent_status`, `memory_candidates::run_close_triggers_candidate_processing`.
 - A PackChat thread with at least five messages produces one or more memory candidates.
 - A candidate marked `shared_recall` is captured in OB1 and later retrieved by `search_thoughts` during a targeted briefing.
 - A candidate marked `calvin_candidate` produces a structured promotion contract without directly mutating Calvin canonical state.
@@ -539,6 +532,7 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 - Write-back: after Phase 5 consolidation approval, promoted lessons and causal links written to TypeDB as well as the file store
 - Query surface: `POST /api/coobie/query` routes natural-language causal questions through Coobie's retrieval chain
 - Coobie's briefing builder calls TypeDB for cross-run pattern queries before preflight
+- **DeepCausality alignment pass** — before deriving executable causaloids from TypeDB or Calvin links, migrate or explicitly pin the DeepCausality API target. Harkonnen currently has a Phase 1 bridge on `deep_causality = "0.3"`, while the current DeepCausality repo centers the modular `PropagatingEffect` / `PropagatingProcess` stack, Effect Ethos, discovery, tensors, and topology crates. The Phase 6 graph should preserve enough structure for that math: effect propagation (`E2 = f(E1)`), contextoids, assumption checks, explanation paths, and Pearl-level promotion evidence.
 - **Semantic adaptation safety classifier** — upgrade `check_adaptation_safe` in `archive.rs` from heuristic string-matching to an embedding-based classifier. Represent each Labrador kernel trait as a vector; score the proposed adaptation summary against the negation-space of each trait using cosine similarity. Flag any adaptation that scores above a configurable negation threshold as unsafe regardless of literal phrasing. This replaces the `basic_heuristic` marker added in the Phase 5-D correctness fix. E2E test: `calvin::adaptation_safety_catches_semantic_negation` (currently passing with the mock; the real TypeDB path must pass the same assertion).
 - **GAIA Level 3 adapter** — maps GAIA's multi-step tool-use tasks to Harkonnen's factory run format; routes sub-tasks to the appropriate Labrador rather than a single generalist. Requires the TypeDB query surface to be live.
 - **AgentBench adapters** — OS, database, and web environments, each mapped to a Labrador role.
@@ -561,6 +555,7 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 
 - **Causal attribution accuracy corpus** — 30–50 labeled runs with seeded failures (wrong API version, missing env var, breaking schema change, etc.). Each entry has a spec, a seeded failure, a ground-truth cause label, and the Coobie `diagnose` output. Score top-1 and top-3 accuracy. Start with 10 entries for a first baseline. Lives in `factory/benchmarks/causal-attribution/`.
 - **E-CARE native adapter** — maps Coobie's `diagnose` output to E-CARE's evaluation format and scores whether generated causal explanations are judged natural-language coherent. Run after consolidation so promoted lessons can inform subsequent diagnose output.
+- **DeepCausality discovery adapter spike** — evaluate whether SURD/MRMR-style discovery can propose candidate causal-pattern records from the labeled corpus. Discovered patterns stay `quarantine` or `review_required` until Coobie/Keeper/operator promotion supplies evidence and governance.
 - Publish before/after comparisons for causal attribution accuracy: pre-Phase 4 (pure semantic recall) versus post-Phase 6 (TypeDB causal graph-augmented).
 
 **Benchmark gate:**

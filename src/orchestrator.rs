@@ -174,6 +174,7 @@ pub struct MemoryCandidateProcessSummary {
     pub held_for_review: usize,
     pub ignored: usize,
     pub duplicates: usize,
+    pub retry_pending: usize,
     pub errors: Vec<String>,
 }
 
@@ -16038,6 +16039,17 @@ Return JSON only.",
                                 summary.captured_openbrain += 1;
                             }
                             Err(error) => {
+                                self.chat
+                                    .update_memory_candidate_processing(
+                                        &candidate.candidate_id,
+                                        "retry_pending",
+                                        Some(&distilled),
+                                        None,
+                                        Some(&dedupe_key),
+                                        None,
+                                    )
+                                    .await?;
+                                summary.retry_pending += 1;
                                 summary.errors.push(format!(
                                     "{}: OB1 capture failed: {}",
                                     candidate.candidate_id, error
@@ -16060,19 +16072,41 @@ Return JSON only.",
                 }
                 "calvin_candidate" => {
                     let contract = build_calvin_promotion_contract(&candidate, &distilled);
-                    self.enqueue_calvin_promotion_candidate(&candidate, contract.clone())
-                        .await?;
-                    self.chat
-                        .update_memory_candidate_processing(
-                            &candidate.candidate_id,
-                            "promotion_pending",
-                            Some(&distilled),
-                            None,
-                            Some(&dedupe_key),
-                            Some(&contract),
-                        )
-                        .await?;
-                    summary.calvin_promotions += 1;
+                    match self
+                        .enqueue_calvin_promotion_candidate(&candidate, contract.clone())
+                        .await
+                    {
+                        Ok(()) => {
+                            self.chat
+                                .update_memory_candidate_processing(
+                                    &candidate.candidate_id,
+                                    "promotion_pending",
+                                    Some(&distilled),
+                                    None,
+                                    Some(&dedupe_key),
+                                    Some(&contract),
+                                )
+                                .await?;
+                            summary.calvin_promotions += 1;
+                        }
+                        Err(error) => {
+                            self.chat
+                                .update_memory_candidate_processing(
+                                    &candidate.candidate_id,
+                                    "retry_pending",
+                                    Some(&distilled),
+                                    None,
+                                    Some(&dedupe_key),
+                                    Some(&contract),
+                                )
+                                .await?;
+                            summary.retry_pending += 1;
+                            summary.errors.push(format!(
+                                "{}: Calvin promotion enqueue failed: {}",
+                                candidate.candidate_id, error
+                            ));
+                        }
+                    }
                 }
                 _ => {
                     self.chat

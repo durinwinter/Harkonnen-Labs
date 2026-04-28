@@ -962,7 +962,7 @@ impl ChatStore {
                        causality_json, status, openbrain_ref, calvin_contract_json, created_at,
                        processed_at
                 FROM memory_candidates
-                WHERE run_id = ?1 AND status IN ('pending', 'retry_pending')
+                WHERE run_id = ?1 AND status IN ('pending', 'retry_pending', 'waiting_openbrain')
                 ORDER BY created_at ASC
                 LIMIT ?2
                 "#,
@@ -980,7 +980,7 @@ impl ChatStore {
                        causality_json, status, openbrain_ref, calvin_contract_json, created_at,
                        processed_at
                 FROM memory_candidates
-                WHERE status IN ('pending', 'retry_pending')
+                WHERE status IN ('pending', 'retry_pending', 'waiting_openbrain')
                 ORDER BY created_at ASC
                 LIMIT ?1
                 "#,
@@ -1028,6 +1028,48 @@ impl ChatStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn approve_memory_candidate_for_processing(
+        &self,
+        run_id: &str,
+        candidate_id: &str,
+    ) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE memory_candidates
+            SET status = 'pending',
+                sensitivity_label = 'normal',
+                processed_at = NULL
+            WHERE run_id = ?1
+              AND candidate_id = ?2
+              AND status IN ('held_for_review', 'waiting_openbrain', 'retry_pending')
+            "#,
+        )
+        .bind(run_id)
+        .bind(candidate_id)
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn discard_memory_candidate(&self, run_id: &str, candidate_id: &str) -> Result<bool> {
+        let result = sqlx::query(
+            r#"
+            UPDATE memory_candidates
+            SET status = 'discarded',
+                processed_at = ?3
+            WHERE run_id = ?1
+              AND candidate_id = ?2
+              AND status NOT IN ('captured_openbrain', 'promotion_pending')
+            "#,
+        )
+        .bind(run_id)
+        .bind(candidate_id)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(result.rows_affected() > 0)
     }
 
     async fn capture_memory_candidate_from_event(&self, event: &PackChatBusEvent) -> Result<()> {
@@ -2752,6 +2794,113 @@ mod tests {
         assert!(candidates
             .iter()
             .any(|candidate| candidate.retention_class == "shared_recall"));
+    }
+
+    #[tokio::test]
+    async fn pending_memory_candidate_scan_includes_retry_pending() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
+        create_memory_candidates_table(&pool).await;
+        let store = ChatStore::new(pool.clone());
+        let now = Utc::now().to_rfc3339();
+
+        for (candidate_id, status) in [
+            ("candidate-pending", "pending"),
+            ("candidate-retry", "retry_pending"),
+            ("candidate-waiting", "waiting_openbrain"),
+            ("candidate-done", "captured_openbrain"),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO memory_candidates
+                    (candidate_id, source_event_id, run_id, role, operation, raw_payload,
+                     retention_class, sensitivity_label, evidence_refs, causality_json,
+                     status, created_at)
+                VALUES (?1, ?2, 'run-retry', 'operator', 'message_appended',
+                        '{"content":"remember this retry"}', 'shared_recall', 'normal',
+                        '[]', '{}', ?3, ?4)
+                "#,
+            )
+            .bind(candidate_id)
+            .bind(format!("event-{candidate_id}"))
+            .bind(status)
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("insert candidate");
+        }
+
+        let candidates = store
+            .list_pending_memory_candidates(Some("run-retry"), 10)
+            .await
+            .expect("pending candidates");
+        let ids = candidates
+            .iter()
+            .map(|candidate| candidate.candidate_id.as_str())
+            .collect::<Vec<_>>();
+
+        assert_eq!(
+            ids,
+            vec!["candidate-pending", "candidate-retry", "candidate-waiting"]
+        );
+    }
+
+    #[tokio::test]
+    async fn held_memory_candidate_can_be_approved_or_discarded() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
+        create_memory_candidates_table(&pool).await;
+        let store = ChatStore::new(pool.clone());
+        let now = Utc::now().to_rfc3339();
+
+        for (candidate_id, status, sensitivity) in [
+            ("candidate-held", "held_for_review", "restricted"),
+            ("candidate-retry", "retry_pending", "normal"),
+        ] {
+            sqlx::query(
+                r#"
+                INSERT INTO memory_candidates
+                    (candidate_id, source_event_id, run_id, role, operation, raw_payload,
+                     retention_class, sensitivity_label, evidence_refs, causality_json,
+                     status, created_at)
+                VALUES (?1, ?2, 'run-review', 'operator', 'message_appended',
+                        '{"content":"remember this review"}', 'shared_recall', ?3,
+                        '[]', '{}', ?4, ?5)
+                "#,
+            )
+            .bind(candidate_id)
+            .bind(format!("event-{candidate_id}"))
+            .bind(sensitivity)
+            .bind(status)
+            .bind(&now)
+            .execute(&pool)
+            .await
+            .expect("insert candidate");
+        }
+
+        assert!(store
+            .approve_memory_candidate_for_processing("run-review", "candidate-held")
+            .await
+            .expect("approve"));
+        assert!(store
+            .discard_memory_candidate("run-review", "candidate-retry")
+            .await
+            .expect("discard"));
+
+        let rows = store
+            .list_memory_candidates_for_run("run-review")
+            .await
+            .expect("list");
+        let held = rows
+            .iter()
+            .find(|candidate| candidate.candidate_id == "candidate-held")
+            .expect("approved candidate");
+        let retry = rows
+            .iter()
+            .find(|candidate| candidate.candidate_id == "candidate-retry")
+            .expect("discarded candidate");
+
+        assert_eq!(held.status, "pending");
+        assert_eq!(held.sensitivity_label, "normal");
+        assert_eq!(retry.status, "discarded");
     }
 
     async fn create_memory_candidates_table(pool: &SqlitePool) {

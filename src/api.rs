@@ -791,6 +791,18 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
             "/api/runs/:id/memory/candidates",
             get(get_memory_candidates).post(post_process_memory_candidates),
         )
+        .route(
+            "/api/runs/:id/memory/candidates/retry",
+            post(post_process_memory_candidates),
+        )
+        .route(
+            "/api/runs/:id/memory/candidates/:cid/approve",
+            post(post_approve_memory_candidate),
+        )
+        .route(
+            "/api/runs/:id/memory/candidates/:cid/discard",
+            post(post_discard_memory_candidate),
+        )
         .route("/api/chat", post(post_chat))
         .route("/api/coobie/query", post(post_coobie_query))
         .route("/api/agents/:id/chat", post(post_agent_chat))
@@ -1553,23 +1565,38 @@ async fn get_memory_candidates(
         Ok(Some(_)) => match app.list_memory_candidates_for_run(&id).await {
             Ok(candidates) => {
                 let total = candidates.len();
-                let pending = candidates.iter().filter(|c| c.status == "pending").count();
-                let captured_openbrain = candidates
-                    .iter()
-                    .filter(|c| c.status == "captured_openbrain")
-                    .count();
-                let promotion_pending = candidates
-                    .iter()
-                    .filter(|c| c.status == "promotion_pending")
-                    .count();
+                let mut status_counts = HashMap::<String, usize>::new();
+                for candidate in &candidates {
+                    *status_counts.entry(candidate.status.clone()).or_default() += 1;
+                }
+                let pending = status_counts.get("pending").copied().unwrap_or(0);
+                let retry_pending = status_counts.get("retry_pending").copied().unwrap_or(0);
+                let waiting_openbrain =
+                    status_counts.get("waiting_openbrain").copied().unwrap_or(0);
+                let held_for_review = status_counts.get("held_for_review").copied().unwrap_or(0);
+                let captured_openbrain = status_counts
+                    .get("captured_openbrain")
+                    .copied()
+                    .unwrap_or(0);
+                let promotion_pending =
+                    status_counts.get("promotion_pending").copied().unwrap_or(0);
+                let actionable =
+                    retry_pending + waiting_openbrain + held_for_review + promotion_pending;
+                let retryable = pending + retry_pending + waiting_openbrain;
                 (
                     StatusCode::OK,
                     Json(serde_json::json!({
                         "run_id": id,
                         "total": total,
+                        "status_counts": status_counts,
                         "pending": pending,
+                        "retry_pending": retry_pending,
+                        "waiting_openbrain": waiting_openbrain,
+                        "held_for_review": held_for_review,
                         "captured_openbrain": captured_openbrain,
                         "promotion_pending": promotion_pending,
+                        "actionable": actionable,
+                        "retryable": retryable,
                         "candidates": candidates,
                     })),
                 )
@@ -1593,6 +1620,63 @@ async fn post_process_memory_candidates(
             .await
         {
             Ok(summary) => (StatusCode::OK, Json(summary)).into_response(),
+            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn post_approve_memory_candidate(
+    Path((id, cid)): Path<(String, String)>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app
+            .chat
+            .approve_memory_candidate_for_processing(&id, &cid)
+            .await
+        {
+            Ok(true) => match app.process_memory_candidates(Some(&id), 25).await {
+                Ok(summary) => (
+                    StatusCode::OK,
+                    Json(serde_json::json!({
+                        "status": "approved",
+                        "candidate_id": cid,
+                        "processing": summary,
+                    })),
+                )
+                    .into_response(),
+                Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+            },
+            Ok(false) => (
+                StatusCode::CONFLICT,
+                "Candidate is not reviewable, retryable, or waiting for OB1",
+            )
+                .into_response(),
+            Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+        },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn post_discard_memory_candidate(
+    Path((id, cid)): Path<(String, String)>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => match app.chat.discard_memory_candidate(&id, &cid).await {
+            Ok(true) => (
+                StatusCode::OK,
+                Json(serde_json::json!({"status": "discarded", "candidate_id": cid})),
+            )
+                .into_response(),
+            Ok(false) => (
+                StatusCode::CONFLICT,
+                "Candidate is already captured/promoted or was not found",
+            )
+                .into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),

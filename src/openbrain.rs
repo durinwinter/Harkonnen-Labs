@@ -47,7 +47,7 @@ impl OpenBrainClient {
         Ok(Some(Self {
             connection_url,
             http: Client::builder()
-                .timeout(Duration::from_secs(30))
+                .timeout(Duration::from_millis(config.timeout_ms.max(250)))
                 .build()
                 .context("building Open Brain HTTP client")?,
             search_limit: config.search_limit,

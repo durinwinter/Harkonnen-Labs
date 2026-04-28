@@ -147,6 +147,8 @@ pub struct OpenBrainConfig {
     pub search_limit: usize,
     #[serde(default = "default_open_brain_search_threshold")]
     pub search_threshold: f64,
+    #[serde(default = "default_open_brain_timeout_ms")]
+    pub timeout_ms: u64,
 }
 
 impl Default for OpenBrainConfig {
@@ -158,6 +160,7 @@ impl Default for OpenBrainConfig {
             access_key_env: default_open_brain_access_key_env(),
             search_limit: default_open_brain_search_limit(),
             search_threshold: default_open_brain_search_threshold(),
+            timeout_ms: default_open_brain_timeout_ms(),
         }
     }
 }
@@ -176,6 +179,10 @@ fn default_open_brain_search_limit() -> usize {
 
 fn default_open_brain_search_threshold() -> f64 {
     0.5
+}
+
+fn default_open_brain_timeout_ms() -> u64 {
+    2_500
 }
 
 /// Top-level [sub_agents] section in harkonnen.toml.

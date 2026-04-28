@@ -15,6 +15,8 @@ pub struct SetupConfig {
     pub calvin_archive: CalvinConfig,
     #[serde(default)]
     pub twilight_bark: TwilightBarkConfig,
+    #[serde(default)]
+    pub open_brain: OpenBrainConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -130,6 +132,51 @@ fn default_twilight_agent_role() -> String {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct OpenBrainConfig {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+    #[serde(default)]
+    pub connection_url: Option<String>,
+    #[serde(default = "default_open_brain_connection_url_env")]
+    pub connection_url_env: String,
+    #[serde(default = "default_open_brain_access_key_env")]
+    pub access_key_env: String,
+    #[serde(default = "default_open_brain_search_limit")]
+    pub search_limit: usize,
+    #[serde(default = "default_open_brain_search_threshold")]
+    pub search_threshold: f64,
+}
+
+impl Default for OpenBrainConfig {
+    fn default() -> Self {
+        Self {
+            enabled: true,
+            connection_url: None,
+            connection_url_env: default_open_brain_connection_url_env(),
+            access_key_env: default_open_brain_access_key_env(),
+            search_limit: default_open_brain_search_limit(),
+            search_threshold: default_open_brain_search_threshold(),
+        }
+    }
+}
+
+fn default_open_brain_connection_url_env() -> String {
+    "OPEN_BRAIN_MCP_URL".to_string()
+}
+
+fn default_open_brain_access_key_env() -> String {
+    "OPEN_BRAIN_ACCESS_KEY".to_string()
+}
+
+fn default_open_brain_search_limit() -> usize {
+    8
+}
+
+fn default_open_brain_search_threshold() -> f64 {
+    0.5
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
 pub struct McpConfig {
     #[serde(default)]
     pub servers: Vec<McpServerConfig>,
@@ -232,6 +279,8 @@ impl SetupConfig {
             routing: None,
             mcp: None,
             calvin_archive: CalvinConfig::default(),
+            twilight_bark: TwilightBarkConfig::default(),
+            open_brain: OpenBrainConfig::default(),
         }
     }
 

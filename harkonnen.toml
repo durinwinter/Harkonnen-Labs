@@ -80,6 +80,15 @@ surface      = "vscode"
 enabled     = true
 harmony_url = "http://127.0.0.1:7171"
 
+# Optional distributed PackChat binding. When enabled, Harkonnen still writes
+# factory/logs/packchat-bus.jsonl, and also publishes versioned PackChat
+# envelopes to the local Twilight Bark daemon.
+[twilight_bark]
+enabled = false
+# daemon_socket = "/tmp/twilight-$USER-daemon.sock"
+agent_name = "harkonnen-packchat"
+agent_role = "packchat-bridge"
+
 # ── Agent Routing ─────────────────────────────────────────────────────────────
 # Each agent is matched to the model tier that fits its role.
 #

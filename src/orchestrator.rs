@@ -38,6 +38,17 @@ use crate::{
     spec, workspace,
 };
 
+fn default_twilight_daemon_socket() -> PathBuf {
+    if let Ok(socket) = std::env::var("TWILIGHT_DAEMON_SOCKET") {
+        return PathBuf::from(socket);
+    }
+    if let Ok(runtime_dir) = std::env::var("XDG_RUNTIME_DIR") {
+        return PathBuf::from(runtime_dir).join("twilight-daemon.sock");
+    }
+    let user = std::env::var("USER").unwrap_or_else(|_| "unknown".to_string());
+    PathBuf::from(format!("/tmp/twilight-{user}-daemon.sock"))
+}
+
 #[derive(Debug, Clone)]
 pub struct AppContext {
     pub paths: Paths,
@@ -59,6 +70,8 @@ pub struct AppContext {
     pub started_at: std::time::Instant,
     /// Calvin Archive HTTP client — None when disabled or harmony not running.
     pub calvin: Option<crate::calvin_client::CalvinClient>,
+    /// Open Brain MCP-backed memory client — default cross-client recall path.
+    pub open_brain: Option<crate::openbrain::OpenBrainClient>,
 }
 
 #[derive(Debug, Clone)]
@@ -931,15 +944,49 @@ impl AppContext {
             None
         };
         let (event_tx, _) = tokio::sync::broadcast::channel(512);
-        let chat = crate::chat::ChatStore::with_bus(
-            pool.clone(),
-            Arc::new(crate::chat::LocalJsonlPackChatBus::new(
-                paths.logs.join("packchat-bus.jsonl"),
-                paths.setup.setup.name.clone(),
-            )),
-        );
+        let local_packchat_bus = Arc::new(crate::chat::LocalJsonlPackChatBus::new(
+            paths.logs.join("packchat-bus.jsonl"),
+            paths.setup.setup.name.clone(),
+        ));
+        let twilight_socket_path = paths.setup.twilight_bark.enabled.then(|| {
+            paths
+                .setup
+                .twilight_bark
+                .daemon_socket
+                .clone()
+                .unwrap_or_else(default_twilight_daemon_socket)
+        });
+        let packchat_bus: Arc<dyn crate::chat::PackChatBus> =
+            if let Some(socket_path) = twilight_socket_path.clone() {
+                Arc::new(crate::chat::CompositePackChatBus::new(vec![
+                    local_packchat_bus,
+                    Arc::new(crate::chat::TwilightPackChatBus::new(
+                        socket_path,
+                        paths.setup.twilight_bark.agent_name.clone(),
+                        paths.setup.twilight_bark.agent_role.clone(),
+                        paths.setup.setup.name.clone(),
+                    )),
+                ]))
+            } else {
+                local_packchat_bus
+            };
+        let chat = crate::chat::ChatStore::with_bus(pool.clone(), packchat_bus);
+        if let Some(socket_path) = twilight_socket_path {
+            chat.spawn_twilight_ingest_loop(
+                socket_path,
+                format!("{}-ingest", paths.setup.twilight_bark.agent_name),
+                paths.setup.twilight_bark.agent_role.clone(),
+            );
+        }
         let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
         let calvin = crate::calvin_client::try_connect(&paths.setup.calvin_archive).await;
+        let open_brain = match crate::openbrain::OpenBrainClient::new(&paths.setup.open_brain) {
+            Ok(client) => client,
+            Err(error) => {
+                tracing::warn!(error = %error, "Open Brain client unavailable");
+                None
+            }
+        };
         Ok(Self {
             paths,
             pool,
@@ -952,6 +999,7 @@ impl AppContext {
             operator_models,
             started_at: std::time::Instant::now(),
             calvin,
+            open_brain,
         })
     }
 
@@ -4446,6 +4494,18 @@ Top memory hits:
             }
             kw
         };
+
+        let mut raw_hits = raw_hits;
+        if !semantic_query.is_empty() {
+            if let Some(open_brain) = self.open_brain.as_ref() {
+                match open_brain.search_thoughts(&semantic_query).await {
+                    Ok(mut open_brain_hits) => raw_hits.append(&mut open_brain_hits),
+                    Err(error) => {
+                        tracing::warn!(error = %error, "Open Brain search failed");
+                    }
+                }
+            }
+        }
 
         for hit in raw_hits {
             if hit.contains("No memories found") || hit.contains("Memory not initialized") {
@@ -28375,6 +28435,7 @@ mod tests {
                 self_server: None,
             }),
             calvin_archive: Default::default(),
+            twilight_bark: Default::default(),
         };
         let staged = std::env::temp_dir().join(format!("harkonnen-tool-test-{}", Uuid::new_v4()));
         std::fs::create_dir_all(&staged).expect("create staged dir");

@@ -26,6 +26,7 @@ mod mcp_server;
 mod memory;
 mod models;
 mod operator_model;
+mod openbrain;
 mod orchestrator;
 mod pidgin;
 mod policy;

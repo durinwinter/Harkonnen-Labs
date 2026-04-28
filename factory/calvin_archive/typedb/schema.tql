@@ -1,3 +1,13 @@
+# Calvin Archive — Phase 6 Schema (production)
+# Used by archive.rs until Phase 8 opens.
+# snake_case naming convention matches the coobie_kernel_seed.tql insert data.
+#
+# Fixes over the original draft:
+#   - created-at changed from string to datetime
+#   - plays declarations added to all entities for all relations that name them
+#   - belongs_to_run, linked_to_spec, causally_contributed_to, evidence-for,
+#     inferred-from, quarantine-holds all have players declared on both sides
+
 define
 attribute uuid, value string;
 attribute name, value string;
@@ -24,7 +34,7 @@ attribute chamber-label, value string;
 attribute quarantine-reason, value string;
 attribute evidence-bounty-threshold, value double;
 attribute salience-weight, value double;
-attribute created-at, value string;
+attribute created-at, value datetime;
 
 entity soul,
   owns uuid @key,
@@ -43,7 +53,8 @@ entity agent_self,
   plays anchored_by:anchored,
   plays stabilizes:target,
   plays destabilizes:target,
-  plays expressed_as:source;
+  plays expressed_as:source,
+  plays quarantine-holds:holder;
 
 entity experience,
   owns uuid @key,
@@ -51,7 +62,11 @@ entity experience,
   owns scope,
   owns provider-name,
   owns model-name,
-  owns chamber-label;
+  owns chamber-label,
+  plays belongs_to_run:experience,
+  plays linked_to_spec:source,
+  plays causally_contributed_to:cause,
+  plays causally_contributed_to:effect;
 
 entity belief,
   owns uuid @key,
@@ -62,7 +77,9 @@ entity belief,
   plays revised_into:prior,
   plays revised_into:next,
   plays reflected_on:target,
-  plays stabilizes:source;
+  plays stabilizes:source,
+  plays evidence-for:claim,
+  plays inferred-from:conclusion;
 
 entity trait,
   owns uuid @key,
@@ -100,7 +117,10 @@ entity causal_pattern,
   owns name,
   owns narrative_summary,
   owns confidence,
-  owns scope;
+  owns scope,
+  plays causally_contributed_to:cause,
+  plays causally_contributed_to:effect,
+  plays linked_to_spec:source;
 
 entity behavioral_signature,
   owns uuid @key,
@@ -134,7 +154,8 @@ entity spec_context,
   owns uuid @key,
   owns name,
   owns narrative_summary,
-  owns scope;
+  owns scope,
+  plays linked_to_spec:spec;
 
 entity run_record,
   owns uuid @key,
@@ -143,7 +164,8 @@ entity run_record,
   owns status,
   owns provider-name,
   owns model-name,
-  owns outcome-label;
+  owns outcome-label,
+  plays belongs_to_run:run;
 
 # Phase 8-B: quarantine holding area for experiences with uncertain identity safety
 entity quarantine-entry,
@@ -152,25 +174,30 @@ entity quarantine-entry,
   owns quarantine-reason,
   owns evidence-bounty-threshold,
   owns salience-weight,
-  owns status;
+  owns status,
+  plays quarantine-holds:held;
 
 # Evidence and inference
 entity evidence-item,
   owns uuid @key,
   owns narrative_summary,
   owns confidence,
-  owns scope;
+  owns scope,
+  plays evidence-for:evidence,
+  plays inferred-from:premise;
 
 entity inference-pattern,
   owns uuid @key,
   owns name,
   owns narrative_summary,
-  owns confidence;
+  owns confidence,
+  plays inferred-from:pattern;
 
 entity uncertainty-state,
   owns uuid @key,
   owns narrative_summary,
-  owns confidence;
+  owns confidence,
+  plays evidence-for:evidence;
 
 relation contains_self,
   relates whole,
@@ -240,4 +267,5 @@ relation evidence-for,
 relation inferred-from,
   owns confidence,
   relates conclusion,
+  relates pattern,
   relates premise;

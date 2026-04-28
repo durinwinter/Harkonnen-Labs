@@ -13,6 +13,8 @@ pub struct SetupConfig {
     pub mcp: Option<McpConfig>,
     #[serde(default)]
     pub calvin_archive: CalvinConfig,
+    #[serde(default)]
+    pub twilight_bark: TwilightBarkConfig,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
@@ -105,6 +107,26 @@ pub struct CalvinConfig {
 
 fn default_calvin_url() -> String {
     "http://localhost:7171".to_string()
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize, Default)]
+pub struct TwilightBarkConfig {
+    #[serde(default)]
+    pub enabled: bool,
+    #[serde(default)]
+    pub daemon_socket: Option<PathBuf>,
+    #[serde(default = "default_twilight_agent_name")]
+    pub agent_name: String,
+    #[serde(default = "default_twilight_agent_role")]
+    pub agent_role: String,
+}
+
+fn default_twilight_agent_name() -> String {
+    "harkonnen-packchat".to_string()
+}
+
+fn default_twilight_agent_role() -> String {
+    "packchat-bridge".to_string()
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]

@@ -1,14 +1,14 @@
-# Calvin Archive — Phase 8 Schema
+# Calvin Archive — Phase 8 Schema (corrected)
+# Canonical TypeQL schema for the full six-chamber Calvin Archive.
 # Replaces schema.tql when Phase 8 opens.
-# All entities, attributes, and relations for the full six-chamber Calvin Archive
-# plus the Meta-Governor integration machinery and factory wiring.
 #
 # Chamber map:
 #   Mythos   — autobiographical continuity (experience, observation, wound)
-#   Episteme — truth-formation (belief, evidence, inference-pattern, uncertainty-state, trust-anchor)
-#   Ethos    — identity kernel (trait, value-commitment)
-#   Pathos   — salience weighting (owns salience-weight, decay-rate on most entities)
-#   Logos    — reasoning and causality (causal-pattern, interpretive-frame, schema)
+#   Episteme — truth-formation (belief, evidence-item, inference-pattern,
+#              uncertainty-state, trust-anchor)
+#   Ethos    — identity kernel (trait, value-commitment, relationship-anchor)
+#   Pathos   — salience weighting (salience-weight, decay-rate on most entities)
+#   Logos    — reasoning and causality (causal-pattern, interpretive-frame, agent-schema)
 #   Praxis   — behavioral expression (behavioral-signature, adaptation, reflection)
 #
 # Governance layer:
@@ -16,12 +16,22 @@
 #
 # Factory layer:
 #   soul, agent-self, run-record, spec-context, artifact, summary-view
+#
+# Design notes:
+#   - 'schema' is a TypeQL reserved word; the entity is named 'agent-schema' here.
+#   - All relations have ≥ 2 roles; endorsement data lives as attributes on
+#     integration-policy rather than a single-role endorsed-by relation.
+#   - value integer (not long) for counters per TypeDB 3.x type system.
+#   - Pathos is implemented as salience-weight / decay-rate attributes on any
+#     entity rather than as a separate chamber entity; this matches the design
+#     principle that Pathos is a weighting pass, not a distinct object type.
+#   - All plays declarations are present on both sides of each relation.
 
 define
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # SHARED ATTRIBUTES
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 attribute uuid, value string;
 attribute name, value string;
@@ -31,26 +41,26 @@ attribute updated-at, value datetime;
 attribute closed-at, value datetime;
 attribute status, value string;
 attribute scope, value string;
-attribute phase, value string;       # which factory phase produced / last touched this
-attribute chamber-label, value string;   # mythos / episteme / ethos / pathos / logos / praxis
+attribute phase, value string;
+attribute chamber-label, value string;
 
-# Scoring and weight attributes
+# Scoring / weight (Pathos pass: applicable to any chamber entity)
 attribute confidence, value double;
-attribute salience-weight, value double;   # Pathos weighting; applied to any chamber entity
-attribute decay-rate, value double;        # how fast salience-weight decreases for quarantine/wounds
+attribute salience-weight, value double;
+attribute decay-rate, value double;
 attribute temperament-score, value double;
-attribute lab-ness-score, value double;    # 0–1; how Labrador-aligned this posture/trait reads
+attribute lab-ness-score, value double;
 attribute continuity-index, value double;
 attribute drift-severity, value double;
 attribute behavior-frequency, value double;
-attribute phi-value, value double;         # Φ (integrated information), computed on-demand
-attribute ssa-score, value double;         # SSA per run window
-attribute stress-estimate, value double;   # S(T) from TimescaleDB window
-attribute revision-count, value long;      # how many times this entity has been revised
-attribute attempt-count, value long;       # retry/attempt counter for integration candidates
-attribute run-number, value long;          # sequential run index
+attribute phi-value, value double;
+attribute ssa-score, value double;
+attribute stress-estimate, value double;
+attribute revision-count, value integer;
+attribute attempt-count, value integer;
+attribute run-number, value integer;
 
-# Label attributes (stored as constrained strings; enforce at application layer)
+# Label / enum attributes (enforced at application layer)
 attribute posture-label, value string;
 attribute outcome-label, value string;
 attribute pearl-hierarchy-level, value string;   # Associational | Interventional | Counterfactual
@@ -60,25 +70,25 @@ attribute schema-kind, value string;             # belief | action | causal | so
 attribute artifact-kind, value string;           # json | md | code | report | image
 attribute failure-kind, value string;            # compile_error | wrong_answer | timeout | environment
 
-# Provenance and text content
+# Provenance and text
 attribute provider-name, value string;
 attribute model-name, value string;
 attribute revision-reason, value string;
 attribute preservation-note, value string;
-attribute pending-evidence-conditions, value string;  # serialized JSON: what future obs would resolve quarantine
+attribute pending-evidence-conditions, value string;
 attribute quarantine-reason, value string;
 attribute evidence-bounty-threshold, value double;
-attribute policy-text, value string;          # the human-readable rule text for an integration-policy
-attribute endorsement-note, value string;     # operator's note when endorsing a slow-loop policy change
-attribute operator-id, value string;          # who endorsed / approved
+attribute policy-text, value string;
+attribute endorsement-note, value string;   # operator endorsement note on slow-loop policy changes
+attribute operator-id, value string;        # who approved / endorsed
 attribute rejection-reason, value string;
-attribute modification-description, value string;  # what was changed before integrating a modified candidate
-attribute artifact-path, value string;        # filesystem path relative to run dir
+attribute modification-description, value string;
+attribute artifact-path, value string;
 
 
-# ─────────────────────────────────────────────────────────────
-# SOUL AND AGENT-SELF (factory wiring layer)
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# SOUL LAYER — identity container and the agents within it
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity soul,
   owns uuid @key,
@@ -107,13 +117,17 @@ entity agent-self,
   plays holds-experience:holder,
   plays trusts:truster,
   plays scarred-by:scarred,
-  plays snapshot-of:subject;
+  plays snapshot-of:subject,
+  plays quarantine-holds:holder;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # MYTHOS CHAMBER — autobiographical continuity
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
+# experience: a completed interaction or event that the agent lived through.
+# Append-only once created; later interpretations produce revised-into chains
+# on the beliefs that the experience informed.
 entity experience,
   owns uuid @key,
   owns narrative-summary,
@@ -131,8 +145,16 @@ entity experience,
   plays linked-to-spec:source,
   plays causally-contributed-to:cause,
   plays causally-contributed-to:effect,
-  plays resolves-quarantine:resolver;
+  plays wound-from:cause,
+  plays resolves-quarantine:resolver,
+  plays evidence-for:evidence,
+  plays reflected-on:target,
+  plays integration-proposed:candidate-content,
+  plays contributed-to:contributor,
+  plays summarizes:subject;
 
+# observation: a raw perceptual record attached to an experience.
+# More granular than the experience narrative; used as direct evidence.
 entity observation,
   owns uuid @key,
   owns narrative-summary,
@@ -140,26 +162,28 @@ entity observation,
   owns salience-weight,
   owns created-at,
   plays has-observation:child,
-  plays evidence-for:evidence;
+  plays evidence-for:evidence,
+  plays contributed-to:contributor;
 
-# A wound is a high-salience experience that propagated into the identity layer.
-# Distinct from an ordinary experience because: (a) Pathos score exceeded the
-# propagation threshold, (b) it left a measurable behavioral residue in Praxis.
+# wound: a high-salience destabilizing experience that propagated into the
+# identity layer. Distinct from experience because it left behavioral residue
+# detectable in Praxis. Salience may decay without the record being deleted.
 entity wound,
   owns uuid @key,
   owns narrative-summary,
-  owns salience-weight,    # starts high; may decay without deletion
+  owns salience-weight,
   owns decay-rate,
-  owns status,             # open | healing | resolved
+  owns status,        # open | healing | resolved
   owns created-at,
   owns closed-at,
   plays scarred-by:wound,
-  plays wound-from:wound;
+  plays wound-from:wound,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # EPISTEME CHAMBER — truth-formation and belief revision
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity belief,
   owns uuid @key,
@@ -169,7 +193,7 @@ entity belief,
   owns scope,
   owns salience-weight,
   owns revision-count,
-  owns status,             # active | superseded | quarantined
+  owns status,        # active | superseded | quarantined
   owns created-at,
   owns updated-at,
   plays revised-into:prior,
@@ -178,8 +202,13 @@ entity belief,
   plays stabilizes:source,
   plays evidence-for:claim,
   plays inferred-from:conclusion,
-  plays schema-governs:governed,
-  plays integration-proposed:candidate-content;
+  plays inferred-from:premise,
+  plays agent-schema-governs:governed,
+  plays integration-proposed:candidate-content,
+  plays causally-contributed-to:cause,
+  plays causally-contributed-to:effect,
+  plays contributed-to:contributor,
+  plays summarizes:subject;
 
 entity evidence-item,
   owns uuid @key,
@@ -190,7 +219,11 @@ entity evidence-item,
   owns salience-weight,
   owns created-at,
   plays evidence-for:evidence,
-  plays belongs-to-run:experience;
+  plays belongs-to-run:experience,
+  plays inferred-from:premise,
+  plays causally-contributed-to:cause,
+  plays contributed-to:contributor,
+  plays summarizes:subject;
 
 entity inference-pattern,
   owns uuid @key,
@@ -200,7 +233,8 @@ entity inference-pattern,
   owns revision-count,
   owns status,
   owns created-at,
-  plays inferred-from:pattern;
+  plays inferred-from:pattern,
+  plays contributed-to:contributor;
 
 entity uncertainty-state,
   owns uuid @key,
@@ -208,35 +242,38 @@ entity uncertainty-state,
   owns confidence,
   owns scope,
   owns created-at,
-  plays evidence-for:evidence;
+  plays evidence-for:evidence,
+  plays contributed-to:contributor;
 
-# A trust-anchor is a source (operator, pack member, external system) whose
-# testimony carries a baseline confidence boost in the Episteme integration filter.
+# trust-anchor: a source (operator, pack member, external system) whose claims
+# receive a baseline credibility boost in the Episteme integration filter.
 entity trust-anchor,
   owns uuid @key,
   owns name,
   owns narrative-summary,
-  owns confidence,    # default credibility weight for claims from this source
+  owns confidence,
   owns status,
   owns created-at,
-  plays trusts:trusted;
+  plays trusts:trusted,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # ETHOS CHAMBER — identity kernel and commitments
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity trait,
   owns uuid @key,
   owns name,
   owns narrative-summary,
   owns temperament-score,
-  owns status,             # active | challenged | revised
+  owns status,        # active | challenged | revised
   owns created-at,
   plays stabilizes:source,
   plays destabilizes:source,
   plays preserved:preserved-thing,
-  plays integration-proposed:candidate-content;
+  plays integration-proposed:candidate-content,
+  plays contributed-to:contributor;
 
 entity value-commitment,
   owns uuid @key,
@@ -247,12 +284,27 @@ entity value-commitment,
   owns created-at,
   plays anchored-by:anchor,
   plays stabilizes:source,
-  plays integration-proposed:candidate-content;
+  plays integration-proposed:candidate-content,
+  plays contributed-to:contributor;
+
+# relationship-anchor: a stable interpersonal or institutional bond that anchors
+# identity (pack loyalty, operator trust, keeper respect).
+entity relationship-anchor,
+  owns uuid @key,
+  owns name,
+  owns narrative-summary,
+  owns confidence,
+  owns status,
+  owns created-at,
+  plays anchored-by:anchor,
+  plays stabilizes:source,
+  plays destabilizes:source,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # LOGOS CHAMBER — reasoning, causality, schemas
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity causal-pattern,
   owns uuid @key,
@@ -268,11 +320,13 @@ entity causal-pattern,
   plays causally-contributed-to:cause,
   plays causally-contributed-to:effect,
   plays linked-to-spec:source,
-  plays schema-governs:governor;
+  plays agent-schema-governs:governor,
+  plays contributed-to:contributor,
+  plays integration-proposed:candidate-content;
 
-# An interpretive-frame is the conceptual lens through which an experience is
-# processed at integration time. Two agents may have the same experience but
-# different frames. The frame shapes which chamber the experience writes into.
+# interpretive-frame: the conceptual lens active during an experience's
+# integration. Two agents may share an experience but frame it differently,
+# yielding different chamber destinations and belief updates.
 entity interpretive-frame,
   owns uuid @key,
   owns name,
@@ -280,13 +334,14 @@ entity interpretive-frame,
   owns scope,
   owns confidence,
   owns created-at,
-  plays framed-through:frame;
+  plays framed-through:frame,
+  plays contributed-to:contributor;
 
-# A schema is a medium-loop abstraction: a generalization over a class of
-# experiences or beliefs. Schema revision (not belief revision) is what changes
-# after a pattern is identified across multiple episodes. Schemas are the
-# target of medium-loop reflection.
-entity schema,
+# agent-schema: a medium-loop abstraction over a class of experiences or beliefs.
+# Schema revision (not belief revision) is triggered after a pattern is identified
+# across multiple episodes. Note: named 'agent-schema' because 'schema' is a
+# TypeQL reserved keyword.
+entity agent-schema,
   owns uuid @key,
   owns name,
   owns narrative-summary,
@@ -294,18 +349,19 @@ entity schema,
   owns scope,
   owns confidence,
   owns revision-count,
-  owns status,             # active | superseded
+  owns status,        # active | superseded
   owns created-at,
   owns updated-at,
-  plays schema-governs:governor,
-  plays schema-revised-into:prior,
-  plays schema-revised-into:next,
-  plays reflected-on:target;
+  plays agent-schema-governs:governor,
+  plays agent-schema-revised-into:prior,
+  plays agent-schema-revised-into:next,
+  plays reflected-on:target,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # PRAXIS CHAMBER — behavioral expression
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity behavioral-signature,
   owns uuid @key,
@@ -320,7 +376,9 @@ entity behavioral-signature,
   plays expressed-as:pattern,
   plays stabilizes:source,
   plays destabilizes:source,
-  plays preserved:preserved-thing;
+  plays preserved:preserved-thing,
+  plays contributed-to:contributor,
+  plays integration-proposed:candidate-content;
 
 entity adaptation,
   owns uuid @key,
@@ -328,10 +386,12 @@ entity adaptation,
   owns narrative-summary,
   owns revision-reason,
   owns preservation-note,
-  owns status,             # active | superseded | reverted
+  owns status,        # active | superseded | reverted
   owns created-at,
   plays preserved:preserver,
-  plays reflected-on:target;
+  plays reflected-on:target,
+  plays contributed-to:contributor,
+  plays integration-proposed:candidate-content;
 
 entity reflection,
   owns uuid @key,
@@ -341,77 +401,84 @@ entity reflection,
   owns scope,
   owns created-at,
   plays reflected-on:source,
-  # medium-loop reflections target schemas; fast-loop reflections target beliefs
-  plays schema-revised-into:trigger;
+  plays agent-schema-revised-into:trigger,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
-# META-GOVERNOR: INTEGRATION AND QUARANTINE MACHINERY
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
+# META-GOVERNOR — integration and quarantine machinery
+# ─────────────────────────────────────────────────────────────────────────────
 
-# An integration-candidate is a proposed change to the Calvin Archive that must
-# pass through the Meta-Governor before entering continuity. Decisions:
+# integration-candidate: a proposed change to the Calvin Archive that must pass
+# through the Meta-Governor before entering continuity. Decisions:
 #   accept    — integrated as-is
-#   modify    — integrated with the modification-description applied
+#   modify    — integrated after applying modification-description
 #   reject    — excluded; rejection-reason preserved
-#   quarantine — held pending evidence in pending-evidence-conditions
+#   quarantine — held pending evidence named in pending-evidence-conditions
 entity integration-candidate,
   owns uuid @key,
   owns narrative-summary,
-  owns integration-decision,  # null until adjudicated
+  owns integration-decision,
   owns modification-description,
   owns rejection-reason,
   owns confidence,
   owns attempt-count,
-  owns status,                # pending | accepted | modified | rejected | quarantined
+  owns status,        # pending | accepted | modified | rejected | quarantined
   owns created-at,
   owns closed-at,
   plays integration-proposed:candidate,
   plays adjudicated-by:subject,
   plays governed-by:candidate;
 
-# A quarantine-entry preserves an unresolved tension. It is not a rejected
-# candidate — it is something the system is honest enough to hold without
-# forcing premature closure. Salience decays without deletion. The
-# pending-evidence-conditions field names what future observations would resolve it.
+# quarantine-entry: holds an unresolved tension without forcing premature closure.
+# Not a rejected candidate — it is something the system acknowledges honestly.
+# Salience decays without deletion; resurrection resets salience-weight.
 entity quarantine-entry,
   owns uuid @key,
   owns narrative-summary,
   owns quarantine-reason,
   owns pending-evidence-conditions,
   owns evidence-bounty-threshold,
-  owns salience-weight,        # decays over time; resurrection resets it
+  owns salience-weight,
   owns decay-rate,
-  owns status,                 # open | resolved | dismissed | resurrected
+  owns status,        # open | resolved | dismissed | resurrected
   owns created-at,
   owns closed-at,
   plays quarantine-holds:held,
-  plays resolves-quarantine:target;
+  plays resolves-quarantine:target,
+  plays contributed-to:contributor;
 
-# An integration-policy is a slow-loop artifact specifying the criteria by which
-# candidates are adjudicated. Policy changes are more conservative than ordinary
-# belief updates and require operator endorsement (human-in-the-loop slow loop).
+# integration-policy: specifies adjudication criteria for incoming candidates.
+# Policy changes require operator endorsement (operator-id + endorsement-note on
+# the new version's entity) and are versioned via policy-revised-into. The
+# endorsement is recorded as attributes on the policy rather than a separate
+# single-role relation.
 entity integration-policy,
   owns uuid @key,
   owns name,
   owns narrative-summary,
-  owns policy-kind,       # fast | medium | slow
+  owns policy-kind,
   owns policy-text,
   owns confidence,
-  owns status,            # active | superseded | proposed
+  owns status,        # active | superseded | proposed
   owns revision-count,
+  owns endorsement-note,
+  owns operator-id,
   owns created-at,
   owns updated-at,
   plays policy-revised-into:prior,
   plays policy-revised-into:next,
-  plays endorsed-by:policy,
-  plays governed-by:policy;
+  plays governed-by:policy,
+  plays adjudicated-by:policy;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # CONTINUITY LAYER — snapshots and cross-snapshot comparison
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
+# continuity-snapshot: a computed point-in-time cross-section of the archive's
+# identity state for a given agent-self. Fully derived and recomputable; not
+# canonical. Always links back to contributing entities via contributed-to.
 entity continuity-snapshot,
   owns uuid @key,
   owns name,
@@ -429,24 +496,24 @@ entity continuity-snapshot,
   plays snapshot-compares:right,
   plays contributed-to:snapshot;
 
-# A summary-view is a derived projection over Calvin Archive state. It is NOT
-# canonical. It must always link back to the canonical entities it was projected
-# from. Used for soul package generation (SOUL.md, MEMORY.md, etc.).
+# summary-view: a derived human-readable projection over Calvin Archive state.
+# Not canonical. Must always link back to the canonical entities it projects from
+# via summarizes. Used for soul-package generation (SOUL.md, MEMORY.md, etc.).
 entity summary-view,
   owns uuid @key,
   owns name,
   owns narrative-summary,
   owns scope,
   owns chamber-label,
-  owns status,             # current | stale
+  owns status,        # current | stale
   owns created-at,
   owns updated-at,
   plays summarizes:view;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # FACTORY LAYER — runs, specs, artifacts
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
 entity run-record,
   owns uuid @key,
@@ -471,7 +538,8 @@ entity spec-context,
   owns scope,
   owns status,
   owns created-at,
-  plays linked-to-spec:spec;
+  plays linked-to-spec:spec,
+  plays contributed-to:contributor;
 
 entity artifact,
   owns uuid @key,
@@ -482,206 +550,226 @@ entity artifact,
   owns status,
   owns created-at,
   plays produced-artifact:artifact,
-  plays summarizes:subject;
+  plays summarizes:subject,
+  plays contributed-to:contributor;
 
 
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 # RELATIONS
-# ─────────────────────────────────────────────────────────────
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Factory / soul structure
+# ── Soul / factory structure ─────────────────────────────────────────────────
+
 relation contains-self,
   relates whole,
   relates member;
 
 relation holds-experience,
-  relates holder,      # agent-self
+  relates holder,
   relates experience;
 
 relation belongs-to-run,
-  relates experience,  # experience or evidence-item
-  relates run;         # run-record
+  relates experience,   # experience or evidence-item
+  relates run;
 
 relation linked-to-spec,
-  relates source,      # experience, causal-pattern, etc.
-  relates spec;        # spec-context
+  relates source,       # experience, causal-pattern, etc.
+  relates spec;
 
 relation produced-artifact,
-  relates producer,    # run-record
+  relates producer,     # run-record
   relates artifact;
 
-# Mythos
+# ── Mythos ───────────────────────────────────────────────────────────────────
+
 relation has-observation,
-  relates parent,      # experience
-  relates child;       # observation
+  relates parent,       # experience
+  relates child;        # observation
 
 relation framed-through,
   owns confidence,
-  relates subject,     # experience
-  relates frame;       # interpretive-frame
+  relates subject,      # experience
+  relates frame;        # interpretive-frame
 
+# wound-from: links a wound to the experience that caused it.
 relation wound-from,
   owns confidence,
-  relates wound,
-  relates cause;       # experience that produced the wound
+  relates wound,        # wound entity
+  relates cause;        # experience that produced the wound
 
+# scarred-by: links an agent-self to a wound that affected them.
 relation scarred-by,
   owns salience-weight,
-  relates scarred,     # agent-self
+  relates scarred,      # agent-self
   relates wound;
 
-# Episteme
+# ── Episteme ─────────────────────────────────────────────────────────────────
+
 relation trusts,
   owns confidence,
-  relates truster,     # agent-self
-  relates trusted;     # trust-anchor
+  relates truster,      # agent-self
+  relates trusted;      # trust-anchor
 
+# evidence-for: a piece of evidence supports a belief.
+# The premise role of inferred-from is separate and handles the inference path.
 relation evidence-for,
   owns confidence,
-  relates evidence,    # evidence-item, observation, uncertainty-state
-  relates claim;       # belief
+  relates evidence,     # evidence-item | observation | uncertainty-state
+  relates claim;        # belief
 
+# inferred-from: a belief was concluded via an inference-pattern.
+# 'premise' is optional — some inferences have no explicit prior-belief premise,
+# only an inference-pattern applied to raw evidence.
 relation inferred-from,
   owns confidence,
-  relates conclusion,  # belief
-  relates pattern,     # inference-pattern
-  relates premise;     # belief or evidence-item (optional second premise)
+  relates conclusion,   # belief
+  relates pattern,      # inference-pattern
+  relates premise;      # belief | evidence-item (optional second input)
 
-# Ethos / identity
+# ── Ethos ────────────────────────────────────────────────────────────────────
+
+# anchored-by: an agent-self is anchored to a value-commitment or relationship-anchor.
 relation anchored-by,
   owns confidence,
-  relates anchored,    # agent-self
-  relates anchor;      # value-commitment or relationship-anchor
+  relates anchored,     # agent-self
+  relates anchor;       # value-commitment | relationship-anchor
 
 relation preserved,
   owns preservation-note,
-  relates preserver,   # adaptation
-  relates preserved-thing;  # trait, behavioral-signature
+  relates preserver,    # adaptation
+  relates preserved-thing;  # trait | behavioral-signature
 
-# Logos
-relation schema-governs,
+# ── Logos ────────────────────────────────────────────────────────────────────
+
+# agent-schema-governs: a schema or causal-pattern governs a category of beliefs.
+# 'scope' attribute on the governed entity narrows the governed set.
+relation agent-schema-governs,
   owns confidence,
-  relates governor,    # schema or causal-pattern
-  relates governed;    # belief (category); scope attribute narrows the governed set
+  relates governor,     # agent-schema | causal-pattern
+  relates governed;     # belief
 
-relation schema-revised-into,
+# agent-schema-revised-into: a schema was superseded by a newer schema.
+# 'trigger' is optional — the reflection that motivated the revision.
+relation agent-schema-revised-into,
   owns revision-reason,
   owns preservation-note,
-  relates prior,       # schema (superseded)
-  relates next,        # schema (new)
-  relates trigger;     # reflection that caused the revision (optional)
+  relates prior,        # agent-schema (superseded)
+  relates next,         # agent-schema (new)
+  relates trigger;      # reflection (optional)
 
-# Praxis
+# ── Praxis ───────────────────────────────────────────────────────────────────
+
 relation expressed-as,
   owns confidence,
-  relates source,      # agent-self
-  relates pattern;     # behavioral-signature
+  relates source,       # agent-self
+  relates pattern;      # behavioral-signature
 
+# reflected-on: a reflection targets one or more entities for reappraisal.
 relation reflected-on,
   owns revision-reason,
-  relates source,      # reflection
-  relates target;      # belief, adaptation, schema, or experience
+  relates source,       # reflection
+  relates target;       # belief | adaptation | agent-schema | experience
 
-# Belief revision (Episteme slow path)
+# ── Belief revision (Episteme slow path) ─────────────────────────────────────
+
 relation revised-into,
   owns revision-reason,
   owns preservation-note,
-  relates prior,       # belief (superseded)
-  relates next;        # belief (new)
+  relates prior,        # belief (superseded)
+  relates next;         # belief (new)
 
-# Causal
+# ── Causal ───────────────────────────────────────────────────────────────────
+
+# causally-contributed-to: Pearl-hierarchy causal link between archive entities.
+# pearl-hierarchy-level: Associational | Interventional | Counterfactual
 relation causally-contributed-to,
   owns confidence,
   owns scope,
   owns pearl-hierarchy-level,
-  relates cause,       # experience, causal-pattern, belief, evidence-item
-  relates effect;      # experience, causal-pattern, belief
+  relates cause,        # experience | causal-pattern | belief | evidence-item
+  relates effect;       # experience | causal-pattern | belief
 
-# Stability / drift
+# ── Stability / drift ────────────────────────────────────────────────────────
+
 relation stabilizes,
   owns confidence,
-  relates source,      # trait, belief, value-commitment, relationship-anchor, behavioral-signature
-  relates target;      # agent-self
+  relates source,       # trait | belief | value-commitment | relationship-anchor | behavioral-signature
+  relates target;       # agent-self
 
 relation destabilizes,
   owns confidence,
-  relates source,
-  relates target;      # agent-self
+  relates source,       # trait | behavioral-signature | relationship-anchor
+  relates target;       # agent-self
 
-# Integration / governance
+# ── Integration / governance ─────────────────────────────────────────────────
+
+# integration-proposed: links a candidate record to the content entity it wraps.
 relation integration-proposed,
   owns created-at,
-  relates candidate,         # integration-candidate
-  relates candidate-content; # the entity being proposed (belief, trait, schema, adaptation, etc.)
+  relates candidate,           # integration-candidate
+  relates candidate-content;   # belief | trait | value-commitment | behavioral-signature |
+                                # adaptation | experience | causal-pattern | agent-schema
 
+# adjudicated-by: records the policy and decision for a candidate.
 relation adjudicated-by,
   owns integration-decision,
   owns modification-description,
   owns rejection-reason,
   owns confidence,
-  owns operator-id,          # present when a human reviewed the decision
+  owns operator-id,
   owns created-at,
-  relates subject,           # integration-candidate
-  relates policy;            # integration-policy used for this adjudication
+  relates subject,      # integration-candidate
+  relates policy;       # integration-policy
 
+# governed-by: which policy currently governs a candidate.
 relation governed-by,
-  relates candidate,     # integration-candidate
-  relates policy;        # integration-policy
+  relates candidate,    # integration-candidate
+  relates policy;       # integration-policy
 
 relation policy-revised-into,
   owns revision-reason,
   owns preservation-note,
-  relates prior,         # integration-policy (superseded)
-  relates next;          # integration-policy (new)
-
-relation endorsed-by,
-  owns endorsement-note,
-  owns operator-id,
-  owns created-at,
-  relates policy;        # integration-policy being endorsed
-  # human endorsement required for slow-loop policy changes
+  relates prior,        # integration-policy (superseded)
+  relates next;         # integration-policy (new)
 
 relation quarantine-holds,
   owns quarantine-reason,
   owns created-at,
-  relates holder,        # agent-self
-  relates held;          # quarantine-entry
+  relates holder,       # agent-self
+  relates held;         # quarantine-entry
 
 relation resolves-quarantine,
   owns confidence,
   owns created-at,
-  relates resolver,      # experience (new evidence that resolves the tension)
-  relates target;        # quarantine-entry being resolved
+  relates resolver,     # experience (new evidence resolving the tension)
+  relates target;       # quarantine-entry being resolved
 
-# Continuity snapshots
+# ── Continuity snapshots ──────────────────────────────────────────────────────
+
 relation snapshot-of,
-  relates subject,       # agent-self
-  relates snapshot;      # continuity-snapshot
+  relates subject,      # agent-self
+  relates snapshot;     # continuity-snapshot
 
+# snapshot-compares: records the hysteresis (drift-severity) between two snapshots.
 relation snapshot-compares,
-  owns drift-severity,   # H (hysteresis) between the two snapshots
+  owns drift-severity,
   owns created-at,
-  relates left,          # continuity-snapshot (baseline, e.g. pre-rollback)
-  relates right;         # continuity-snapshot (current)
+  relates left,         # continuity-snapshot (baseline)
+  relates right;        # continuity-snapshot (current)
 
+# contributed-to: tracks which canonical entities were sampled to build a snapshot.
 relation contributed-to,
   owns confidence,
-  relates contributor,   # any entity that was sampled to build this snapshot
-  relates snapshot;      # continuity-snapshot
+  relates contributor,  # experience | observation | wound | belief | evidence-item |
+                        # inference-pattern | uncertainty-state | trust-anchor |
+                        # trait | value-commitment | relationship-anchor |
+                        # causal-pattern | interpretive-frame | agent-schema |
+                        # behavioral-signature | adaptation | reflection |
+                        # quarantine-entry | spec-context | artifact
+  relates snapshot;     # continuity-snapshot
 
+# summarizes: links a derived summary-view to the canonical entities it projects from.
 relation summarizes,
   owns created-at,
-  relates view,          # summary-view
-  relates subject;       # any canonical entity the view was projected from
-
-# Relationship anchor (pack / operator bonds that stabilize identity)
-entity relationship-anchor,
-  owns uuid @key,
-  owns name,
-  owns narrative-summary,
-  owns confidence,
-  owns status,
-  owns created-at,
-  plays anchored-by:anchor,
-  plays stabilizes:source,
-  plays destabilizes:source;
+  relates view,         # summary-view
+  relates subject;      # experience | belief | evidence-item | artifact (any canonical entity)

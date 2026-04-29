@@ -36,6 +36,15 @@ attribute evidence-bounty-threshold, value double;
 attribute salience-weight, value double;
 attribute created-at, value datetime;
 
+# Prediction system
+attribute predicted-outcome, value string;    # "pass" | "fail" | "uncertain"
+attribute actual-outcome, value string;        # "completed" | "failed" | "completed_with_issues"
+attribute prediction-error, value double;      # 0.0 = correct, 1.0 = completely wrong
+attribute risk-score, value double;            # 0.0 = low risk, 1.0 = very likely to fail
+attribute failure-phase, value string;         # which phase the prediction targets
+attribute failure-kind-label, value string;    # compile_error | test_failure | wrong_answer | timeout
+attribute source-cause-ids, value string;      # comma-separated PriorCauseSignal ids that drove the prediction
+
 entity soul,
   owns uuid @key,
   owns name,
@@ -165,7 +174,36 @@ entity run_record,
   owns provider-name,
   owns model-name,
   owns outcome-label,
-  plays belongs_to_run:run;
+  plays belongs_to_run:run,
+  plays prediction_for_run:run;
+
+# A prediction is Coobie's pre-run epistemic claim: what will happen and why.
+# Append-only. The prediction_result links in the actual outcome afterward.
+entity prediction_record,
+  owns uuid @key,
+  owns name,
+  owns narrative_summary,
+  owns predicted-outcome,
+  owns risk-score,
+  owns confidence,
+  owns failure-phase,
+  owns failure-kind-label,
+  owns source-cause-ids,
+  owns created-at,
+  plays prediction_for_run:prediction,
+  plays prediction_verified:prediction;
+
+# A prediction_result records the actual outcome and computes the error signal.
+# Linked to the prediction_record via prediction_verified.
+entity prediction_result,
+  owns uuid @key,
+  owns narrative_summary,
+  owns actual-outcome,
+  owns failure-phase,
+  owns failure-kind-label,
+  owns prediction-error,
+  owns created-at,
+  plays prediction_verified:result;
 
 # Phase 8-B: quarantine holding area for experiences with uncertain identity safety
 entity quarantine-entry,
@@ -247,6 +285,18 @@ relation causally_contributed_to,
 relation belongs_to_run,
   relates experience,
   relates run;
+
+# prediction_for_run: associates a prediction with the run it was made before.
+relation prediction_for_run,
+  relates prediction,
+  relates run;
+
+# prediction_verified: links a prediction to its outcome record after the run.
+relation prediction_verified,
+  owns prediction-error,
+  owns created-at,
+  relates prediction,
+  relates result;
 
 relation linked_to_spec,
   relates source,

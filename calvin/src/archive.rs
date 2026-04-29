@@ -375,6 +375,124 @@ impl ArchiveStore {
         Ok(true)
     }
 
+    pub(crate) async fn record_prediction(
+        &self,
+        run_id: &str,
+        prediction_id: &str,
+        predicted_outcome: &str,
+        risk_score: f64,
+        confidence: f64,
+        failure_phase: Option<&str>,
+        failure_kind: Option<&str>,
+        source_cause_ids: &str,
+        narrative_summary: &str,
+    ) -> Result<()> {
+        let tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Write)
+            .await?;
+        let phase_clause = failure_phase
+            .map(|p| format!(r#"has failure-phase "{p}","#))
+            .unwrap_or_default();
+        let kind_clause = failure_kind
+            .map(|k| format!(r#"has failure-kind-label "{k}","#))
+            .unwrap_or_default();
+        let tql = format!(
+            r#"match $run isa run_record, has uuid "{run_id}";
+               insert $p isa prediction_record,
+                has uuid "{prediction_id}",
+                has name "prediction-{run_id}",
+                has narrative_summary "{summary}",
+                has predicted-outcome "{predicted_outcome}",
+                has risk-score {risk_score},
+                has confidence {confidence},
+                {phase_clause}
+                {kind_clause}
+                has source-cause-ids "{source_cause_ids}";
+               (prediction: $p, run: $run) isa prediction_for_run;"#,
+            summary = escape_tql(narrative_summary),
+            source_cause_ids = escape_tql(source_cause_ids),
+        );
+        tx.query(&tql).await.context("record_prediction query")?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn record_prediction_result(
+        &self,
+        prediction_id: &str,
+        result_id: &str,
+        actual_outcome: &str,
+        actual_failure_phase: Option<&str>,
+        actual_failure_kind: Option<&str>,
+        prediction_error: f64,
+        narrative_summary: &str,
+    ) -> Result<()> {
+        let tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Write)
+            .await?;
+        let phase_clause = actual_failure_phase
+            .map(|p| format!(r#"has failure-phase "{p}","#))
+            .unwrap_or_default();
+        let kind_clause = actual_failure_kind
+            .map(|k| format!(r#"has failure-kind-label "{k}","#))
+            .unwrap_or_default();
+        let tql = format!(
+            r#"match $pred isa prediction_record, has uuid "{prediction_id}";
+               insert $r isa prediction_result,
+                has uuid "{result_id}",
+                has narrative_summary "{summary}",
+                has actual-outcome "{actual_outcome}",
+                {phase_clause}
+                {kind_clause}
+                has prediction-error {prediction_error};
+               (prediction: $pred, result: $r) isa prediction_verified,
+                has prediction-error {prediction_error};"#,
+            summary = escape_tql(narrative_summary),
+        );
+        tx.query(&tql)
+            .await
+            .context("record_prediction_result query")?;
+        tx.commit().await?;
+        Ok(())
+    }
+
+    pub(crate) async fn get_prediction(&self, run_id: &str) -> Result<Option<serde_json::Value>> {
+        let tx = self
+            .driver
+            .transaction(&self.db_name, TransactionType::Read)
+            .await?;
+        let tql = format!(
+            r#"match
+                $run isa run_record, has uuid "{run_id}";
+                $p isa prediction_record,
+                    has uuid $pid,
+                    has predicted-outcome $po,
+                    has risk-score $rs,
+                    has confidence $c;
+                (prediction: $p, run: $run) isa prediction_for_run;
+               select $pid, $po, $rs, $c;
+               limit 1;"#
+        );
+        let answer = tx.query(&tql).await.context("get_prediction query")?;
+        let mut rows = answer.into_rows();
+        if let Some(row_result) = rows.next().await {
+            let row = row_result?;
+            let pid = row.get("pid").ok().flatten().and_then(|c| c.try_get_string().map(|s| s.to_string()));
+            let po = row.get("po").ok().flatten().and_then(|c| c.try_get_string().map(|s| s.to_string()));
+            let rs = row.get("rs").ok().flatten().and_then(|c| c.try_get_double());
+            let conf = row.get("c").ok().flatten().and_then(|c| c.try_get_double());
+            return Ok(Some(serde_json::json!({
+                "prediction_id": pid,
+                "predicted_outcome": po,
+                "risk_score": rs,
+                "confidence": conf,
+            })));
+        }
+        Ok(None)
+    }
+
     pub(crate) async fn record_causal_link(
         &self,
         run_id: &str,

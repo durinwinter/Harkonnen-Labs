@@ -36,6 +36,42 @@ pub struct BeliefRevision {
     pub preservation_note: Option<String>,
 }
 
+/// Coobie's pre-run epistemic claim about what will happen in this run.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct RunPrediction {
+    pub prediction_id: String,
+    pub run_id: String,
+    pub spec_id: String,
+    /// "pass" | "fail" | "uncertain"
+    pub predicted_outcome: String,
+    /// 0.0 = low risk, 1.0 = very likely to fail
+    pub risk_score: f64,
+    /// How confident Coobie is in this prediction.
+    pub confidence: f64,
+    /// The phase most likely to fail, if identifiable.
+    pub failure_phase: Option<String>,
+    /// The failure kind most likely, if identifiable.
+    pub failure_kind: Option<String>,
+    /// Comma-separated PriorCauseSignal ids that drove this prediction.
+    pub source_cause_ids: String,
+    pub narrative_summary: String,
+}
+
+/// The actual run outcome, linked back to the prediction for error computation.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct PredictionOutcome {
+    pub prediction_id: String,
+    pub result_id: String,
+    pub run_id: String,
+    /// "completed" | "failed" | "completed_with_issues"
+    pub actual_outcome: String,
+    pub actual_failure_phase: Option<String>,
+    pub actual_failure_kind: Option<String>,
+    /// 0.0 = prediction was correct, 1.0 = completely wrong.
+    pub prediction_error: f64,
+    pub narrative_summary: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct TelemetryEvent {
     pub agent_id: String,
@@ -149,6 +185,59 @@ impl CalvinClient {
             .await
             .context("PATCH /runs/{run_id}/close")?;
         Ok(())
+    }
+
+    pub async fn record_prediction(&self, pred: &RunPrediction) -> Result<()> {
+        self.client
+            .post(format!("{}/runs/{}/predictions", self.base_url, pred.run_id))
+            .json(&serde_json::json!({
+                "prediction_id": pred.prediction_id,
+                "predicted_outcome": pred.predicted_outcome,
+                "risk_score": pred.risk_score,
+                "confidence": pred.confidence,
+                "failure_phase": pred.failure_phase,
+                "failure_kind": pred.failure_kind,
+                "source_cause_ids": pred.source_cause_ids,
+                "narrative_summary": pred.narrative_summary,
+            }))
+            .send()
+            .await
+            .context("POST /runs/{run_id}/predictions")?;
+        Ok(())
+    }
+
+    pub async fn record_prediction_result(&self, outcome: &PredictionOutcome) -> Result<()> {
+        self.client
+            .post(format!(
+                "{}/runs/{}/prediction-result",
+                self.base_url, outcome.run_id
+            ))
+            .json(&serde_json::json!({
+                "prediction_id": outcome.prediction_id,
+                "result_id": outcome.result_id,
+                "actual_outcome": outcome.actual_outcome,
+                "actual_failure_phase": outcome.actual_failure_phase,
+                "actual_failure_kind": outcome.actual_failure_kind,
+                "prediction_error": outcome.prediction_error,
+                "narrative_summary": outcome.narrative_summary,
+            }))
+            .send()
+            .await
+            .context("POST /runs/{run_id}/prediction-result")?;
+        Ok(())
+    }
+
+    pub async fn get_prediction(&self, run_id: &str) -> Result<Option<serde_json::Value>> {
+        let resp = self
+            .client
+            .get(format!("{}/runs/{run_id}/predictions", self.base_url))
+            .send()
+            .await
+            .context("GET /runs/{run_id}/predictions")?;
+        if resp.status() == reqwest::StatusCode::NOT_FOUND {
+            return Ok(None);
+        }
+        Ok(Some(resp.json().await?))
     }
 
     pub async fn record_causal_link(

@@ -1999,6 +1999,7 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, final_status).await;
+                self.try_record_calvin_prediction_result(run_id, final_status, None).await;
                 self.try_process_memory_candidates_on_close(run_id).await;
                 self.finalize_blackboard(final_status, &output.run_dir)
                     .await?;
@@ -2021,6 +2022,7 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, "failed").await;
+                self.try_record_calvin_prediction_result(run_id, "failed", None).await;
                 self.try_process_memory_candidates_on_close(run_id).await;
                 let run_dir = self.run_dir(run_id);
                 self.mark_blackboard_failed(&message, &run_dir).await?;
@@ -2181,6 +2183,9 @@ impl AppContext {
                 None, // profile_dispatch: loaded from profiles in Phase 5b
             )
             .await?;
+        // Emit pre-run prediction — the explicit error signal that closes the learning loop.
+        self.try_record_calvin_prediction(run_id, &spec_obj.id, &briefing)
+            .await;
         let scout_briefing = build_scoped_briefing(&briefing, BriefingScope::ScoutPreflight);
         let mason_briefing = build_scoped_briefing(&briefing, BriefingScope::MasonPreflight);
         let sable_briefing = build_scoped_briefing(&briefing, BriefingScope::SablePreflight);
@@ -4542,13 +4547,15 @@ Top memory hits:
             if hit.contains("No memories found") || hit.contains("Memory not initialized") {
                 continue;
             }
+            let dedupe_key = normalize_briefing_hit_key(&hit);
+            if dedupe_key.is_empty() || !seen.insert(dedupe_key) {
+                continue;
+            }
+            let labeled_hit = format!("[{source_label}] {hit}");
             if let Some(id) = extract_memory_entry_id(&hit) {
                 ids.push(id);
             }
-            let labeled_hit = format!("[{source_label}] {hit}");
-            if seen.insert(labeled_hit.clone()) {
-                hits.push(labeled_hit);
-            }
+            hits.push(labeled_hit);
         }
 
         Ok(CollectedMemoryHits { hits, ids })
@@ -11709,6 +11716,92 @@ Return JSON only.",
         };
         if let Err(error) = calvin.close_run(run_id, outcome).await {
             tracing::warn!(run_id = %run_id, error = %error, "Calvin close_run failed");
+        }
+    }
+
+    /// Emit a pre-run prediction to Calvin, synthesized from the Coobie briefing.
+    async fn try_record_calvin_prediction(
+        &self,
+        run_id: &str,
+        spec_id: &str,
+        briefing: &CoobieBriefing,
+    ) {
+        let Some(calvin) = self.calvin.as_ref() else {
+            return;
+        };
+        let pred = synthesize_run_prediction(run_id, spec_id, briefing);
+        if let Err(error) = calvin.record_prediction(&pred).await {
+            tracing::warn!(run_id = %run_id, error = %error, "Calvin record_prediction failed");
+        } else {
+            tracing::debug!(
+                run_id = %run_id,
+                predicted_outcome = %pred.predicted_outcome,
+                risk_score = pred.risk_score,
+                "prediction recorded"
+            );
+        }
+    }
+
+    /// Compute and emit the prediction result after a run closes.
+    async fn try_record_calvin_prediction_result(
+        &self,
+        run_id: &str,
+        actual_outcome: &str,
+        failure_phase: Option<&str>,
+    ) {
+        let Some(calvin) = self.calvin.as_ref() else {
+            return;
+        };
+        // Look up the existing prediction for this run.
+        let prediction_id = match calvin.get_prediction(run_id).await {
+            Ok(Some(pred)) => pred
+                .get("prediction_id")
+                .and_then(|v| v.as_str())
+                .map(|s| s.to_string()),
+            Ok(None) => {
+                tracing::debug!(run_id = %run_id, "no prediction found for run; skipping result");
+                return;
+            }
+            Err(error) => {
+                tracing::warn!(run_id = %run_id, error = %error, "Calvin get_prediction failed");
+                return;
+            }
+        };
+        let Some(prediction_id) = prediction_id else {
+            return;
+        };
+        let predicted_outcome = match calvin.get_prediction(run_id).await {
+            Ok(Some(pred)) => pred
+                .get("predicted_outcome")
+                .and_then(|v| v.as_str())
+                .unwrap_or("uncertain")
+                .to_string(),
+            _ => "uncertain".to_string(),
+        };
+        let error_score = compute_prediction_error(&predicted_outcome, actual_outcome);
+        let result_id = uuid::Uuid::new_v4().to_string();
+        let narrative = format!(
+            "Run {run_id} {actual_outcome}. Prediction was '{predicted_outcome}'. Error: {error_score:.2}."
+        );
+        let outcome = crate::calvin_client::PredictionOutcome {
+            prediction_id,
+            result_id,
+            run_id: run_id.to_string(),
+            actual_outcome: actual_outcome.to_string(),
+            actual_failure_phase: failure_phase.map(str::to_string),
+            actual_failure_kind: None,
+            prediction_error: error_score,
+            narrative_summary: narrative,
+        };
+        if let Err(error) = calvin.record_prediction_result(&outcome).await {
+            tracing::warn!(run_id = %run_id, error = %error, "Calvin record_prediction_result failed");
+        } else {
+            tracing::debug!(
+                run_id = %run_id,
+                actual = %actual_outcome,
+                error = error_score,
+                "prediction result recorded"
+            );
         }
     }
 
@@ -23365,6 +23458,23 @@ fn extract_memory_entry_id(hit: &str) -> Option<String> {
     }
 }
 
+fn normalize_briefing_hit_key(hit: &str) -> String {
+    let mut text = hit.trim();
+
+    while let Some(rest) = text.strip_prefix('[') {
+        let Some(end) = rest.find(']') else {
+            break;
+        };
+        text = rest[end + 1..].trim_start();
+    }
+
+    if let Some((before_source, _)) = text.split_once(" [source:") {
+        text = before_source.trim_end();
+    }
+
+    normalize_text_key(text)
+}
+
 fn format_yaml_list(items: &[String]) -> String {
     if items.is_empty() {
         "[]".to_string()
@@ -28118,6 +28228,139 @@ fn render_run_timing_markdown(report: &RunTimingReport) -> String {
     lines.join("\n")
 }
 
+/// Synthesize a prediction from the Coobie briefing using heuristic risk factors.
+///
+/// This is marked `basic_heuristic` — Phase 7 replaces it with a model-driven
+/// classifier trained on the causal attribution corpus.
+fn synthesize_run_prediction(
+    run_id: &str,
+    spec_id: &str,
+    briefing: &CoobieBriefing,
+) -> crate::calvin_client::RunPrediction {
+    let max_occurrences = briefing
+        .prior_causes
+        .iter()
+        .map(|c| c.occurrences)
+        .max()
+        .unwrap_or(0);
+    let min_pass_rate = briefing
+        .prior_causes
+        .iter()
+        .map(|c| c.scenario_pass_rate)
+        .fold(1.0f32, f32::min);
+
+    let mut risk: f64 = 0.0;
+    // Prior cause frequency is the strongest signal.
+    if max_occurrences >= 3 {
+        risk += 0.4;
+    } else if max_occurrences >= 1 {
+        risk += 0.2;
+    }
+    // Many required checks → higher complexity → higher failure probability.
+    if briefing.required_checks.len() > 5 {
+        risk += 0.2;
+    } else if briefing.required_checks.len() > 2 {
+        risk += 0.1;
+    }
+    // Low historical scenario pass rate on relevant causes.
+    if min_pass_rate < 0.5 {
+        risk += 0.3;
+    } else if min_pass_rate < 0.8 {
+        risk += 0.15;
+    }
+    // Many open questions → spec ambiguity risk.
+    if briefing.open_questions.len() > 3 {
+        risk += 0.1;
+    }
+    risk = risk.min(1.0);
+
+    let predicted_outcome = if risk >= 0.6 {
+        "fail"
+    } else if risk >= 0.3 {
+        "uncertain"
+    } else {
+        "pass"
+    };
+
+    // Map the most frequent prior cause to a predicted failing phase.
+    let predicted_failure_phase = briefing
+        .prior_causes
+        .iter()
+        .max_by_key(|c| c.occurrences)
+        .map(|c| phase_from_cause_id(&c.cause_id).to_string());
+
+    let source_cause_ids = briefing
+        .prior_causes
+        .iter()
+        .map(|c| c.cause_id.as_str())
+        .collect::<Vec<_>>()
+        .join(",");
+
+    let confidence = if risk > 0.3 { 0.7 } else { 0.5 };
+
+    let narrative = format!(
+        "Coobie predicts '{}' for run {} (spec: {}). Risk score: {:.2}. \
+         Based on {} prior cause(s), {} required check(s), \
+         and minimum scenario pass rate {:.0}%.",
+        predicted_outcome,
+        run_id,
+        spec_id,
+        risk,
+        briefing.prior_causes.len(),
+        briefing.required_checks.len(),
+        min_pass_rate * 100.0,
+    );
+
+    crate::calvin_client::RunPrediction {
+        prediction_id: uuid::Uuid::new_v4().to_string(),
+        run_id: run_id.to_string(),
+        spec_id: spec_id.to_string(),
+        predicted_outcome: predicted_outcome.to_string(),
+        risk_score: risk,
+        confidence,
+        failure_phase: predicted_failure_phase,
+        failure_kind: None, // heuristic; Phase 7 refines with FailureKind classifier
+        source_cause_ids,
+        narrative_summary: narrative,
+    }
+}
+
+/// Map a PriorCauseSignal cause_id to the most likely failing factory phase.
+fn phase_from_cause_id(cause_id: &str) -> &str {
+    if cause_id.contains("SPEC") || cause_id.contains("AMBIG") {
+        "scout"
+    } else if cause_id.contains("TWIN") || cause_id.contains("ENV") {
+        "twin"
+    } else if cause_id.contains("TEST") || cause_id.contains("BLIND") {
+        "validation"
+    } else if cause_id.contains("PACK") || cause_id.contains("BREAKDOWN") {
+        "orchestration"
+    } else if cause_id.contains("MEMORY") || cause_id.contains("PRIOR") {
+        "preflight"
+    } else {
+        "unknown"
+    }
+}
+
+/// Compute prediction error: 0.0 = correct prediction, 1.0 = completely wrong.
+///
+/// Asymmetric by design: missing a real failure (false confidence) is penalised
+/// more heavily than raising a false alarm.
+pub(crate) fn compute_prediction_error(predicted: &str, actual: &str) -> f64 {
+    match (predicted, actual) {
+        ("pass", "completed") => 0.0,
+        ("fail", "failed") => 0.0,
+        ("uncertain", _) => 0.2,               // never fully wrong when uncertain
+        ("pass", "failed") => 1.0,             // missed a real failure — worst outcome
+        ("fail", "completed") => 0.6,          // false alarm — less harmful than false confidence
+        ("pass", "completed_with_issues") => 0.4,
+        ("fail", "completed_with_issues") => 0.1,
+        ("uncertain", "completed") => 0.1,
+        ("uncertain", "failed") => 0.2,
+        _ => 0.5,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -28257,6 +28500,16 @@ mod tests {
             .memory_hits
             .iter()
             .all(|hit| !hit.to_ascii_lowercase().contains("implementation note")));
+    }
+
+    #[test]
+    fn normalize_briefing_hit_key_dedupes_source_labels_and_provenance() {
+        assert_eq!(
+            normalize_briefing_hit_key(
+                "[project memory] [open-brain] Thin evidence should become explicit checks. [source: PackChat thread=t1, run=r1]",
+            ),
+            normalize_briefing_hit_key("[core memory] Thin evidence should become explicit checks.")
+        );
     }
 
     #[test]

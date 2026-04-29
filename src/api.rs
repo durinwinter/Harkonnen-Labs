@@ -1583,11 +1583,51 @@ async fn get_memory_candidates(
                 let actionable =
                     retry_pending + waiting_openbrain + held_for_review + promotion_pending;
                 let retryable = pending + retry_pending + waiting_openbrain;
+                let mut memory_chain_blockers = Vec::new();
+                if held_for_review > 0 {
+                    memory_chain_blockers.push(format!(
+                        "{held_for_review} candidate{} held for operator review",
+                        plural_suffix(held_for_review)
+                    ));
+                }
+                if retry_pending > 0 {
+                    memory_chain_blockers.push(format!(
+                        "{retry_pending} candidate{} waiting for retry",
+                        plural_suffix(retry_pending)
+                    ));
+                }
+                if waiting_openbrain > 0 {
+                    memory_chain_blockers.push(format!(
+                        "{waiting_openbrain} candidate{} waiting for OB1 configuration",
+                        plural_suffix(waiting_openbrain)
+                    ));
+                }
+                if promotion_pending > 0 {
+                    memory_chain_blockers.push(format!(
+                        "{promotion_pending} Calvin promotion{} pending review",
+                        plural_suffix(promotion_pending)
+                    ));
+                }
+                let memory_chain_status = if held_for_review > 0 {
+                    "needs_review"
+                } else if retry_pending > 0 {
+                    "retry_pending"
+                } else if waiting_openbrain > 0 {
+                    "waiting_openbrain"
+                } else if pending > 0 {
+                    "processing"
+                } else if promotion_pending > 0 {
+                    "calvin_review"
+                } else {
+                    "clear"
+                };
                 (
                     StatusCode::OK,
                     Json(serde_json::json!({
                         "run_id": id,
                         "total": total,
+                        "memory_chain_status": memory_chain_status,
+                        "memory_chain_blockers": memory_chain_blockers,
                         "status_counts": status_counts,
                         "pending": pending,
                         "retry_pending": retry_pending,
@@ -1606,6 +1646,14 @@ async fn get_memory_candidates(
         },
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+fn plural_suffix(count: usize) -> &'static str {
+    if count == 1 {
+        ""
+    } else {
+        "s"
     }
 }
 

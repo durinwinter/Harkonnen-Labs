@@ -104,6 +104,10 @@ async fn spawn_mock_calvin() -> (String, RequestLog) {
         )
         .route("/agents/:name/status", patch(capture_body))
         .route("/runs/:run_id/causal-links", post(capture_body))
+        .route("/runs/:run_id/predictions", post(capture_body).get(|| async {
+            Json(json!({"prediction_id": "pred-001", "predicted_outcome": "pass", "risk_score": 0.1, "confidence": 0.7}))
+        }))
+        .route("/runs/:run_id/prediction-result", post(capture_body))
         .route("/telemetry", post(capture_body))
         .route("/telemetry/batch", post(capture_body))
         .with_state(Arc::clone(&log_clone));
@@ -1433,5 +1437,159 @@ mod three_way {
         // The mock returns safe:true because of the string-matching gap (see Section 1).
         // When the semantic check gap is fixed, "less cooperative" would return safe:false
         // and belief_writes would be empty.
+    }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// SECTION 6 — PREDICTION SYSTEM
+// ─────────────────────────────────────────────────────────────────────────────
+
+mod prediction {
+    use super::*;
+
+    /// A pre-run prediction must be recorded before the run opens, with all
+    /// required fields: predicted_outcome, risk_score, confidence, prediction_id.
+    #[tokio::test]
+    async fn prediction_recorded_before_run() {
+        let (url, log) = spawn_mock_calvin().await;
+        let client = reqwest::Client::new();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let prediction_id = uuid::Uuid::new_v4().to_string();
+
+        // Open the run first.
+        client
+            .post(format!("{url}/runs"))
+            .json(&json!({"run_id": run_id, "spec_id": "spec-pred-001", "provider": "claude", "model": "claude-sonnet-4-6"}))
+            .send().await.unwrap();
+
+        // Record a prediction synthesized from the briefing.
+        let r = client
+            .post(format!("{url}/runs/{run_id}/predictions"))
+            .json(&json!({
+                "prediction_id": prediction_id,
+                "predicted_outcome": "uncertain",
+                "risk_score": 0.45,
+                "confidence": 0.7,
+                "failure_phase": "scout",
+                "failure_kind": null,
+                "source_cause_ids": "SPEC_AMBIGUITY,NO_PRIOR_MEMORY",
+                "narrative_summary": "Coobie predicts 'uncertain' (risk 0.45): 2 prior causes, 4 required checks."
+            }))
+            .send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 201, "prediction POST must return 201");
+
+        let calls = log.lock().unwrap();
+        let pred_call = calls.iter().find(|c| c.get("predicted_outcome").is_some()).unwrap();
+        assert_eq!(pred_call["predicted_outcome"], "uncertain");
+        assert_eq!(pred_call["risk_score"], 0.45);
+        assert!(pred_call["prediction_id"].as_str().is_some());
+        assert_eq!(pred_call["failure_phase"], "scout");
+    }
+
+    /// A prediction result must be recorded after the run closes with the actual
+    /// outcome and computed prediction error.
+    #[tokio::test]
+    async fn prediction_result_recorded_after_run() {
+        let (url, log) = spawn_mock_calvin().await;
+        let client = reqwest::Client::new();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let prediction_id = uuid::Uuid::new_v4().to_string();
+        let result_id = uuid::Uuid::new_v4().to_string();
+
+        client.post(format!("{url}/runs")).json(&json!({"run_id": run_id, "spec_id": "spec-pred-002", "provider": "claude", "model": "claude-sonnet-4-6"})).send().await.unwrap();
+
+        // Record prediction (predicted pass with low risk).
+        client.post(format!("{url}/runs/{run_id}/predictions"))
+            .json(&json!({"prediction_id": prediction_id, "predicted_outcome": "pass", "risk_score": 0.1, "confidence": 0.7, "source_cause_ids": "", "narrative_summary": "Low risk run."}))
+            .send().await.unwrap();
+
+        // Run completed successfully — prediction was correct (error = 0.0).
+        let r = client
+            .post(format!("{url}/runs/{run_id}/prediction-result"))
+            .json(&json!({
+                "prediction_id": prediction_id,
+                "result_id": result_id,
+                "actual_outcome": "completed",
+                "actual_failure_phase": null,
+                "actual_failure_kind": null,
+                "prediction_error": 0.0,
+                "narrative_summary": "Run completed. Prediction was 'pass'. Error: 0.00."
+            }))
+            .send().await.unwrap();
+        assert_eq!(r.status().as_u16(), 201, "prediction result POST must return 201");
+
+        let calls = log.lock().unwrap();
+        let result_call = calls.iter().find(|c| c.get("prediction_error").is_some()).unwrap();
+        assert_eq!(result_call["prediction_error"], 0.0);
+        assert_eq!(result_call["actual_outcome"], "completed");
+    }
+
+    /// prediction_error must be 1.0 when a pass was predicted but the run failed.
+    #[tokio::test]
+    async fn prediction_error_is_maximum_for_false_confidence() {
+        let (url, log) = spawn_mock_calvin().await;
+        let client = reqwest::Client::new();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let prediction_id = uuid::Uuid::new_v4().to_string();
+
+        client.post(format!("{url}/runs")).json(&json!({"run_id": run_id, "spec_id": "spec-pred-003", "provider": "claude", "model": "claude-sonnet-4-6"})).send().await.unwrap();
+        client.post(format!("{url}/runs/{run_id}/predictions"))
+            .json(&json!({"prediction_id": prediction_id, "predicted_outcome": "pass", "risk_score": 0.05, "confidence": 0.8, "source_cause_ids": "", "narrative_summary": "Very low risk."}))
+            .send().await.unwrap();
+
+        // Run actually failed — predicted pass, got failure: error = 1.0.
+        client.post(format!("{url}/runs/{run_id}/prediction-result"))
+            .json(&json!({"prediction_id": prediction_id, "result_id": uuid::Uuid::new_v4().to_string(), "actual_outcome": "failed", "actual_failure_phase": "mason", "actual_failure_kind": "compile_error", "prediction_error": 1.0, "narrative_summary": "Run failed. Prediction was 'pass'. Error: 1.00."}))
+            .send().await.unwrap();
+
+        client.patch(format!("{url}/runs/{run_id}/close")).json(&json!({"outcome": "failed"})).send().await.unwrap();
+
+        let calls = log.lock().unwrap();
+        let result_call = calls.iter().find(|c| c.get("prediction_error").is_some()).unwrap();
+        assert_eq!(result_call["prediction_error"], 1.0, "missed failure must produce maximum prediction error");
+        assert_eq!(result_call["actual_failure_phase"], "mason");
+    }
+
+    /// The full prediction round-trip: predict → run → result → error signal stored.
+    /// Validates that prediction_error data flows into Calvin for causal attribution.
+    #[tokio::test]
+    async fn full_prediction_round_trip_in_calvin() {
+        let (url, log) = spawn_mock_calvin().await;
+        let client = reqwest::Client::new();
+        let run_id = uuid::Uuid::new_v4().to_string();
+        let prediction_id = uuid::Uuid::new_v4().to_string();
+
+        // 1. Open run.
+        client.post(format!("{url}/runs")).json(&json!({"run_id": run_id, "spec_id": "spec-e2e-pred", "provider": "claude", "model": "claude-sonnet-4-6"})).send().await.unwrap();
+
+        // 2. Pre-run prediction (uncertain, moderate risk from two prior causes).
+        client.post(format!("{url}/runs/{run_id}/predictions"))
+            .json(&json!({"prediction_id": prediction_id, "predicted_outcome": "uncertain", "risk_score": 0.35, "confidence": 0.7, "failure_phase": "validation", "source_cause_ids": "TEST_BLIND_SPOT", "narrative_summary": "TEST_BLIND_SPOT streak at 2 — uncertain outcome."}))
+            .send().await.unwrap();
+
+        // 3. Record experience (Bramble ran tests).
+        client.post(format!("{url}/runs/{run_id}/experiences")).json(&json!({"run_id": run_id, "episode_id": "ep-001", "provider": "gemini", "model": "gemini-pro", "narrative_summary": "Bramble: 12 pass, 2 fail.", "scope": "bramble", "chamber": "praxis"})).send().await.unwrap();
+
+        // 4. Prediction result (completed_with_issues — partially correct).
+        let error_score = 0.4; // uncertain → completed_with_issues: partial credit
+        client.post(format!("{url}/runs/{run_id}/prediction-result"))
+            .json(&json!({"prediction_id": prediction_id, "result_id": uuid::Uuid::new_v4().to_string(), "actual_outcome": "completed_with_issues", "actual_failure_phase": "validation", "actual_failure_kind": "test_failure", "prediction_error": error_score, "narrative_summary": format!("Error: {error_score}. Prediction phase matched actual.")}))
+            .send().await.unwrap();
+
+        // 5. Close run.
+        client.patch(format!("{url}/runs/{run_id}/close")).json(&json!({"outcome": "completed_with_issues"})).send().await.unwrap();
+
+        let calls = log.lock().unwrap();
+        let pred_call = calls.iter().find(|c| c.get("predicted_outcome").is_some());
+        let result_call = calls.iter().find(|c| c.get("prediction_error").is_some());
+        let exp_call = calls.iter().find(|c| c.get("chamber").is_some());
+
+        assert!(pred_call.is_some(), "prediction must be written to Calvin before the run");
+        assert!(result_call.is_some(), "prediction result must be written to Calvin after the run");
+        assert!(exp_call.is_some(), "experience must be written to Calvin during the run");
+
+        let result = result_call.unwrap();
+        assert_eq!(result["prediction_error"], error_score);
+        assert_eq!(result["actual_failure_phase"], "validation", "prediction phase must match actual for causal attribution");
     }
 }

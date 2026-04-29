@@ -136,6 +136,8 @@ const PACKCHAT_MESSAGE_EXCERPT_CHARS: usize = 1_200;
 const PACKCHAT_MIN_MESSAGE_EXCERPT_CHARS: usize = 300;
 const PACKCHAT_ASSISTANT_CONTEXT_CHARS: usize = 2_400;
 const PACKCHAT_MIN_ASSISTANT_CONTEXT_CHARS: usize = 600;
+const HARKONNEN_PACKCHAT_TOPIC_ROOT: &str = "harkonnen";
+const HARKONNEN_PACKCHAT_TWILIGHT_OPERATION: &str = "harkonnen.packchat.event";
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -313,7 +315,10 @@ impl LocalJsonlPackChatBus {
     }
 
     fn topic(&self, suffix: &str) -> String {
-        format!("harkonnen/{}/{}", self.setup_name, suffix)
+        format!(
+            "{}/{}/{}",
+            HARKONNEN_PACKCHAT_TOPIC_ROOT, self.setup_name, suffix
+        )
     }
 
     fn enrich_event(&self, event: &PackChatBusEvent) -> PackChatBusEvent {
@@ -323,7 +328,10 @@ impl LocalJsonlPackChatBus {
         }
         if enriched.topic.is_empty() {
             enriched.topic = self.topic("chat/unknown");
-        } else if !enriched.topic.starts_with("harkonnen/") {
+        } else if !enriched
+            .topic
+            .starts_with(&format!("{HARKONNEN_PACKCHAT_TOPIC_ROOT}/"))
+        {
             enriched.topic = self.topic(enriched.topic.trim_start_matches('/'));
         }
         enriched
@@ -376,10 +384,17 @@ impl TwilightPackChatBus {
             enriched.setup_name = self.setup_name.clone();
         }
         if enriched.topic.is_empty() {
-            enriched.topic = format!("harkonnen/{}/chat/unknown", self.setup_name);
-        } else if !enriched.topic.starts_with("harkonnen/") {
             enriched.topic = format!(
-                "harkonnen/{}/{}",
+                "{}/{}/chat/unknown",
+                HARKONNEN_PACKCHAT_TOPIC_ROOT, self.setup_name
+            );
+        } else if !enriched
+            .topic
+            .starts_with(&format!("{HARKONNEN_PACKCHAT_TOPIC_ROOT}/"))
+        {
+            enriched.topic = format!(
+                "{}/{}/{}",
+                HARKONNEN_PACKCHAT_TOPIC_ROOT,
                 self.setup_name,
                 enriched.topic.trim_start_matches('/')
             );
@@ -2133,17 +2148,23 @@ fn publish_packchat_to_twilight_socket(
 
     write_ipc_json(
         &mut stream,
-        serde_json::json!({
-            "cmd": "publish_task",
-            "operation": "harkonnen.packchat.event",
-            "input_json": serde_json::to_string(envelope)?,
-        }),
+        build_twilight_packchat_publish_command(envelope)?,
     )?;
     let response = read_ipc_json(&mut reader)?;
     if response["ok"].as_bool() == Some(false) {
         anyhow::bail!("Twilight daemon rejected PackChat event: {response}");
     }
     Ok(())
+}
+
+fn build_twilight_packchat_publish_command(envelope: &PackChatWireEnvelope) -> Result<Value> {
+    // Twilight Bark remains Harkonnen-agnostic here: Harkonnen publishes an
+    // opaque operation/payload through Twilight's generic task IPC surface.
+    Ok(serde_json::json!({
+        "cmd": "publish_task",
+        "operation": HARKONNEN_PACKCHAT_TWILIGHT_OPERATION,
+        "input_json": serde_json::to_string(envelope)?,
+    }))
 }
 
 #[cfg(not(unix))]
@@ -2280,7 +2301,7 @@ async fn run_twilight_ingest_once(
     while let Some(line) = lines.next_line().await? {
         let message: Value = serde_json::from_str(line.trim()).context("parsing Twilight event")?;
         if message["event"].as_str() != Some("task_request")
-            || message["operation"].as_str() != Some("harkonnen.packchat.event")
+            || message["operation"].as_str() != Some(HARKONNEN_PACKCHAT_TWILIGHT_OPERATION)
         {
             continue;
         }
@@ -2597,6 +2618,48 @@ mod tests {
         assert!(raw.contains("\"event_id\":\"evt-1\""));
         assert!(raw.contains("\"setup_name\":\"lm-studio-local\""));
         assert!(raw.contains("\"topic\":\"harkonnen/lm-studio-local/chat/thread-1/message\""));
+    }
+
+    #[test]
+    fn twilight_bridge_uses_harkonnen_owned_operation_over_generic_task_ipc() {
+        let event = PackChatBusEvent {
+            event_id: "evt-twilight-boundary".to_string(),
+            topic: "harkonnen/home-linux/chat/thread-1/message".to_string(),
+            kind: PackChatBusEventKind::MessageAppended,
+            setup_name: "home-linux".to_string(),
+            thread_id: Some("thread-1".to_string()),
+            run_id: Some("run-1".to_string()),
+            spec_id: None,
+            message_id: Some("msg-1".to_string()),
+            checkpoint_id: None,
+            role: Some("operator".to_string()),
+            agent: Some("coobie".to_string()),
+            agent_runtime_id: Some("coobie#home-linux".to_string()),
+            content_preview: "Remember this boundary.".to_string(),
+            content: Some(
+                "Twilight Bark carries Harkonnen PackChat payloads opaquely.".to_string(),
+            ),
+            metadata_json: serde_json::json!({"thread_kind": "run"}),
+            emitted_at: Utc::now(),
+        };
+        let envelope = PackChatWireEnvelope::from_event(event);
+        let command = build_twilight_packchat_publish_command(&envelope).expect("publish command");
+
+        assert_eq!(command["cmd"].as_str(), Some("publish_task"));
+        assert_eq!(
+            command["operation"].as_str(),
+            Some(HARKONNEN_PACKCHAT_TWILIGHT_OPERATION)
+        );
+        assert!(HARKONNEN_PACKCHAT_TWILIGHT_OPERATION.starts_with("harkonnen."));
+
+        let input_json = command["input_json"].as_str().expect("input_json");
+        let decoded: PackChatWireEnvelope =
+            serde_json::from_str(input_json).expect("decode envelope");
+        assert_eq!(decoded.schema, "harkonnen.packchat.v1");
+        assert_eq!(
+            decoded.event.topic,
+            "harkonnen/home-linux/chat/thread-1/message"
+        );
     }
 
     #[test]

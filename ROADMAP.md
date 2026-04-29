@@ -273,11 +273,31 @@ Full design: `factory/context/briefing-scope-design.md` (BriefingScope) and `fac
 
 ---
 
+## Prediction System — **SHIPPED 2026-04-28**
+
+Closes the learning loop by making Coobie's expectations explicit before each run and measuring how wrong they were afterward.
+
+**What was built:**
+
+- **TypeDB schema** — `prediction_record` + `prediction_result` entities, `prediction_for_run` + `prediction_verified` relations. New attributes: `predicted-outcome`, `actual-outcome`, `prediction-error`, `risk-score`, `failure-phase`, `failure-kind-label`, `source-cause-ids`.
+- **Calvin sidecar** — `record_prediction()`, `record_prediction_result()`, `get_prediction()` in `archive.rs`; `POST /runs/{id}/predictions`, `GET /runs/{id}/predictions`, `POST /runs/{id}/prediction-result` in `api.rs`.
+- **Calvin client** — `RunPrediction` and `PredictionOutcome` structs + three client methods in `calvin_client.rs`.
+- **Prediction synthesis** (`synthesize_run_prediction()` in `orchestrator.rs`) — heuristic risk scoring from `prior_causes` frequency and pass rate + `required_checks` count + `open_questions` count → predicted outcome (`pass`/`uncertain`/`fail`) + risk score 0–1. Marked `basic_heuristic`; Phase 7 replaces with a model-driven classifier trained on the causal attribution corpus.
+- **Prediction error** (`compute_prediction_error()`) — asymmetric: predicted `pass`, got `fail` → 1.0 (worst); false alarm → 0.6; `uncertain` → max 0.2. Missing a failure is penalised more than raising a false alarm.
+- **Orchestrator wiring** — prediction emitted after every `dispatch_coobie_briefing()`; prediction result emitted at both run completion paths (alongside `try_close_calvin_run()`).
+- **E2E tests** — 4 new tests in `tests/e2e_integration.rs`: `prediction_recorded_before_run`, `prediction_result_recorded_after_run`, `prediction_error_is_maximum_for_false_confidence`, `full_prediction_round_trip_in_calvin`. 128/128 tests passing.
+
+**What this enables:** every run now produces a `prediction_error` score. Runs where the error is high (unexpected failures) are natural candidates for intensive causal annotation in Phase 7. The error signal is the primary input for Phase 8 posture adaptation.
+
+---
+
 ## Phase 5-D — PackChat Memory Distillation Chain
 
 **Unlocks:** The full conversation-to-continuity path. Twilight Bark carries live PackChat events, Harkonnen persists them as memory candidates, Coobie distills them into durable thoughts, Open Brain (OB1) stores shared semantic recall, and Calvin receives only governed promotion contracts.
 
 This is now the critical memory slice. It replaces the old assumption that the next step must be a larger local vector store. The local fastembed/SQLite vector store remains opt-in; OB1 is the shared recall default.
+
+**Twilight Bark dependency rule:** Twilight Bark is an upstream transport dependency for Harkonnen Labs, not a downstream consumer of Harkonnen concepts. Harkonnen-owned operation labels and PackChat/Calvin schemas may ride over Twilight's generic task/event surface, but Twilight Bark must stay free of Harkonnen imports, Calvin archive assumptions, and Labrador-specific runtime policy.
 
 ### Calvin Archive sidecar correctness (pre-5-D gate) — **SHIPPED 2026-04-28**
 
@@ -319,9 +339,12 @@ Twilight Bark / PackChat envelope
 - **Candidate retry semantics** — **SHIPPED 2026-04-28**. OB1 capture failures and Calvin promotion enqueue failures now mark candidates as `retry_pending`, and the candidate processor scans both `pending` and `retry_pending` rows so manual/API-triggered processing retries transient failures instead of silently stalling. `OpenBrainClient` now uses a configurable short timeout (`open_brain.timeout_ms`, default 2500 ms) so OB1 outages do not block productive run close for 30 seconds. Regression test: `chat::tests::pending_memory_candidate_scan_includes_retry_pending` — green.
 - **Candidate retry/operator surface** — **SHIPPED 2026-04-28**. `GET /api/runs/{id}/memory/candidates` now returns `status_counts`, `retryable`, and `actionable` totals covering `pending`, `retry_pending`, `waiting_openbrain`, `held_for_review`, `captured_openbrain`, and `promotion_pending`; `POST /api/runs/{id}/memory/candidates/retry` is a clear retry alias for the processing endpoint. The Run Detail drawer now includes a Memory tab with candidate counts, status chips, recent candidate previews, and a one-click retry action.
 - **Candidate review actions** — **SHIPPED 2026-04-28**. `POST /api/runs/{id}/memory/candidates/{cid}/approve` releases `held_for_review`, `retry_pending`, or `waiting_openbrain` candidates back to processing and immediately retries them; `POST /api/runs/{id}/memory/candidates/{cid}/discard` marks uncaptured/unpromoted candidates as discarded. The Memory tab now shows approve/discard actions on reviewable candidates. Regression test: `chat::tests::held_memory_candidate_can_be_approved_or_discarded` — green.
+- **Memory chain readiness signal** — **SHIPPED 2026-04-28**. `GET /api/runs/{id}/memory/candidates` now returns `memory_chain_status` (`clear`, `processing`, `needs_review`, `retry_pending`, `waiting_openbrain`, `calvin_review`) plus `memory_chain_blockers`; the Memory tab renders a readiness banner so operators can see at a glance whether the PackChat → OB1 → Calvin chain is clear, waiting on service configuration, or waiting on review.
+- **OB1 reader dedupe in briefings** — **SHIPPED 2026-04-28**. Coobie briefing assembly now deduplicates memory hits by normalized content before adding source labels, so the same fact from repo memory/core memory/OB1 is not repeated just because it arrived through multiple recall paths. Provenance suffixes such as PackChat source refs are stripped for the dedupe key while preserved in the displayed hit. Regression test: `orchestrator::tests::normalize_briefing_hit_key_dedupes_source_labels_and_provenance` — green.
 - **Twilight ingest loop write-back to Calvin** — **SHIPPED 2026-04-28**. `run_twilight_ingest_once()` in `chat.rs` now checks each inbound wire envelope for `archive_contract.schema == "harkonnen.calvin.ingress.v1"` and calls `calvin_client.record_experience()` with the mapped `ArchiveExperience`. Non-null `causation_id` values are forwarded as `causally_contributed_to` links via `POST /runs/{id}/causal-links` (Pearl level: `Associational`, carried in the relation scope until Phase 7 adds a dedicated Pearl-level attribute). Calvin is now initialised before the ingest loop spawns so the client is available from the first poll. New endpoints added: `POST /runs/{id}/causal-links` on Calvin, `record_causal_link()` on `CalvinClient`. E2E tests: `twilight::twilight_ingest_loop_writes_to_calvin`, `memory_candidates::causation_id_written_to_calvin_causal_graph` — both green.
 - **Complete chamber mapping for all six chambers** — **SHIPPED 2026-04-28**. Added `BeliefRevised` and `DriftDetected` variants to `PackChatBusEventKind`. `calvin_chamber_for_packchat_event()` now maps by event kind first: `ThreadOpened → mythos`, `ThreadRosterSynced → ethos`, `BeliefRevised → episteme`, `DriftDetected → pathos`, `CheckpointResolved → praxis`, `MessageAppended → logos` (role-refined). All six chambers are now reachable. E2E test: `twilight::chamber_mapping_covers_all_six_chambers` — green.
 - **Agent presence TTL watcher → Calvin agent status** — **SHIPPED 2026-04-28**. `spawn_twilight_ingest_loop()` now maintains a `HashMap<agent_id, Instant>` presence tracker that persists across reconnect cycles. On each loop iteration, agents not seen for > 600 s are marked `"offline"` via `PATCH /agents/{name}/status`. Activity events reset the last-seen timestamp. New endpoint added: `PATCH /agents/{name}/status` on Calvin, `update_agent_status()` on `CalvinClient` and `ArchiveStore`. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status` — green.
+- **Twilight Bark dependency-direction guard** — **SHIPPED 2026-04-28**. `src/chat.rs` now names the Harkonnen-owned PackChat topic root and Twilight operation label explicitly, and the publish path builds a generic Twilight `publish_task` command carrying an opaque `harkonnen.packchat.event` payload. Regression test: `chat::tests::twilight_bridge_uses_harkonnen_owned_operation_over_generic_task_ipc` — green. This protects the boundary that Harkonnen depends on Twilight Bark as transport while Twilight Bark remains Harkonnen-agnostic.
 
 ### OpenZiti service profile
 
@@ -790,6 +813,7 @@ If Twilight Bark is adopted here, Harkonnen should map:
 - canonical Labrador role + `agent_runtime_id` onto Twilight Bark agent identity / presence records.
 - local `packchat-bus.jsonl` observability onto Twilight Bark's `twilight-eventlog` so replay and audit stay append-only.
 - PackChat thread topics onto Zenoh keyexprs directly rather than introducing a second naming scheme.
+- Keep Harkonnen-owned operation labels and Calvin ingress contracts in Harkonnen adapter code only; Twilight Bark remains a generic transport and should not grow Harkonnen-specific dependencies.
 
 ### Calvin Archive cross-machine consistency
 

@@ -13,6 +13,15 @@ const STATUS_STYLE = {
   ignored_ephemeral: { label: 'Ignored', color: '#8f99a8', bg: 'rgba(143,153,168,0.12)' },
 };
 
+const CHAIN_STATUS = {
+  clear: { label: 'Clear', tone: 'good', detail: 'Memory chain has no pending operator action.' },
+  processing: { label: 'Processing', tone: 'neutral', detail: 'Candidates are queued for processing.' },
+  needs_review: { label: 'Needs review', tone: 'warn', detail: 'One or more candidates need operator action.' },
+  retry_pending: { label: 'Retry pending', tone: 'warn', detail: 'A transient failure needs another processing attempt.' },
+  waiting_openbrain: { label: 'Waiting OB1', tone: 'warn', detail: 'OB1 is not configured or reachable for shared recall capture.' },
+  calvin_review: { label: 'Calvin review', tone: 'neutral', detail: 'Promotion contracts are waiting in the governed review flow.' },
+};
+
 function StatusChip({ status }) {
   const style = STATUS_STYLE[status] || { label: status || 'Unknown', color: '#b8b2a7', bg: 'rgba(255,255,255,0.08)' };
   return (
@@ -42,6 +51,30 @@ function CountTile({ label, value, tone = 'neutral' }) {
     }}>
       <div style={{ fontSize: 11, color: '#8f99a8', marginBottom: 4 }}>{label}</div>
       <div style={{ fontSize: 18, fontWeight: 700, color }}>{value ?? 0}</div>
+    </div>
+  );
+}
+
+function ChainStatusBanner({ status, blockers }) {
+  const entry = CHAIN_STATUS[status] || CHAIN_STATUS.clear;
+  const color = entry.tone === 'warn' ? '#e0b34f' : entry.tone === 'good' ? '#64c27b' : '#d8d3ca';
+  return (
+    <div style={{
+      border: `1px solid ${entry.tone === 'warn' ? 'rgba(224,179,79,0.28)' : 'rgba(255,255,255,0.08)'}`,
+      background: entry.tone === 'warn' ? 'rgba(224,179,79,0.08)' : '#191d1f',
+      borderRadius: 8,
+      padding: '10px 12px',
+      marginBottom: 12,
+    }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+        <span style={{ color, fontWeight: 750, fontSize: 13 }}>{entry.label}</span>
+        <span style={{ color: '#8f99a8', fontSize: 12 }}>{entry.detail}</span>
+      </div>
+      {blockers?.length > 0 && (
+        <div style={{ color: '#c9c1b4', fontSize: 12, lineHeight: 1.45 }}>
+          {blockers.join(' · ')}
+        </div>
+      )}
     </div>
   );
 }
@@ -136,6 +169,11 @@ export default function MemoryCandidatesPanel({ runId }) {
       </div>
 
       {error && <div className="drawer-error">Error: {error}</div>}
+
+      <ChainStatusBanner
+        status={data?.memory_chain_status || 'clear'}
+        blockers={data?.memory_chain_blockers || []}
+      />
 
       <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 14 }}>
         <CountTile label="Retryable" value={data?.retryable} tone={retryable > 0 ? 'warn' : 'neutral'} />

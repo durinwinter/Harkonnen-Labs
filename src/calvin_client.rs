@@ -189,7 +189,10 @@ impl CalvinClient {
 
     pub async fn record_prediction(&self, pred: &RunPrediction) -> Result<()> {
         self.client
-            .post(format!("{}/runs/{}/predictions", self.base_url, pred.run_id))
+            .post(format!(
+                "{}/runs/{}/predictions",
+                self.base_url, pred.run_id
+            ))
             .json(&serde_json::json!({
                 "prediction_id": pred.prediction_id,
                 "predicted_outcome": pred.predicted_outcome,

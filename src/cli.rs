@@ -1540,47 +1540,10 @@ fn interview_mcp_servers(config: &mut SetupConfig, discovery: &SystemDiscovery) 
 }
 
 fn common_mcp_templates(platform: &str) -> Vec<McpInterviewTemplate> {
+    // filesystem, memory, and sqlite are now served natively by the Harkonnen
+    // self-server (cargo run -- mcp serve --transport stdio). Only external
+    // services remain as npx templates.
     let mut templates = vec![
-        McpInterviewTemplate {
-            name: "filesystem",
-            prompt: "filesystem MCP for product/workspace/artifact access",
-            command: "npx",
-            args: &[
-                "-y",
-                "@modelcontextprotocol/server-filesystem",
-                "./products",
-                "./factory/workspaces",
-                "./factory/artifacts",
-            ],
-            env: &[],
-            aliases: &["filesystem_read", "workspace_write", "artifact_writer"],
-            default_enabled: true,
-            customizable: false,
-        },
-        McpInterviewTemplate {
-            name: "memory",
-            prompt: "memory MCP for retrieval and scratch knowledge",
-            command: "npx",
-            args: &["-y", "@modelcontextprotocol/server-memory"],
-            env: &[],
-            aliases: &["memory_store", "metadata_query"],
-            default_enabled: true,
-            customizable: false,
-        },
-        McpInterviewTemplate {
-            name: "sqlite",
-            prompt: "sqlite MCP for run-state inspection",
-            command: "npx",
-            args: &[
-                "-y",
-                "@modelcontextprotocol/server-sqlite",
-                "./factory/state.db",
-            ],
-            env: &[],
-            aliases: &["db_read"],
-            default_enabled: true,
-            customizable: false,
-        },
         McpInterviewTemplate {
             name: "github",
             prompt: "GitHub MCP for repository, issue, and doc access",

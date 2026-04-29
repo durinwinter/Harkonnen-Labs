@@ -345,6 +345,7 @@ Twilight Bark / PackChat envelope
 - **Complete chamber mapping for all six chambers** — **SHIPPED 2026-04-28**. Added `BeliefRevised` and `DriftDetected` variants to `PackChatBusEventKind`. `calvin_chamber_for_packchat_event()` now maps by event kind first: `ThreadOpened → mythos`, `ThreadRosterSynced → ethos`, `BeliefRevised → episteme`, `DriftDetected → pathos`, `CheckpointResolved → praxis`, `MessageAppended → logos` (role-refined). All six chambers are now reachable. E2E test: `twilight::chamber_mapping_covers_all_six_chambers` — green.
 - **Agent presence TTL watcher → Calvin agent status** — **SHIPPED 2026-04-28**. `spawn_twilight_ingest_loop()` now maintains a `HashMap<agent_id, Instant>` presence tracker that persists across reconnect cycles. On each loop iteration, agents not seen for > 600 s are marked `"offline"` via `PATCH /agents/{name}/status`. Activity events reset the last-seen timestamp. New endpoint added: `PATCH /agents/{name}/status` on Calvin, `update_agent_status()` on `CalvinClient` and `ArchiveStore`. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status` — green.
 - **Twilight Bark dependency-direction guard** — **SHIPPED 2026-04-28**. `src/chat.rs` now names the Harkonnen-owned PackChat topic root and Twilight operation label explicitly, and the publish path builds a generic Twilight `publish_task` command carrying an opaque `harkonnen.packchat.event` payload. Regression test: `chat::tests::twilight_bridge_uses_harkonnen_owned_operation_over_generic_task_ipc` — green. This protects the boundary that Harkonnen depends on Twilight Bark as transport while Twilight Bark remains Harkonnen-agnostic.
+- **OB1 capture-to-briefing round trip** — **SHIPPED 2026-04-29**. The Phase 5-D product gate now has a real in-process smoke test for the Harkonnen side of the chain: a `shared_recall` memory candidate is processed by `process_memory_candidates()`, captured through `OpenBrainClient::capture_thought`, marked `captured_openbrain`, and then retrieved through Coobie's `collect_memory_hits()` briefing path via `OpenBrainClient::search_thoughts`. Regression test: `orchestrator::tests::memory_candidate_capture_is_retrievable_from_openbrain_briefing_path` — green.
 
 ### OpenZiti service profile
 
@@ -363,7 +364,7 @@ OpenZiti Dial and Bind policies should be separate. Privileged writers should ca
 
 - **E2E integration test suite green — DONE 2026-04-28:** all 20 tests in `tests/e2e_integration.rs` pass. The six gap tests that were failing at roadmap entry are now green: `calvin::beliefs_scoped_to_named_agent`, `calvin::adaptation_safety_catches_semantic_negation`, `twilight::twilight_ingest_loop_writes_to_calvin`, `twilight::chamber_mapping_covers_all_six_chambers`, `twilight::agent_presence_expiry_updates_calvin_agent_status`, `memory_candidates::run_close_triggers_candidate_processing`.
 - A PackChat thread with at least five messages produces one or more memory candidates.
-- A candidate marked `shared_recall` is captured in OB1 and later retrieved by `search_thoughts` during a targeted briefing.
+- A candidate marked `shared_recall` is captured in OB1 and later retrieved by `search_thoughts` during a targeted briefing. **DONE 2026-04-29:** covered by `orchestrator::tests::memory_candidate_capture_is_retrievable_from_openbrain_briefing_path`.
 - A candidate marked `calvin_candidate` produces a structured promotion contract without directly mutating Calvin canonical state.
 - Candidate dedupe prevents repeated chat phrasing from producing duplicate OB1 thoughts.
 - Sensitivity labels prevent secrets and high-risk payloads from being sent to OB1 without review.
@@ -477,16 +478,28 @@ pub struct ContextUtilization {
 
 `utilization_rate` is computed post-run by Coobie: scan the agent's output for references to the content of each briefing hit (embedding similarity above a threshold). A briefing with `utilization_rate < 0.2` over multiple runs for the same scope is a signal that the budget is too high or the category filter is too loose. This data feeds the Phase 7 causal corpus and the Phase 8 Episteme chamber's slow-loop policy revision for scope configuration.
 
-### Rust-native MCP server consolidation (`rmcp`)
+### Rust-native MCP server consolidation — **SHIPPED 2026-04-29**
 
-Replace the three `npx @modelcontextprotocol/server-*` processes (filesystem, memory, sqlite) with a single `harkonnen mcp serve` invocation backed by the `rmcp` crate (Anthropic's official Rust MCP SDK). The consolidated server:
+The three `npx @modelcontextprotocol/server-*` processes (filesystem, memory, sqlite) are replaced by the Harkonnen self-server (`cargo run -- mcp serve --transport stdio`). No Node.js runtime needed for the core MCP surface.
 
-- Exposes the same tool aliases (`filesystem_read`, `workspace_write`, `artifact_writer`, `memory_store`, `metadata_query`, `db_read`) so no harkonnen.toml changes are needed at the agent-routing level
-- Serves the new `prompts` surface (see above) over the same transport
-- Removes Node.js / `npx` from the runtime dependency list entirely
-- Uses `sqlx` directly for SQLite access rather than shelling out to a Node sqlite server
+**Tools added to `src/mcp_server.rs`** (all boundary-enforced):
 
-`harkonnen.toml` is updated to replace the three `npx` server entries with a single self-server entry pointing at `harkonnen mcp serve --transport sse`. The three old entries are removed from `common_mcp_templates` in `src/cli.rs`; the self-server config block becomes the default for all setups.
+- `read_file` / `list_directory` — reads from products, workspaces, artifacts, memory, specs, logs, calvin_archive, the-soul-of-ai (read-only boundary)
+- `write_file` / `create_directory` — writes only into factory/workspaces and factory/artifacts
+- `memory_store` — writes a timestamped markdown entry to the memory store + OB1 capture
+- `memory_retrieve` — hybrid search: file store + OB1 `search_thoughts`, deduplicated, limited
+- `memory_list` — lists recent memory store entries with id + summary
+- `db_list_tables` — lists SQLite tables in state.db
+- `db_query` — SELECT-only queries against state.db (INSERT/UPDATE/DELETE/DROP rejected)
+
+**Config changes:**
+
+- `harkonnen.toml`: removed `[[mcp.servers]]` entries for filesystem, memory, sqlite; updated `[mcp.self]` to `transport = "stdio"`
+- `.mcp.json`: replaced three npx server entries + old harkonnen entry with single consolidated entry pointing at current repo path via `flatpak-spawn --host`
+- `.claude/settings.local.json`: `enabledMcpjsonServers` reduced to `["harkonnen"]`
+- `src/cli.rs` `common_mcp_templates()`: three npx server templates removed; github and brave-search remain (external services)
+
+**Result:** one process, one restart, all tools. `/mcp coobie/briefing`, `memory_pull`, `read_file`, `db_query`, live prompts — all served by the same `cargo run -- mcp serve` invocation that Claude Code auto-starts via stdio. 128/128 tests green.
 
 ### `llm.rs` multi-provider extension
 

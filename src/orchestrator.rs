@@ -1999,7 +1999,8 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, final_status).await;
-                self.try_record_calvin_prediction_result(run_id, final_status, None).await;
+                self.try_record_calvin_prediction_result(run_id, final_status, None)
+                    .await;
                 self.try_process_memory_candidates_on_close(run_id).await;
                 self.finalize_blackboard(final_status, &output.run_dir)
                     .await?;
@@ -2022,7 +2023,8 @@ impl AppContext {
                     )
                     .await?;
                 self.try_close_calvin_run(run_id, "failed").await;
-                self.try_record_calvin_prediction_result(run_id, "failed", None).await;
+                self.try_record_calvin_prediction_result(run_id, "failed", None)
+                    .await;
                 self.try_process_memory_candidates_on_close(run_id).await;
                 let run_dir = self.run_dir(run_id);
                 self.mark_blackboard_failed(&message, &run_dir).await?;
@@ -28350,9 +28352,9 @@ pub(crate) fn compute_prediction_error(predicted: &str, actual: &str) -> f64 {
     match (predicted, actual) {
         ("pass", "completed") => 0.0,
         ("fail", "failed") => 0.0,
-        ("uncertain", _) => 0.2,               // never fully wrong when uncertain
-        ("pass", "failed") => 1.0,             // missed a real failure — worst outcome
-        ("fail", "completed") => 0.6,          // false alarm — less harmful than false confidence
+        ("uncertain", _) => 0.2,      // never fully wrong when uncertain
+        ("pass", "failed") => 1.0,    // missed a real failure — worst outcome
+        ("fail", "completed") => 0.6, // false alarm — less harmful than false confidence
         ("pass", "completed_with_issues") => 0.4,
         ("fail", "completed_with_issues") => 0.1,
         ("uncertain", "completed") => 0.1,
@@ -28364,7 +28366,182 @@ pub(crate) fn compute_prediction_error(predicted: &str, actual: &str) -> f64 {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use axum::{extract::State, response::IntoResponse, routing::post, Json, Router};
     use chrono::{Duration, TimeZone};
+    use serde_json::{json, Value};
+    use std::sync::Mutex;
+
+    type OpenBrainThoughts = Arc<Mutex<Vec<String>>>;
+
+    async fn spawn_openbrain_round_trip_mock() -> (String, OpenBrainThoughts) {
+        let thoughts: OpenBrainThoughts = Arc::new(Mutex::new(Vec::new()));
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0")
+            .await
+            .expect("bind mock openbrain");
+        let addr = listener.local_addr().expect("mock openbrain addr");
+        let app = Router::new()
+            .route("/", post(openbrain_round_trip_dispatch))
+            .with_state(Arc::clone(&thoughts));
+
+        tokio::spawn(async move {
+            axum::serve(listener, app)
+                .await
+                .expect("serve mock openbrain");
+        });
+
+        (format!("http://{addr}"), thoughts)
+    }
+
+    async fn openbrain_round_trip_dispatch(
+        State(thoughts): State<OpenBrainThoughts>,
+        Json(req): Json<Value>,
+    ) -> impl IntoResponse {
+        let id = req.get("id").cloned().unwrap_or(json!(1));
+        let tool = req
+            .pointer("/params/name")
+            .and_then(Value::as_str)
+            .unwrap_or("");
+        let args = req
+            .pointer("/params/arguments")
+            .cloned()
+            .unwrap_or_else(|| json!({}));
+
+        let result = match tool {
+            "capture_thought" => {
+                if let Some(content) = args.get("content").and_then(Value::as_str) {
+                    thoughts
+                        .lock()
+                        .expect("thoughts lock")
+                        .push(content.to_string());
+                }
+                json!({"content": [{"type": "text", "text": "ok"}]})
+            }
+            "search_thoughts" => {
+                let query = args
+                    .get("query")
+                    .and_then(Value::as_str)
+                    .unwrap_or("")
+                    .to_ascii_lowercase();
+                let matches = thoughts
+                    .lock()
+                    .expect("thoughts lock")
+                    .iter()
+                    .filter(|thought| {
+                        let thought_lc = thought.to_ascii_lowercase();
+                        query
+                            .split_whitespace()
+                            .filter(|term| term.len() > 2)
+                            .all(|term| thought_lc.contains(term))
+                    })
+                    .cloned()
+                    .collect::<Vec<_>>();
+                json!({"content": [{"type": "text", "text": matches.join("\n")}]})
+            }
+            _ => json!({"content": [{"type": "text", "text": "unknown tool"}]}),
+        };
+
+        Json(json!({"jsonrpc": "2.0", "id": id, "result": result}))
+    }
+
+    async fn test_app_with_openbrain(openbrain_url: String) -> (tempfile::TempDir, AppContext) {
+        let dir = tempfile::TempDir::new().expect("tempdir");
+        let root = dir.path().to_path_buf();
+        let factory = root.join("factory");
+        let memory = factory.join("memory");
+        let logs = factory.join("logs");
+        let specs = factory.join("specs");
+        let scenarios = factory.join("scenarios");
+        let artifacts = factory.join("artifacts");
+        let workspaces = factory.join("workspaces");
+        let products = root.join("products");
+        for path in [
+            &factory,
+            &memory,
+            &logs,
+            &specs,
+            &scenarios,
+            &artifacts,
+            &workspaces,
+            &products,
+        ] {
+            std::fs::create_dir_all(path).expect("create test path");
+        }
+
+        let setup = crate::setup::SetupConfig {
+            setup: crate::setup::SetupMeta {
+                name: "test".to_string(),
+                template: None,
+                role: None,
+                organization: None,
+                platform: std::env::consts::OS.to_string(),
+                anythingllm: Some(false),
+                openclaw: Some(false),
+            },
+            machine: None,
+            providers: crate::setup::ProvidersConfig {
+                default: "test".to_string(),
+                claude: None,
+                gemini: None,
+                codex: None,
+                extras: std::collections::HashMap::new(),
+            },
+            routing: None,
+            mcp: None,
+            calvin_archive: crate::setup::CalvinConfig {
+                enabled: false,
+                ..Default::default()
+            },
+            twilight_bark: crate::setup::TwilightBarkConfig::default(),
+            open_brain: crate::setup::OpenBrainConfig {
+                connection_url: Some(openbrain_url),
+                timeout_ms: 750,
+                ..Default::default()
+            },
+            sub_agents: crate::setup::SubAgentConfig::default(),
+        };
+
+        let paths = Paths {
+            root,
+            factory: factory.clone(),
+            specs,
+            scenarios,
+            artifacts,
+            logs: logs.clone(),
+            workspaces,
+            memory: memory.clone(),
+            db_file: factory.join("state.db"),
+            products,
+            setup,
+        };
+        let pool = db::init_db(&paths).await.expect("init db");
+        let memory_store = MemoryStore::new(paths.memory.clone());
+        let coobie = crate::coobie::SqliteCoobie::new(pool.clone());
+        let (event_tx, _) = tokio::sync::broadcast::channel(16);
+        let chat = crate::chat::ChatStore::new(pool.clone());
+        let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
+        let open_brain =
+            crate::openbrain::OpenBrainClient::new(&paths.setup.open_brain).expect("openbrain");
+        let dispatcher = crate::subagent::SubAgentDispatcher::new(
+            paths.setup.sub_agents.clone(),
+            paths.setup.clone(),
+        );
+        let app = AppContext {
+            paths,
+            pool,
+            memory_store,
+            blackboard: Arc::new(RwLock::new(BlackboardState::default())),
+            coobie,
+            embedding_store: None,
+            event_tx,
+            chat,
+            operator_models,
+            started_at: std::time::Instant::now(),
+            calvin: None,
+            open_brain,
+            dispatcher,
+        };
+        (dir, app)
+    }
 
     fn sample_run(run_id: &str) -> RunRecord {
         RunRecord {
@@ -28509,6 +28686,78 @@ mod tests {
                 "[project memory] [open-brain] Thin evidence should become explicit checks. [source: PackChat thread=t1, run=r1]",
             ),
             normalize_briefing_hit_key("[core memory] Thin evidence should become explicit checks.")
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_candidate_capture_is_retrievable_from_openbrain_briefing_path() {
+        let (openbrain_url, thoughts) = spawn_openbrain_round_trip_mock().await;
+        let (_dir, app) = test_app_with_openbrain(openbrain_url).await;
+        let run_id = format!("run-{}", Uuid::new_v4());
+        let candidate_id = format!("candidate-{}", Uuid::new_v4());
+        let content =
+            "Thin evidence in PackChat requires explicit checks before Mason edits the auth scope.";
+
+        sqlx::query(
+            r#"
+            INSERT INTO memory_candidates
+                (candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                 agent_runtime_id, agent, role, operation, raw_payload, distilled_content,
+                 dedupe_key, importance_score, retention_class, sensitivity_label,
+                 evidence_refs, causality_json, status, created_at)
+            VALUES (?1, ?2, 'thread-ob1', ?3, 'spec-ob1', 'msg-ob1',
+                    'coobie#test', 'coobie', 'agent', 'packchat.message_appended',
+                    ?4, NULL, NULL, 0.82, 'shared_recall', 'normal',
+                    ?5, ?6, 'pending', ?7)
+            "#,
+        )
+        .bind(&candidate_id)
+        .bind(format!("event-{candidate_id}"))
+        .bind(&run_id)
+        .bind(json!({"content": content}).to_string())
+        .bind(json!([{"ref_type": "packchat_message", "id": "msg-ob1"}]).to_string())
+        .bind(json!({"correlation_id": run_id.clone(), "causation_id": null}).to_string())
+        .bind(Utc::now().to_rfc3339())
+        .execute(&app.pool)
+        .await
+        .expect("insert memory candidate");
+
+        let summary = app
+            .process_memory_candidates(Some(&run_id), 10)
+            .await
+            .expect("process memory candidates");
+        assert_eq!(summary.scanned, 1);
+        assert_eq!(summary.captured_openbrain, 1);
+        assert_eq!(thoughts.lock().expect("thoughts lock").len(), 1);
+
+        let stored = app
+            .list_memory_candidates_for_run(&run_id)
+            .await
+            .expect("list candidates");
+        assert_eq!(stored[0].status, "captured_openbrain");
+        let expected_openbrain_ref = format!("openbrain:{candidate_id}");
+        assert_eq!(
+            stored[0].openbrain_ref.as_deref(),
+            Some(expected_openbrain_ref.as_str())
+        );
+
+        let hits = app
+            .collect_memory_hits(
+                &app.memory_store,
+                &["thin evidence explicit checks".to_string()],
+                "project memory",
+            )
+            .await
+            .expect("collect memory hits");
+
+        assert!(
+            hits.hits.iter().any(|hit| {
+                hit.contains("[open-brain]")
+                    && hit.contains("Thin evidence")
+                    && hit.contains("PackChat thread=thread-ob1")
+            }),
+            "captured OB1 memory should be retrievable through Coobie briefing collection; hits={:?}",
+            hits.hits
         );
     }
 

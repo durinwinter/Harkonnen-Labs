@@ -120,27 +120,8 @@ ash    = "claude-haiku"
 flint  = "claude-haiku"
 
 # ── MCP Servers ───────────────────────────────────────────────────────────────
-# Each entry maps a named MCP server into the agent tool boundary.
-# tool_aliases connect abstract tool names in agent profiles to real servers.
-# Add new servers here and reference them in factory/mcp/<name>.yaml for docs.
-
-[[mcp.servers]]
-name    = "filesystem"
-command = "npx"
-args    = ["-y", "@modelcontextprotocol/server-filesystem", "./products", "./factory/workspaces", "./factory/artifacts"]
-tool_aliases = ["filesystem_read", "workspace_write", "artifact_writer"]
-
-[[mcp.servers]]
-name    = "memory"
-command = "npx"
-args    = ["-y", "@modelcontextprotocol/server-memory"]
-tool_aliases = ["memory_store", "metadata_query"]
-
-[[mcp.servers]]
-name    = "sqlite"
-command = "npx"
-args    = ["-y", "@modelcontextprotocol/server-sqlite", "./factory/state.db"]
-tool_aliases = ["db_read"]
+# The three npx helper servers (filesystem, memory, sqlite) are replaced by
+# the Harkonnen self-server below. Only external services remain here.
 
 [[mcp.servers]]
 name    = "github"
@@ -155,6 +136,21 @@ command = "npx"
 args    = ["-y", "@modelcontextprotocol/server-brave-search"]
 env     = { BRAVE_API_KEY = "BRAVE_API_KEY" }
 tool_aliases = ["web_search"]
+
+# ── Harkonnen self-server ─────────────────────────────────────────────────────
+# Single Rust-native MCP server replacing filesystem, memory, and sqlite npx
+# servers. Serves all tools (list_runs, read_file, memory_retrieve, db_query,
+# coobie/briefing, memory_pull, …) plus live MCP prompts.
+# Claude Code wires this via .claude/settings.json mcpServers.harkonnen.
+# Aliases covered: filesystem_read, workspace_write, artifact_writer,
+#                  memory_store, metadata_query, db_read
+
+[mcp.self]
+enabled   = true
+transport = "stdio"
+# transport = "sse"   # uncomment for Pack Board HTTP access
+# host    = "127.0.0.1"
+# port    = 3001
 
 # ── Sub-Agent Dispatch ─────────────────────────────────────────────────────────
 # Controls which backend handles each high-context task. DirectLlm is the

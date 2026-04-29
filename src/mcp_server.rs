@@ -657,6 +657,206 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
             };
             return Ok(text_tool_result(&rendered));
         }
+        // ══════════════════════════════════════════════════════════════════════
+        // CONSOLIDATED NATIVE TOOLS — Phase 5b
+        // Replaces three npx MCP servers (filesystem, memory, sqlite) with
+        // Rust-native implementations backed by tokio::fs and sqlx.
+        // All writes are boundary-enforced to allowed directories.
+        // ══════════════════════════════════════════════════════════════════════
+
+        // ── filesystem_read alias ─────────────────────────────────────────────
+        "read_file" => {
+            let path = required_string(&arguments, "path")?;
+            let abs = resolve_allowed_read_path(&state.app.paths, &path)?;
+            let content = tokio::fs::read_to_string(&abs)
+                .await
+                .map_err(|e| (-32004, format!("read_file failed for {path}: {e}")))?;
+            return Ok(text_tool_result(&content));
+        }
+
+        "list_directory" => {
+            let path = optional_string(&arguments, "path").unwrap_or_else(|| ".".into());
+            let abs = resolve_allowed_read_path(&state.app.paths, &path)?;
+            let mut entries = tokio::fs::read_dir(&abs)
+                .await
+                .map_err(|e| (-32004, format!("list_directory failed for {path}: {e}")))?;
+            let mut names: Vec<String> = Vec::new();
+            while let Some(entry) = entries.next_entry().await.map_err(internal_error)? {
+                let name = entry.file_name().to_string_lossy().to_string();
+                let is_dir = entry.file_type().await.map(|t| t.is_dir()).unwrap_or(false);
+                names.push(if is_dir { format!("{name}/") } else { name });
+            }
+            names.sort();
+            return Ok(text_tool_result(&names.join("\n")));
+        }
+
+        // ── workspace_write / artifact_writer aliases ─────────────────────────
+        "write_file" => {
+            let path = required_string(&arguments, "path")?;
+            let content = required_string(&arguments, "content")?;
+            let abs = resolve_allowed_write_path(&state.app.paths, &path)?;
+            if let Some(parent) = abs.parent() {
+                tokio::fs::create_dir_all(parent)
+                    .await
+                    .map_err(internal_error)?;
+            }
+            tokio::fs::write(&abs, &content)
+                .await
+                .map_err(|e| (-32004, format!("write_file failed for {path}: {e}")))?;
+            return Ok(text_tool_result(&format!(
+                "wrote {} bytes to {path}",
+                content.len()
+            )));
+        }
+
+        "create_directory" => {
+            let path = required_string(&arguments, "path")?;
+            let abs = resolve_allowed_write_path(&state.app.paths, &path)?;
+            tokio::fs::create_dir_all(&abs)
+                .await
+                .map_err(|e| (-32004, format!("create_directory failed for {path}: {e}")))?;
+            return Ok(text_tool_result(&format!("created {path}")));
+        }
+
+        // ── memory_store / metadata_query aliases ─────────────────────────────
+        "memory_store" => {
+            let content = required_string(&arguments, "content")?;
+            let tags = optional_string_array(&arguments, "tags").unwrap_or_default();
+            let id = uuid::Uuid::new_v4().to_string();
+            let tag_prefix = if tags.is_empty() {
+                String::new()
+            } else {
+                format!("[{}] ", tags.join(", "))
+            };
+            let entry = format!("{tag_prefix}{content}");
+            // Write to a timestamped file in the memory store so it's indexed.
+            let ts = chrono::Utc::now().format("%Y%m%dT%H%M%S");
+            let filename = format!("mcp-store-{ts}-{}.md", &id[..8]);
+            let path = state.app.paths.memory.join(&filename);
+            tokio::fs::write(
+                &path,
+                &format!("---\ntags: [mcp_store]\nsummary: {content}\n---\n{entry}"),
+            )
+            .await
+            .map_err(internal_error)?;
+            // Also capture to OB1 if available.
+            if let Some(ob) = state.app.open_brain.as_ref() {
+                let _ = ob.capture_thought(&entry, Some("mcp_store")).await;
+            }
+            return Ok(text_tool_result(&format!("stored memory entry: {id}")));
+        }
+
+        "memory_retrieve" => {
+            let query = required_string(&arguments, "query")?;
+            let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(8) as usize;
+            let mut hits = state
+                .app
+                .memory_store
+                .retrieve_context(&query)
+                .await
+                .unwrap_or_default();
+            if let Some(ob) = state.app.open_brain.as_ref() {
+                if let Ok(ob_hits) = ob.search_thoughts(&query).await {
+                    for h in ob_hits {
+                        if !hits.contains(&h) {
+                            hits.push(h);
+                        }
+                    }
+                }
+            }
+            hits.truncate(limit);
+            let body = hits
+                .iter()
+                .enumerate()
+                .map(|(i, h)| format!("{}. {}", i + 1, h.trim()))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(text_tool_result(if body.is_empty() {
+                "No memory found."
+            } else {
+                &body
+            }));
+        }
+
+        "memory_list" => {
+            let limit = arguments.get("limit").and_then(Value::as_u64).unwrap_or(20) as usize;
+            let entries = state
+                .app
+                .memory_store
+                .list_entries()
+                .await
+                .unwrap_or_default()
+                .into_iter()
+                .take(limit)
+                .collect::<Vec<_>>();
+            let body = entries
+                .iter()
+                .enumerate()
+                .map(|(i, e)| format!("{}. [{}] {}", i + 1, e.id, e.summary))
+                .collect::<Vec<_>>()
+                .join("\n");
+            return Ok(text_tool_result(if body.is_empty() {
+                "Memory is empty."
+            } else {
+                &body
+            }));
+        }
+
+        // ── db_read alias ─────────────────────────────────────────────────────
+        "db_list_tables" => {
+            let rows =
+                sqlx::query("SELECT name FROM sqlite_master WHERE type='table' ORDER BY name")
+                    .fetch_all(&state.app.pool)
+                    .await
+                    .map_err(internal_error)?;
+            let names: Vec<String> = rows
+                .iter()
+                .filter_map(|r| {
+                    use sqlx::Row as _;
+                    r.try_get("name").ok()
+                })
+                .collect();
+            return Ok(text_tool_result(&names.join("\n")));
+        }
+
+        "db_query" => {
+            let sql = required_string(&arguments, "sql")?;
+            // Enforce read-only: reject any non-SELECT statement.
+            let normalized = sql.trim().to_lowercase();
+            if !normalized.starts_with("select") && !normalized.starts_with("with") {
+                return Err((
+                    -32602,
+                    "db_query only permits SELECT / WITH queries".to_string(),
+                ));
+            }
+            let rows = sqlx::query(&sql)
+                .fetch_all(&state.app.pool)
+                .await
+                .map_err(|e| (-32004, format!("db_query failed: {e}")))?;
+            let mut lines: Vec<String> = Vec::new();
+            for row in &rows {
+                use sqlx::{Column as _, Row as _, TypeInfo as _};
+                let mut cols: Vec<String> = Vec::new();
+                for i in 0..row.len() {
+                    let col_name = row.column(i).name().to_string();
+                    let val: String = row
+                        .try_get::<String, _>(i)
+                        .or_else(|_| row.try_get::<i64, _>(i).map(|n| n.to_string()))
+                        .or_else(|_| row.try_get::<f64, _>(i).map(|n| format!("{n:.4}")))
+                        .or_else(|_| row.try_get::<bool, _>(i).map(|b| b.to_string()))
+                        .unwrap_or_else(|_| "NULL".to_string());
+                    cols.push(format!("{col_name}={val}"));
+                }
+                lines.push(cols.join(" | "));
+            }
+            let body = if lines.is_empty() {
+                "(no rows)".to_string()
+            } else {
+                format!("{} row(s):\n{}", lines.len(), lines.join("\n"))
+            };
+            return Ok(text_tool_result(&body));
+        }
+
         // ── memory_pull: on-demand context retrieval mid-task (Phase 5b) ─────
         "memory_pull" => {
             let query = required_string(&arguments, "query")
@@ -739,12 +939,93 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
     Ok(text_tool_result_pretty(&result))
 }
 
+/// Resolve a path for read access. Allowed roots: products, workspaces,
+/// artifacts, memory, specs, logs, the-soul-of-ai, factory/context.
+fn resolve_allowed_read_path(
+    paths: &crate::config::Paths,
+    requested: &str,
+) -> std::result::Result<std::path::PathBuf, (i64, String)> {
+    let candidate = if std::path::Path::new(requested).is_absolute() {
+        std::path::PathBuf::from(requested)
+    } else {
+        paths.root.join(requested)
+    };
+    let canonical = candidate.canonicalize().unwrap_or(candidate.clone());
+
+    let allowed: Vec<std::path::PathBuf> = vec![
+        paths.products.clone(),
+        paths.workspaces.clone(),
+        paths.artifacts.clone(),
+        paths.memory.clone(),
+        paths.specs.clone(),
+        paths.logs.clone(),
+        paths.root.join("factory/context"),
+        paths.root.join("the-soul-of-ai"),
+        paths.root.join("factory/calvin_archive"),
+        paths.root.join("ROADMAP.md"),
+        paths.root.join("MASTER_SPEC.md"),
+        paths.root.join("AGENTS.md"),
+        paths.root.join("CLAUDE.md"),
+    ];
+
+    let ok = allowed.iter().any(|root| {
+        root.canonicalize()
+            .map(|r| canonical.starts_with(&r) || canonical == r)
+            .unwrap_or_else(|_| canonical.starts_with(root))
+    });
+
+    if ok {
+        Ok(canonical)
+    } else {
+        Err((
+            -32602,
+            format!("read_file path '{requested}' is outside allowed directories"),
+        ))
+    }
+}
+
+/// Resolve a path for write access. Allowed roots: workspaces, artifacts only.
+fn resolve_allowed_write_path(
+    paths: &crate::config::Paths,
+    requested: &str,
+) -> std::result::Result<std::path::PathBuf, (i64, String)> {
+    let candidate = if std::path::Path::new(requested).is_absolute() {
+        std::path::PathBuf::from(requested)
+    } else {
+        paths.root.join(requested)
+    };
+
+    let allowed: Vec<&std::path::PathBuf> = vec![&paths.workspaces, &paths.artifacts];
+    let ok = allowed.iter().any(|root| {
+        let norm_root = root.to_string_lossy();
+        let norm_cand = candidate.to_string_lossy();
+        norm_cand.starts_with(norm_root.as_ref())
+    });
+
+    if ok {
+        Ok(candidate)
+    } else {
+        Err((
+            -32602,
+            format!(
+                "write_file path '{requested}' is outside allowed write directories \
+             (factory/workspaces, factory/artifacts)"
+            ),
+        ))
+    }
+}
+
 /// Returns tag strings that should be filtered out for a given scope name.
 /// Mirrors the BriefingScope isolation rules without requiring the full enum.
 fn scope_disallowed_tags(scope: &str) -> Vec<&'static str> {
     match scope {
         "sable" | "sable_preflight" | "scenario" => {
-            vec!["implementation_notes", "mason_plan", "edit_rationale", "fix_patterns"]
+            vec![
+                "implementation_notes",
+                "mason_plan",
+                "edit_rationale",
+                "fix_patterns",
+            ]
         }
         "mason" | "mason_preflight" => vec!["scenario_patterns", "hidden_scenario"],
         _ => vec![],
@@ -890,10 +1171,7 @@ async fn read_resource(
     }))
 }
 
-async fn get_prompt(
-    state: &McpState,
-    params: &Value,
-) -> std::result::Result<Value, (i64, String)> {
+async fn get_prompt(state: &McpState, params: &Value) -> std::result::Result<Value, (i64, String)> {
     let name = required_string(params, "name")?;
     let arguments = params
         .get("arguments")
@@ -936,7 +1214,8 @@ async fn get_prompt(
                 .map(String::from)
                 .collect();
 
-            build_coobie_briefing_prompt(state, run_id.as_deref(), &phase, &query_terms, max_tokens).await
+            build_coobie_briefing_prompt(state, run_id.as_deref(), &phase, &query_terms, max_tokens)
+                .await
         }
 
         // sable/eval-setup: run artifacts + scenario patterns, no mason content.
@@ -1052,10 +1331,14 @@ async fn build_coobie_briefing_prompt(
         for row in &cause_rows {
             use sqlx::Row as _;
             let cause_id: String = row.try_get("cause_id").unwrap_or_default();
-            let desc: String = row.try_get("description").unwrap_or_else(|_| cause_id.clone());
+            let desc: String = row
+                .try_get("description")
+                .unwrap_or_else(|_| cause_id.clone());
             let occ: i64 = row.try_get("occurrences").unwrap_or(0);
             let pct: f64 = row.try_get::<f64, _>("pass_rate").unwrap_or(1.0) * 100.0;
-            sections.push(format!("- **{desc}** ({occ} occurrences, {pct:.0}% pass rate)"));
+            sections.push(format!(
+                "- **{desc}** ({occ} occurrences, {pct:.0}% pass rate)"
+            ));
         }
     }
 
@@ -1098,7 +1381,10 @@ async fn build_sable_eval_prompt(state: &McpState, run_id: &str) -> String {
 
     // Pull scenario-pattern memory (no implementation content).
     if let Some(ob) = state.app.open_brain.as_ref() {
-        if let Ok(hits) = ob.search_thoughts("scenario failure acceptance criteria").await {
+        if let Ok(hits) = ob
+            .search_thoughts("scenario failure acceptance criteria")
+            .await
+        {
             if !hits.is_empty() {
                 lines.push("## Prior scenario patterns".into());
                 for hit in hits.iter().take(4) {
@@ -1124,7 +1410,11 @@ async fn build_scout_preflight_prompt(
 ) -> String {
     let mut lines = vec![format!(
         "# Scout Preflight Package{}{}",
-        if spec_id.is_empty() { String::new() } else { format!(" — spec: {spec_id}") },
+        if spec_id.is_empty() {
+            String::new()
+        } else {
+            format!(" — spec: {spec_id}")
+        },
         run_id.map(|id| format!(" | run: {id}")).unwrap_or_default(),
     )];
 
@@ -1561,6 +1851,85 @@ fn tool_descriptors() -> Vec<Value> {
                         "enum": ["summary", "full"]
                     }
                 }
+            }
+        }),
+        // ── Consolidated native tools (replaces filesystem / memory / sqlite npx servers) ──
+        json!({
+            "name": "read_file",
+            "description": "Read a file from factory workspaces, artifacts, memory, specs, or logs.",
+            "inputSchema": {
+                "type": "object", "required": ["path"],
+                "properties": { "path": { "type": "string", "description": "Relative or absolute path" } }
+            }
+        }),
+        json!({
+            "name": "list_directory",
+            "description": "List files in a factory directory (workspaces, artifacts, memory, specs, logs).",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "path": { "type": "string", "description": "Directory path (default: .)" } }
+            }
+        }),
+        json!({
+            "name": "write_file",
+            "description": "Write content to a file inside factory/workspaces or factory/artifacts only.",
+            "inputSchema": {
+                "type": "object", "required": ["path", "content"],
+                "properties": {
+                    "path": { "type": "string" },
+                    "content": { "type": "string" }
+                }
+            }
+        }),
+        json!({
+            "name": "create_directory",
+            "description": "Create a directory inside factory/workspaces or factory/artifacts.",
+            "inputSchema": {
+                "type": "object", "required": ["path"],
+                "properties": { "path": { "type": "string" } }
+            }
+        }),
+        json!({
+            "name": "memory_store",
+            "description": "Store a new entry in Harkonnen memory (file store + OB1 capture). Use for lessons, patterns, operator facts.",
+            "inputSchema": {
+                "type": "object", "required": ["content"],
+                "properties": {
+                    "content": { "type": "string", "description": "The memory content to store" },
+                    "tags": { "type": "array", "items": { "type": "string" }, "description": "Optional classification tags" }
+                }
+            }
+        }),
+        json!({
+            "name": "memory_retrieve",
+            "description": "Retrieve memory hits from file store + OB1 for a query. Returns ranked results.",
+            "inputSchema": {
+                "type": "object", "required": ["query"],
+                "properties": {
+                    "query": { "type": "string" },
+                    "limit": { "type": "integer", "default": 8, "minimum": 1, "maximum": 20 }
+                }
+            }
+        }),
+        json!({
+            "name": "memory_list",
+            "description": "List recent memory entries in the file store.",
+            "inputSchema": {
+                "type": "object",
+                "properties": { "limit": { "type": "integer", "default": 20, "minimum": 1, "maximum": 100 } }
+            }
+        }),
+        json!({
+            "name": "db_list_tables",
+            "description": "List tables in the Harkonnen SQLite state database.",
+            "inputSchema": { "type": "object", "properties": {} }
+        }),
+        json!({
+            "name": "db_query",
+            "description": "Execute a read-only SELECT query against the Harkonnen SQLite state database.",
+            "inputSchema": {
+                "type": "object", "required": ["sql"],
+                "properties": { "sql": { "type": "string", "description": "A SELECT or WITH query" } }
             }
         }),
         json!({

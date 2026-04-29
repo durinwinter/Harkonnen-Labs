@@ -1479,7 +1479,10 @@ mod prediction {
         assert_eq!(r.status().as_u16(), 201, "prediction POST must return 201");
 
         let calls = log.lock().unwrap();
-        let pred_call = calls.iter().find(|c| c.get("predicted_outcome").is_some()).unwrap();
+        let pred_call = calls
+            .iter()
+            .find(|c| c.get("predicted_outcome").is_some())
+            .unwrap();
         assert_eq!(pred_call["predicted_outcome"], "uncertain");
         assert_eq!(pred_call["risk_score"], 0.45);
         assert!(pred_call["prediction_id"].as_str().is_some());
@@ -1515,11 +1518,20 @@ mod prediction {
                 "prediction_error": 0.0,
                 "narrative_summary": "Run completed. Prediction was 'pass'. Error: 0.00."
             }))
-            .send().await.unwrap();
-        assert_eq!(r.status().as_u16(), 201, "prediction result POST must return 201");
+            .send()
+            .await
+            .unwrap();
+        assert_eq!(
+            r.status().as_u16(),
+            201,
+            "prediction result POST must return 201"
+        );
 
         let calls = log.lock().unwrap();
-        let result_call = calls.iter().find(|c| c.get("prediction_error").is_some()).unwrap();
+        let result_call = calls
+            .iter()
+            .find(|c| c.get("prediction_error").is_some())
+            .unwrap();
         assert_eq!(result_call["prediction_error"], 0.0);
         assert_eq!(result_call["actual_outcome"], "completed");
     }
@@ -1542,11 +1554,22 @@ mod prediction {
             .json(&json!({"prediction_id": prediction_id, "result_id": uuid::Uuid::new_v4().to_string(), "actual_outcome": "failed", "actual_failure_phase": "mason", "actual_failure_kind": "compile_error", "prediction_error": 1.0, "narrative_summary": "Run failed. Prediction was 'pass'. Error: 1.00."}))
             .send().await.unwrap();
 
-        client.patch(format!("{url}/runs/{run_id}/close")).json(&json!({"outcome": "failed"})).send().await.unwrap();
+        client
+            .patch(format!("{url}/runs/{run_id}/close"))
+            .json(&json!({"outcome": "failed"}))
+            .send()
+            .await
+            .unwrap();
 
         let calls = log.lock().unwrap();
-        let result_call = calls.iter().find(|c| c.get("prediction_error").is_some()).unwrap();
-        assert_eq!(result_call["prediction_error"], 1.0, "missed failure must produce maximum prediction error");
+        let result_call = calls
+            .iter()
+            .find(|c| c.get("prediction_error").is_some())
+            .unwrap();
+        assert_eq!(
+            result_call["prediction_error"], 1.0,
+            "missed failure must produce maximum prediction error"
+        );
         assert_eq!(result_call["actual_failure_phase"], "mason");
     }
 
@@ -1577,19 +1600,36 @@ mod prediction {
             .send().await.unwrap();
 
         // 5. Close run.
-        client.patch(format!("{url}/runs/{run_id}/close")).json(&json!({"outcome": "completed_with_issues"})).send().await.unwrap();
+        client
+            .patch(format!("{url}/runs/{run_id}/close"))
+            .json(&json!({"outcome": "completed_with_issues"}))
+            .send()
+            .await
+            .unwrap();
 
         let calls = log.lock().unwrap();
         let pred_call = calls.iter().find(|c| c.get("predicted_outcome").is_some());
         let result_call = calls.iter().find(|c| c.get("prediction_error").is_some());
         let exp_call = calls.iter().find(|c| c.get("chamber").is_some());
 
-        assert!(pred_call.is_some(), "prediction must be written to Calvin before the run");
-        assert!(result_call.is_some(), "prediction result must be written to Calvin after the run");
-        assert!(exp_call.is_some(), "experience must be written to Calvin during the run");
+        assert!(
+            pred_call.is_some(),
+            "prediction must be written to Calvin before the run"
+        );
+        assert!(
+            result_call.is_some(),
+            "prediction result must be written to Calvin after the run"
+        );
+        assert!(
+            exp_call.is_some(),
+            "experience must be written to Calvin during the run"
+        );
 
         let result = result_call.unwrap();
         assert_eq!(result["prediction_error"], error_score);
-        assert_eq!(result["actual_failure_phase"], "validation", "prediction phase must match actual for causal attribution");
+        assert_eq!(
+            result["actual_failure_phase"], "validation",
+            "prediction phase must match actual for causal attribution"
+        );
     }
 }

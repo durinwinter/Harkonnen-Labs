@@ -479,9 +479,21 @@ impl ArchiveStore {
         let mut rows = answer.into_rows();
         if let Some(row_result) = rows.next().await {
             let row = row_result?;
-            let pid = row.get("pid").ok().flatten().and_then(|c| c.try_get_string().map(|s| s.to_string()));
-            let po = row.get("po").ok().flatten().and_then(|c| c.try_get_string().map(|s| s.to_string()));
-            let rs = row.get("rs").ok().flatten().and_then(|c| c.try_get_double());
+            let pid = row
+                .get("pid")
+                .ok()
+                .flatten()
+                .and_then(|c| c.try_get_string().map(|s| s.to_string()));
+            let po = row
+                .get("po")
+                .ok()
+                .flatten()
+                .and_then(|c| c.try_get_string().map(|s| s.to_string()));
+            let rs = row
+                .get("rs")
+                .ok()
+                .flatten()
+                .and_then(|c| c.try_get_double());
             let conf = row.get("c").ok().flatten().and_then(|c| c.try_get_double());
             return Ok(Some(serde_json::json!({
                 "prediction_id": pid,

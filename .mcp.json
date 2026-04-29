@@ -1,46 +1,13 @@
 {
   "mcpServers": {
-    "memory": {
-      "command": "flatpak-spawn",
-      "args": [
-        "--host",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-memory"
-      ]
-    },
-    "filesystem": {
-      "command": "flatpak-spawn",
-      "args": [
-        "--host",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-filesystem",
-        "./products",
-        "./factory/workspaces",
-        "./factory/artifacts",
-        "./factory/memory"
-      ]
-    },
-    "sqlite": {
-      "command": "flatpak-spawn",
-      "args": [
-        "--host",
-        "npx",
-        "-y",
-        "@modelcontextprotocol/server-sqlite",
-        "./factory/state.db"
-      ]
-    },
     "harkonnen": {
       "command": "sh",
       "args": [
         "-lc",
-        "cd \"/media/earthling/Caleb's Files2/Harkonnen-Labs\" && exec target/debug/harkonnen-labs mcp serve --transport stdio"
+        "cd \"/media/earthling/Caleb's Files3/Labrador-Subsystem/Harkonnen-Labs\" && exec cargo run --bin harkonnen-labs --quiet -- mcp serve --transport stdio 2>/tmp/harkonnen-mcp.log"
       ],
       "env": {
-        "HARKONNEN_SETUP": "lm-studio-local",
-        "LM_STUDIO_API_KEY": "lm-studio"
+        "RUST_LOG": "warn"
       }
     }
   }

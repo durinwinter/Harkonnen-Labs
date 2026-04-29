@@ -25,8 +25,14 @@ pub(crate) fn router(state: Arc<CalvinState>) -> Router {
         .route("/runs/:run_id/beliefs", post(revise_belief))
         .route("/runs/:run_id/close", patch(close_run))
         .route("/runs/:run_id/causal-links", post(record_causal_link))
-        .route("/runs/:run_id/predictions", post(post_prediction).get(get_prediction))
-        .route("/runs/:run_id/prediction-result", post(post_prediction_result))
+        .route(
+            "/runs/:run_id/predictions",
+            post(post_prediction).get(get_prediction),
+        )
+        .route(
+            "/runs/:run_id/prediction-result",
+            post(post_prediction_result),
+        )
         .route("/agents/:name/traits", get(get_traits))
         .route("/agents/:name/beliefs", get(get_beliefs))
         .route("/agents/:name/check", post(check_adaptation))

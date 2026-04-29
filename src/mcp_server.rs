@@ -229,7 +229,7 @@ async fn handle_rpc(
         "resources/list" => json!({ "resources": resource_descriptors() }),
         "prompts/list" => json!({ "prompts": prompt_descriptors() }),
         "resources/read" => read_resource(state, &envelope.params).await?,
-        "prompts/get" => get_prompt(&envelope.params)?,
+        "prompts/get" => get_prompt(state, &envelope.params).await?,
         "tools/call" => call_tool(state, &envelope.params).await?,
         _ => return Err((-32601, format!("method not found: {method}"))),
     };
@@ -657,10 +657,98 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
             };
             return Ok(text_tool_result(&rendered));
         }
+        // ── memory_pull: on-demand context retrieval mid-task (Phase 5b) ─────
+        "memory_pull" => {
+            let query = required_string(&arguments, "query")
+                .map_err(|_| (-32602, "memory_pull requires query".to_string()))?;
+            let scope = optional_string(&arguments, "scope").unwrap_or_else(|| "general".into());
+            let max_tokens = arguments
+                .get("max_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(500) as usize;
+
+            let mut hits: Vec<String> = Vec::new();
+
+            // File-backed memory search.
+            if let Ok(h) = state.app.memory_store.retrieve_context(&query).await {
+                hits.extend(h);
+            }
+
+            // OB1 semantic search.
+            if let Some(ob) = state.app.open_brain.as_ref() {
+                if let Ok(ob_hits) = ob.search_thoughts(&query).await {
+                    for hit in ob_hits {
+                        if !hits.contains(&hit) {
+                            hits.push(hit);
+                        }
+                    }
+                }
+            }
+
+            // Scope filtering: drop hits tagged with disallowed categories.
+            let disallowed = scope_disallowed_tags(&scope);
+            hits.retain(|h| {
+                let lower = h.to_lowercase();
+                !disallowed.iter().any(|tag| lower.contains(tag))
+            });
+
+            // Budget enforcement (~4 chars per token).
+            let char_budget = max_tokens * 4;
+            let mut total = 0usize;
+            let mut output_lines: Vec<String> = Vec::new();
+            for hit in &hits {
+                if total + hit.len() > char_budget {
+                    break;
+                }
+                total += hit.len();
+                output_lines.push(hit.trim().to_string());
+            }
+
+            let hits_returned = output_lines.len() as u32;
+            let tokens_approx = (total / 4) as u32;
+
+            // Log the pull call for context utilization tracking.
+            tracing::info!(
+                query = %query,
+                scope = %scope,
+                hits_returned = hits_returned,
+                tokens = tokens_approx,
+                "memory_pull"
+            );
+
+            let body = if output_lines.is_empty() {
+                format!("No memory found for query: \"{query}\" (scope: {scope})")
+            } else {
+                format!(
+                    "# Memory pull — query: \"{query}\" | scope: {scope} | {hits_returned} hit(s)\n\n{}",
+                    output_lines
+                        .iter()
+                        .enumerate()
+                        .map(|(i, h)| format!("{}. {h}", i + 1))
+                        .collect::<Vec<_>>()
+                        .join("\n")
+                )
+            };
+
+            return Ok(text_tool_result(&body));
+        }
+
         _ => return Err((-32601, format!("unknown tool: {name}"))),
     };
 
     Ok(text_tool_result_pretty(&result))
+}
+
+/// Returns tag strings that should be filtered out for a given scope name.
+/// Mirrors the BriefingScope isolation rules without requiring the full enum.
+fn scope_disallowed_tags(scope: &str) -> Vec<&'static str> {
+    match scope {
+        "sable" | "sable_preflight" | "scenario" => {
+            vec!["implementation_notes", "mason_plan", "edit_rationale", "fix_patterns"]
+        }
+        "mason" | "mason_preflight" => vec!["scenario_patterns", "hidden_scenario"],
+        _ => vec![],
+    }
 }
 
 async fn read_resource(
@@ -802,40 +890,343 @@ async fn read_resource(
     }))
 }
 
-fn get_prompt(params: &Value) -> std::result::Result<Value, (i64, String)> {
+async fn get_prompt(
+    state: &McpState,
+    params: &Value,
+) -> std::result::Result<Value, (i64, String)> {
     let name = required_string(params, "name")?;
     let arguments = params
         .get("arguments")
         .cloned()
         .unwrap_or_else(|| json!({}));
+
     let text = match name.as_str() {
+        // ── Static templates (kept for backwards compatibility) ───────────────
         "briefing_for_spec" => {
             let spec_id = required_string(&arguments, "spec_id")?;
             format!(
-                "Build a concise Harkonnen briefing for spec `{spec_id}`. Include likely risks, guardrails, and the next recommended operator action."
+                "Build a concise Harkonnen briefing for spec `{spec_id}`. \
+                 Include likely risks, guardrails, and the next recommended operator action."
             )
         }
         "diagnose_run" => {
             let run_id = required_string(&arguments, "run_id")?;
             format!(
-                "Diagnose Harkonnen run `{run_id}`. Summarize status, likely failure causes, operator-visible risks, and the most useful next debugging step."
+                "Diagnose Harkonnen run `{run_id}`. Summarize status, likely failure causes, \
+                 operator-visible risks, and the most useful next debugging step."
             )
         }
+
+        // ── Live-hydrated prompts (Phase 5b) ─────────────────────────────────
+
+        // coobie/briefing: pulls live memory context for given keywords and
+        // formats it as a Coobie preflight briefing the agent can act on.
+        "coobie/briefing" => {
+            let run_id = optional_string(&arguments, "run_id");
+            let phase = optional_string(&arguments, "phase").unwrap_or_else(|| "preflight".into());
+            let keywords_raw = optional_string(&arguments, "keywords").unwrap_or_default();
+            let max_tokens = arguments
+                .get("max_tokens")
+                .and_then(Value::as_u64)
+                .unwrap_or(500) as usize;
+            let query_terms: Vec<String> = keywords_raw
+                .split(',')
+                .map(str::trim)
+                .filter(|t| !t.is_empty())
+                .map(String::from)
+                .collect();
+
+            build_coobie_briefing_prompt(state, run_id.as_deref(), &phase, &query_terms, max_tokens).await
+        }
+
+        // sable/eval-setup: run artifacts + scenario patterns, no mason content.
+        "sable/eval-setup" => {
+            let run_id = required_string(&arguments, "run_id")
+                .map_err(|_| (-32602, "sable/eval-setup requires run_id".to_string()))?;
+            build_sable_eval_prompt(state, &run_id).await
+        }
+
+        // scout/preflight: spec-scoped intent package + prior ambiguity patterns.
+        "scout/preflight" => {
+            let spec_id = optional_string(&arguments, "spec_id").unwrap_or_default();
+            let run_id = optional_string(&arguments, "run_id");
+            build_scout_preflight_prompt(state, &spec_id, run_id.as_deref()).await
+        }
+
+        // keeper/policy-check: relevant guardrails + prior decisions for an action.
+        "keeper/policy-check" => {
+            let action = required_string(&arguments, "action")
+                .map_err(|_| (-32602, "keeper/policy-check requires action".to_string()))?;
+            let context = optional_string(&arguments, "context").unwrap_or_default();
+            build_keeper_policy_prompt(state, &action, &context).await
+        }
+
         _ => return Err((-32601, format!("unknown prompt: {name}"))),
     };
 
     Ok(json!({
-        "description": format!("Prompt template `{name}`"),
+        "description": format!("Live-hydrated prompt: {name}"),
         "messages": [
             {
                 "role": "user",
-                "content": {
-                    "type": "text",
-                    "text": text
-                }
+                "content": { "type": "text", "text": text }
             }
         ]
     }))
+}
+
+// ── Live prompt builders ──────────────────────────────────────────────────────
+
+async fn build_coobie_briefing_prompt(
+    state: &McpState,
+    run_id: Option<&str>,
+    phase: &str,
+    query_terms: &[String],
+    max_tokens: usize,
+) -> String {
+    let mut sections: Vec<String> = Vec::new();
+    sections.push(format!(
+        "# Coobie Briefing — phase: {phase}{}\n",
+        run_id.map(|id| format!(" | run: {id}")).unwrap_or_default()
+    ));
+
+    // Pull from file-backed memory.
+    let mut hits: Vec<String> = Vec::new();
+    for term in query_terms.iter().take(8) {
+        if let Ok(h) = state.app.memory_store.retrieve_context(term).await {
+            for hit in h {
+                if !hits.contains(&hit) {
+                    hits.push(hit);
+                }
+            }
+        }
+    }
+
+    // Pull from OB1.
+    if !query_terms.is_empty() {
+        if let Some(ob) = state.app.open_brain.as_ref() {
+            let q = query_terms.join(" ");
+            if let Ok(ob_hits) = ob.search_thoughts(&q).await {
+                for hit in ob_hits {
+                    if !hits.contains(&hit) {
+                        hits.push(hit);
+                    }
+                }
+            }
+        }
+    }
+
+    // Budget enforcement (approximate: 1 token ≈ 4 chars).
+    let char_budget = max_tokens * 4;
+    let mut total_chars = 0usize;
+    let mut budgeted_hits: Vec<&str> = Vec::new();
+    for hit in &hits {
+        if total_chars + hit.len() > char_budget {
+            break;
+        }
+        total_chars += hit.len();
+        budgeted_hits.push(hit);
+    }
+
+    if budgeted_hits.is_empty() {
+        sections.push("**Memory:** No relevant context found for the given keywords.".into());
+    } else {
+        sections.push("## What the factory knows".into());
+        for (i, hit) in budgeted_hits.iter().enumerate() {
+            sections.push(format!("{}. {}", i + 1, hit.trim()));
+        }
+    }
+
+    // Pull top prior causes for causal guardrails.
+    let cause_rows = sqlx::query(
+        "SELECT cause_id, description, COUNT(*) as occurrences, \
+         AVG(CASE WHEN scenario_passed = 1 THEN 1.0 ELSE 0.0 END) as pass_rate \
+         FROM causal_hypotheses \
+         GROUP BY cause_id, description ORDER BY occurrences DESC LIMIT 5",
+    )
+    .fetch_all(&state.app.pool)
+    .await
+    .unwrap_or_default();
+    if !cause_rows.is_empty() {
+        sections.push("\n## Causal guardrails".into());
+        for row in &cause_rows {
+            use sqlx::Row as _;
+            let cause_id: String = row.try_get("cause_id").unwrap_or_default();
+            let desc: String = row.try_get("description").unwrap_or_else(|_| cause_id.clone());
+            let occ: i64 = row.try_get("occurrences").unwrap_or(0);
+            let pct: f64 = row.try_get::<f64, _>("pass_rate").unwrap_or(1.0) * 100.0;
+            sections.push(format!("- **{desc}** ({occ} occurrences, {pct:.0}% pass rate)"));
+        }
+    }
+
+    sections.push(format!(
+        "\n*Briefing built from {} memory hits (budget: {} tokens). \
+         Apply guidance concretely — turn it into guardrails and explicit checks, not paraphrase.*",
+        budgeted_hits.len(),
+        max_tokens,
+    ));
+    sections.join("\n")
+}
+
+async fn build_sable_eval_prompt(state: &McpState, run_id: &str) -> String {
+    let mut lines = vec![
+        format!("# Sable Evaluation Setup — run: {run_id}"),
+        String::new(),
+        "## Isolation firewall".into(),
+        "You are Sable. Do NOT use content tagged: \
+         implementation_notes, mason_plan, edit_rationale, fix_patterns."
+            .into(),
+        String::new(),
+    ];
+
+    // List run artifacts.
+    let run_dir = state.app.paths.workspaces.join(run_id).join("product");
+    if let Ok(entries) = std::fs::read_dir(&run_dir) {
+        let artifacts: Vec<String> = entries
+            .filter_map(|e| e.ok())
+            .filter(|e| e.path().is_file())
+            .filter_map(|e| e.file_name().into_string().ok())
+            .collect();
+        if !artifacts.is_empty() {
+            lines.push("## Available artifacts".into());
+            for a in &artifacts {
+                lines.push(format!("- {a}"));
+            }
+            lines.push(String::new());
+        }
+    }
+
+    // Pull scenario-pattern memory (no implementation content).
+    if let Some(ob) = state.app.open_brain.as_ref() {
+        if let Ok(hits) = ob.search_thoughts("scenario failure acceptance criteria").await {
+            if !hits.is_empty() {
+                lines.push("## Prior scenario patterns".into());
+                for hit in hits.iter().take(4) {
+                    lines.push(format!("- {}", hit.trim()));
+                }
+                lines.push(String::new());
+            }
+        }
+    }
+
+    lines.push(
+        "Generate 2-4 hidden scenarios that verify the spec's acceptance criteria \
+         were genuinely met — not just that the pipeline ran."
+            .into(),
+    );
+    lines.join("\n")
+}
+
+async fn build_scout_preflight_prompt(
+    state: &McpState,
+    spec_id: &str,
+    run_id: Option<&str>,
+) -> String {
+    let mut lines = vec![format!(
+        "# Scout Preflight Package{}{}",
+        if spec_id.is_empty() { String::new() } else { format!(" — spec: {spec_id}") },
+        run_id.map(|id| format!(" | run: {id}")).unwrap_or_default(),
+    )];
+
+    // Query for spec-history and prior ambiguity patterns.
+    let query = if spec_id.is_empty() {
+        "spec ambiguity prior failure scout".to_string()
+    } else {
+        format!("{spec_id} spec ambiguity prior failure")
+    };
+
+    let mut hits: Vec<String> = Vec::new();
+    if let Ok(h) = state.app.memory_store.retrieve_context(&query).await {
+        hits.extend(h);
+    }
+    if let Some(ob) = state.app.open_brain.as_ref() {
+        if let Ok(ob_hits) = ob.search_thoughts(&query).await {
+            for hit in ob_hits {
+                if !hits.contains(&hit) {
+                    hits.push(hit);
+                }
+            }
+        }
+    }
+
+    if !hits.is_empty() {
+        lines.push(String::new());
+        lines.push("## Relevant prior context".into());
+        for hit in hits.iter().take(6) {
+            lines.push(format!("- {}", hit.trim()));
+        }
+    }
+
+    // Pull operator model commissioning brief if available.
+    let brief_path = state
+        .app
+        .paths
+        .root
+        .join(".harkonnen/operator-model/commissioning-brief.json");
+    if let Ok(raw) = std::fs::read_to_string(&brief_path) {
+        if let Ok(brief) = serde_json::from_str::<serde_json::Value>(&raw) {
+            if let Some(patterns) = brief.get("top_patterns").and_then(|p| p.as_array()) {
+                lines.push(String::new());
+                lines.push("## Operator model patterns".into());
+                for p in patterns.iter().take(3) {
+                    if let Some(s) = p.as_str() {
+                        lines.push(format!("- {s}"));
+                    }
+                }
+            }
+        }
+    }
+
+    lines.push(String::new());
+    lines.push(
+        "Parse the spec, flag ambiguities, and produce a structured intent package. \
+         Do not write implementation code."
+            .into(),
+    );
+    lines.join("\n")
+}
+
+async fn build_keeper_policy_prompt(state: &McpState, action: &str, context: &str) -> String {
+    let mut lines = vec![
+        format!("# Keeper Policy Check — action: {action}"),
+        String::new(),
+        format!("**Proposed action:** {action}"),
+    ];
+    if !context.is_empty() {
+        lines.push(format!("\n**Context:** {context}"));
+    }
+
+    // Pull relevant guardrails from memory.
+    let query = format!("policy boundary guardrail {action}");
+    let mut hits: Vec<String> = Vec::new();
+    if let Ok(h) = state.app.memory_store.retrieve_context(&query).await {
+        hits.extend(h);
+    }
+    if let Some(ob) = state.app.open_brain.as_ref() {
+        if let Ok(ob_hits) = ob.search_thoughts(&query).await {
+            for hit in ob_hits {
+                if !hits.contains(&hit) {
+                    hits.push(hit);
+                }
+            }
+        }
+    }
+
+    if !hits.is_empty() {
+        lines.push(String::new());
+        lines.push("## Relevant policy context".into());
+        for hit in hits.iter().take(4) {
+            lines.push(format!("- {}", hit.trim()));
+        }
+    }
+
+    lines.push(String::new());
+    lines.push(
+        "Issue a clear policy decision: in-bounds, out-of-bounds, or conditional with \
+         stated requirements. Update the claim record if coordination is needed."
+            .into(),
+    );
+    lines.join("\n")
 }
 
 fn required_string(params: &Value, key: &str) -> std::result::Result<String, (i64, String)> {
@@ -1173,6 +1564,29 @@ fn tool_descriptors() -> Vec<Value> {
             }
         }),
         json!({
+            "name": "memory_pull",
+            "description": "On-demand context retrieval mid-task. Searches file-backed memory and OB1 for the query, applies scope isolation, and returns the top hits within the token budget.",
+            "inputSchema": {
+                "type": "object",
+                "required": ["query"],
+                "properties": {
+                    "query": { "type": "string", "description": "The retrieval query" },
+                    "scope": {
+                        "type": "string",
+                        "description": "Isolation scope: general | sable | mason | scout | keeper",
+                        "default": "general"
+                    },
+                    "max_tokens": {
+                        "type": "integer",
+                        "description": "Token budget for returned hits",
+                        "default": 500,
+                        "minimum": 50,
+                        "maximum": 4000
+                    }
+                }
+            }
+        }),
+        json!({
             "name": "start_run",
             "description": "Start a new Harkonnen run from a spec path and product target.",
             "inputSchema": {
@@ -1477,13 +1891,48 @@ fn resource_descriptors() -> Vec<Value> {
 
 fn prompt_descriptors() -> Vec<Value> {
     vec![
+        // ── Static templates (backwards compat) ──────────────────────────────
         json!({
             "name": "briefing_for_spec",
-            "description": "Prompt template for building a Coobie-style briefing for a spec."
+            "description": "Static prompt template for a Coobie-style briefing."
         }),
         json!({
             "name": "diagnose_run",
-            "description": "Prompt template for diagnosing a completed or failed run."
+            "description": "Static prompt template for diagnosing a completed or failed run."
+        }),
+        // ── Live-hydrated prompts (Phase 5b) ─────────────────────────────────
+        json!({
+            "name": "coobie/briefing",
+            "description": "Live Coobie preflight briefing — pulls real memory hits, OB1 recall, and prior causes for the given keywords and phase.",
+            "arguments": [
+                { "name": "keywords", "description": "Comma-separated search keywords", "required": false },
+                { "name": "phase", "description": "Factory phase (preflight, scout, mason, sable, ...)", "required": false },
+                { "name": "run_id", "description": "Optional run ID for run-scoped context", "required": false },
+                { "name": "max_tokens", "description": "Token budget for memory hits (default: 500)", "required": false }
+            ]
+        }),
+        json!({
+            "name": "sable/eval-setup",
+            "description": "Live Sable evaluation context — run artifacts, scenario patterns, isolation firewall enforced.",
+            "arguments": [
+                { "name": "run_id", "description": "Run ID to evaluate", "required": true }
+            ]
+        }),
+        json!({
+            "name": "scout/preflight",
+            "description": "Live Scout preflight package — spec history, prior ambiguities, operator model posture.",
+            "arguments": [
+                { "name": "spec_id", "description": "Spec identifier", "required": false },
+                { "name": "run_id", "description": "Optional run ID for run-scoped context", "required": false }
+            ]
+        }),
+        json!({
+            "name": "keeper/policy-check",
+            "description": "Live Keeper policy context — relevant guardrails and prior decisions for a proposed action.",
+            "arguments": [
+                { "name": "action", "description": "The action under review", "required": true },
+                { "name": "context", "description": "Additional context for the policy check", "required": false }
+            ]
         }),
     ]
 }

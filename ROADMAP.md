@@ -435,46 +435,32 @@ Add `pdfium-render` to `Cargo.toml` as the rasterization layer (Rust bindings to
 
 No new CLI surface. The `memory ingest` command detects the absence of a text layer, runs the pipeline silently, and writes the extracted text sidecar alongside the imported asset. A `confidence` field in the sidecar records whether extraction came from the text layer, vision API, or Tesseract fallback, so downstream retrieval can weight hits accordingly.
 
-### MCP prompts — live dynamic briefings from `mcp_server.rs`
+### MCP prompts — live dynamic briefings from `mcp_server.rs` — **SHIPPED 2026-04-28**
 
-The MCP protocol's `prompts` primitive lets a server expose named templates that Claude Code renders as slash commands, but unlike the static files in `.claude/skills/`, MCP prompts are **dynamically hydrated** — the server pulls live data before returning the rendered text. This is the right layer for Coobie briefings, Sable isolation context, and Scout preflight packages, because they all require live SQLite and memory state.
+`get_prompt` is now async and state-aware. Four live-hydrated prompts added to `src/mcp_server.rs`:
 
-Add a `prompts` handler to `src/mcp_server.rs` exposing:
-
-| Prompt name | Arguments | What it returns |
+| Prompt | Arguments | What it returns |
 | --- | --- | --- |
-| `coobie/briefing` | `run_id`, `phase`, `keywords`, `max_tokens?` | `BriefingPackage` from `build_targeted_briefing()` — scope + relevance + budget enforced |
-| `sable/eval-setup` | `run_id` | Sable-scoped context: scenario patterns, run artifacts, isolation confirmation — no Mason content |
-| `scout/preflight` | `spec_id`, `run_id` | Scout-scoped intent package: spec history, prior ambiguities, operator model posture |
-| `keeper/policy-check` | `action`, `context` | Policy decision context: relevant guardrails, prior decisions, risk tolerances |
+| `coobie/briefing` | `keywords`, `phase`, `run_id?`, `max_tokens?` | Real memory hits (file store + OB1) + top prior causes from SQLite, budget-capped |
+| `sable/eval-setup` | `run_id` | Run artifacts + OB1 scenario patterns; firewall drops implementation_notes, mason_plan, edit_rationale, fix_patterns |
+| `scout/preflight` | `spec_id?`, `run_id?` | Spec-scoped memory + OB1 recall + operator model commissioning brief patterns |
+| `keeper/policy-check` | `action`, `context?` | Policy-scoped memory + OB1 recall for the proposed action |
 
-Each prompt handler constructs a `ContextTarget` using `phase_defaults(scope)` and calls `build_targeted_briefing()` — same scoping rules, same isolation guarantees, same relevance re-ranking and budget enforcement as the orchestrator path. The `coobie/briefing` prompt accepts an optional `max_tokens` argument to override the default budget when an operator explicitly wants a tighter or looser briefing. The output is returned to Claude Code's context window rather than passed to the orchestrator.
+All prompts: file-backed memory search → OB1 `search_thoughts` → deduplication → scope isolation → token budget (≈4 chars/token). Registered in `prompt_descriptors()` with argument schemas. The two static templates (`briefing_for_spec`, `diagnose_run`) are preserved for backwards compatibility.
 
-The Sable prompt handler enforces the same `SablePreflight` scope filter as the orchestrator path: any retrieved hit tagged `implementation_notes`, `mason_plan`, `edit_rationale`, or `fix_patterns` is dropped before the prompt is returned regardless of relevance score.
+### `memory_pull` — on-demand context retrieval mid-task — **SHIPPED 2026-04-28**
 
-### `memory_pull` — on-demand context retrieval mid-task
-
-Add a `memory_pull` MCP tool to `mcp_server.rs` alongside the existing tools:
+New MCP tool in `src/mcp_server.rs`:
 
 ```text
 tool:    memory_pull
-args:    query (string), scope (BriefingScope variant), max_tokens (u32, default 500)
-returns: top-ranked memory hits relevant to query, within scope, under budget
+args:    query (string, required), scope (string, default "general"), max_tokens (integer, default 500)
+returns: top-ranked memory hits relevant to query, scoped and budget-capped
 ```
 
-This is the pull half of the context model. An agent running inside a Claude Code session that encounters uncertainty mid-task can call `memory_pull` to fetch targeted context without restarting with a new briefing. The orchestrator tracks each pull call in the episode record:
+Searches file-backed memory → OB1 → deduplicates → filters by scope (sable scope drops mason content; mason scope drops scenario content) → truncates to `max_tokens` budget. Each call is logged via `tracing::info!` with query, scope, hits_returned, and token count for context utilization analysis. Registered in `tool_descriptors()` with full JSON Schema.
 
-```rust
-pub struct PullRecord {
-    pub query: String,
-    pub scope: String,
-    pub hits_returned: u32,
-    pub tokens_returned: u32,
-    pub phase: String,
-}
-```
-
-Over runs, the pull log reveals what the pre-run briefing consistently misses — those queries and their associated hit categories become automatic candidates for promotion into `phase_defaults()` for that scope. A `memory_pull` query that fires in the Mason phase three times in a row for the same pattern means the `MasonPreflight` budget or `allow_categories` is under-configured for that spec type.
+Pull records are logged (not yet persisted to SQLite episode store — episode record extension remains in the context utilization tracking item below).
 
 ### Context utilization tracking
 

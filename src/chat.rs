@@ -253,12 +253,59 @@ pub struct MemoryCandidate {
     pub retention_class: String,
     pub sensitivity_label: String,
     pub evidence_refs: Value,
+    pub source_authority: String,
     pub causality_json: Value,
     pub status: String,
     pub openbrain_ref: Option<String>,
     pub calvin_contract_json: Option<Value>,
     pub created_at: chrono::DateTime<Utc>,
     pub processed_at: Option<chrono::DateTime<Utc>>,
+}
+
+pub fn evidence_ref_source_authority(ref_type: &str) -> &'static str {
+    match ref_type {
+        "operator" | "operator_message" | "checkpoint_reply" => "operator",
+        "test_result" | "visible_test" | "hidden_scenario" | "scenario_result" => "test_result",
+        "tool_output" | "command_output" | "build_log" => "tool_output",
+        "code_diff" | "patch" | "file_change" => "code_diff",
+        "openbrain" | "openbrain_thought" | "ob1" => "ob1_recall",
+        "calvin" | "calvin_fact" | "calvin_archive" => "calvin_approved_fact",
+        "packchat_message" | "packchat_event" | "packchat_thread" | "chat_message" => {
+            "packchat_statement"
+        }
+        "agent_observation" | "agent_message" => "agent_observation",
+        _ => "agent_observation",
+    }
+}
+
+pub fn strongest_memory_source_authority(evidence_refs: &Value) -> String {
+    let Some(refs) = evidence_refs.as_array() else {
+        return "agent_observation".to_string();
+    };
+    let mut best = "agent_observation";
+    let mut best_rank = 0;
+    for evidence_ref in refs {
+        let ref_type = evidence_ref
+            .get("ref_type")
+            .and_then(Value::as_str)
+            .unwrap_or_default();
+        let authority = evidence_ref_source_authority(ref_type);
+        let rank = match authority {
+            "calvin_approved_fact" => 80,
+            "operator" => 70,
+            "test_result" => 60,
+            "code_diff" => 50,
+            "tool_output" => 40,
+            "packchat_statement" => 30,
+            "ob1_recall" => 20,
+            _ => 10,
+        };
+        if rank > best_rank {
+            best = authority;
+            best_rank = rank;
+        }
+    }
+    best.to_string()
 }
 
 impl PackChatWireEnvelope {
@@ -1043,6 +1090,105 @@ impl ChatStore {
         .execute(&self.pool)
         .await?;
         Ok(())
+    }
+
+    pub async fn mark_memory_candidate_needs_reconsolidation(
+        &self,
+        target_candidate_id: &str,
+        trigger_candidate: &MemoryCandidate,
+        reason: &str,
+    ) -> Result<bool> {
+        if target_candidate_id == trigger_candidate.candidate_id {
+            return Ok(false);
+        }
+        let existing = sqlx::query(
+            r#"
+            SELECT calvin_contract_json
+            FROM memory_candidates
+            WHERE candidate_id = ?1
+            "#,
+        )
+        .bind(target_candidate_id)
+        .fetch_optional(&self.pool)
+        .await?;
+
+        let Some(row) = existing else {
+            return Ok(false);
+        };
+
+        let mut contract = row
+            .get::<Option<String>, _>("calvin_contract_json")
+            .and_then(|value| serde_json::from_str::<Value>(&value).ok())
+            .unwrap_or_else(|| serde_json::json!({}));
+        if !contract.is_object() {
+            contract = serde_json::json!({});
+        }
+        contract["reconsolidation"] = serde_json::json!({
+            "schema": "harkonnen.memory.reconsolidation.v1",
+            "status": "needs_reconsolidation",
+            "reason": reason,
+            "trigger_candidate_id": trigger_candidate.candidate_id,
+            "trigger_source_event_id": trigger_candidate.source_event_id,
+            "trigger_message_id": trigger_candidate.message_id,
+            "triggered_at": Utc::now().to_rfc3339(),
+        });
+
+        let result = sqlx::query(
+            r#"
+            UPDATE memory_candidates
+            SET status = 'needs_reconsolidation',
+                calvin_contract_json = ?2,
+                processed_at = ?3
+            WHERE candidate_id = ?1
+              AND status IN (
+                  'captured_openbrain',
+                  'promotion_pending',
+                  'duplicate_openbrain',
+                  'ignored_ephemeral'
+              )
+            "#,
+        )
+        .bind(target_candidate_id)
+        .bind(serde_json::to_string(&contract)?)
+        .bind(Utc::now().to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+
+        Ok(result.rows_affected() > 0)
+    }
+
+    pub async fn mark_memory_source_needs_reconsolidation(
+        &self,
+        target_source_event_id: &str,
+        trigger_candidate: &MemoryCandidate,
+        reason: &str,
+    ) -> Result<usize> {
+        let rows = sqlx::query(
+            r#"
+            SELECT candidate_id
+            FROM memory_candidates
+            WHERE source_event_id = ?1
+            "#,
+        )
+        .bind(target_source_event_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut updated = 0;
+        for row in rows {
+            let target_candidate_id: String = row.get("candidate_id");
+            if self
+                .mark_memory_candidate_needs_reconsolidation(
+                    &target_candidate_id,
+                    trigger_candidate,
+                    reason,
+                )
+                .await?
+            {
+                updated += 1;
+            }
+        }
+        Ok(updated)
     }
 
     pub async fn approve_memory_candidate_for_processing(
@@ -2440,6 +2586,11 @@ fn parse_chat_thread(row: sqlx::sqlite::SqliteRow) -> Result<ChatThread> {
 }
 
 fn parse_memory_candidate(row: sqlx::sqlite::SqliteRow) -> Result<MemoryCandidate> {
+    let evidence_refs = row
+        .get::<Option<String>, _>("evidence_refs")
+        .and_then(|value| serde_json::from_str(&value).ok())
+        .unwrap_or_else(|| Value::Array(Vec::new()));
+    let source_authority = strongest_memory_source_authority(&evidence_refs);
     Ok(MemoryCandidate {
         candidate_id: row.get("candidate_id"),
         source_event_id: row.get("source_event_id"),
@@ -2460,10 +2611,8 @@ fn parse_memory_candidate(row: sqlx::sqlite::SqliteRow) -> Result<MemoryCandidat
         importance_score: row.get("importance_score"),
         retention_class: row.get("retention_class"),
         sensitivity_label: row.get("sensitivity_label"),
-        evidence_refs: row
-            .get::<Option<String>, _>("evidence_refs")
-            .and_then(|value| serde_json::from_str(&value).ok())
-            .unwrap_or_else(|| Value::Array(Vec::new())),
+        evidence_refs,
+        source_authority,
         causality_json: row
             .get::<Option<String>, _>("causality_json")
             .and_then(|value| serde_json::from_str(&value).ok())
@@ -3133,6 +3282,28 @@ mod tests {
         assert_eq!(
             ids,
             vec!["candidate-pending", "candidate-retry", "candidate-waiting"]
+        );
+    }
+
+    #[test]
+    fn source_authority_taxonomy_prefers_stronger_evidence() {
+        let evidence_refs = serde_json::json!([
+            {"ref_type": "packchat_message", "id": "msg-1"},
+            {"ref_type": "test_result", "id": "scenario-1"},
+            {"ref_type": "openbrain_thought", "id": "thought-1"}
+        ]);
+
+        assert_eq!(
+            strongest_memory_source_authority(&evidence_refs),
+            "test_result"
+        );
+        assert_eq!(
+            evidence_ref_source_authority("calvin_fact"),
+            "calvin_approved_fact"
+        );
+        assert_eq!(
+            evidence_ref_source_authority("unknown-ref"),
+            "agent_observation"
         );
     }
 

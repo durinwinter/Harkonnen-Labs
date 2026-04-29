@@ -2,7 +2,7 @@ use anyhow::{bail, Context, Result};
 use chrono::Utc;
 use serde::{Deserialize, Serialize};
 use sqlx::{Row, SqlitePool};
-use std::collections::{hash_map::DefaultHasher, BTreeMap, HashMap, HashSet};
+use std::collections::{hash_map::DefaultHasher, BTreeMap, BTreeSet, HashMap, HashSet};
 use std::hash::{Hash, Hasher};
 use std::path::{Component, Path, PathBuf};
 use std::sync::Arc;
@@ -21,17 +21,18 @@ use crate::{
     memory::{MemoryEntry, MemoryIngestOptions, MemoryIngestResult, MemoryProvenance, MemoryStore},
     models::{
         AgentExecution, AgentRuntimeState, BlackboardState, BriefingScope, CausalEventEdge,
-        CausalEventNode, CheckpointAnswerRecord, CommissioningBrief, ConsolidationCandidate,
-        ContextSection, ContextTarget, CoobieBriefing, CoobieEvidenceCitation, EpisodeCausalState,
-        EpisodeRecord, EpisodeStateDiff, EvidenceAnnotation, EvidenceAnnotationBundle,
-        EvidenceAnnotationHistoryEvent, EvidenceMatchAssessment, EvidenceMatchReport,
-        EvidenceSource, EvidenceTimeRange, EvidenceWindowMatch, FailureKind,
-        HiddenScenarioCheckResult, HiddenScenarioEvaluation, HiddenScenarioSummary, IntentPackage,
-        LessonRecord, LiveEvent, OperatorModelContext, PearlHierarchyLevel, PhaseAttributionRecord,
-        PriorCauseSignal, ProjectInterviewContext, ProjectResumeRisk, RunCausalGraph,
-        RunCheckpointRecord, RunEvent, RunRecord, RunTimingReport, ScenarioResult,
-        SoulIdentityContext, Spec, StakeholderAlignmentSummary, TwinEnvironment, TwinFailureMode,
-        TwinService, TwinServiceSpec, ValidationSummary, WorkerHarnessConfig,
+        CausalEventNode, CheckpointAnswerRecord, CodeReviewLearningRecord, CommissioningBrief,
+        ConsolidationCandidate, ContextSection, ContextTarget, CoobieBriefing,
+        CoobieEvidenceCitation, EpisodeCausalState, EpisodeRecord, EpisodeStateDiff,
+        EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent,
+        EvidenceMatchAssessment, EvidenceMatchReport, EvidenceSource, EvidenceTimeRange,
+        EvidenceWindowMatch, FailureKind, HiddenScenarioCheckResult, HiddenScenarioEvaluation,
+        HiddenScenarioSummary, IntentPackage, LessonRecord, LiveEvent, OperatorModelContext,
+        PearlHierarchyLevel, PhaseAttributionRecord, PriorCauseSignal, ProjectInterviewContext,
+        ProjectResumeRisk, RunCausalGraph, RunCheckpointRecord, RunEvent, RunRecord,
+        RunTimingReport, ScenarioResult, SoulIdentityContext, Spec, StakeholderAlignmentSummary,
+        TwinEnvironment, TwinFailureMode, TwinService, TwinServiceSpec, ValidationSummary,
+        WorkerHarnessConfig,
     },
     pidgin, policy, scenarios,
     setup::command_available,
@@ -171,6 +172,7 @@ pub struct MemoryCandidateProcessSummary {
     pub scanned: usize,
     pub captured_openbrain: usize,
     pub calvin_promotions: usize,
+    pub reconsolidations: usize,
     pub held_for_review: usize,
     pub ignored: usize,
     pub duplicates: usize,
@@ -198,6 +200,8 @@ struct ValidationRepairAttemptRecord {
     proposal_summary: String,
     #[serde(default)]
     proposal_rationale: Vec<String>,
+    #[serde(default)]
+    edited_files: Vec<String>,
     edits_applied: usize,
     before_summary: String,
     after_summary: String,
@@ -223,6 +227,30 @@ struct ValidationRepairArtifact {
     generated_at: String,
     #[serde(default)]
     attempts: Vec<ValidationRepairAttemptRecord>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PlanCompletionAuditItem {
+    item_id: String,
+    source: String,
+    requirement: String,
+    status: String,
+    #[serde(default)]
+    evidence_refs: Vec<String>,
+    note: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct PlanCompletionAuditArtifact {
+    run_id: String,
+    spec_id: String,
+    product: String,
+    final_status: String,
+    generated_at: String,
+    summary: String,
+    unresolved_count: usize,
+    #[serde(default)]
+    items: Vec<PlanCompletionAuditItem>,
 }
 
 #[derive(Debug, Clone)]
@@ -1998,6 +2026,17 @@ impl AppContext {
                         &prepared.log_path,
                     )
                     .await?;
+                let audit = build_plan_completion_audit(
+                    run_id,
+                    &prepared.spec_obj,
+                    &prepared.target_source,
+                    final_status,
+                    Some(&output.validation),
+                    Some(&output.hidden_scenarios),
+                    &output.run_dir,
+                );
+                self.write_plan_completion_audit(&output.run_dir, &audit)
+                    .await?;
                 self.try_close_calvin_run(run_id, final_status).await;
                 self.try_record_calvin_prediction_result(run_id, final_status, None)
                     .await;
@@ -2027,6 +2066,28 @@ impl AppContext {
                     .await;
                 self.try_process_memory_candidates_on_close(run_id).await;
                 let run_dir = self.run_dir(run_id);
+                let audit = build_plan_completion_audit(
+                    run_id,
+                    &prepared.spec_obj,
+                    &prepared.target_source,
+                    "failed",
+                    None,
+                    None,
+                    &run_dir,
+                );
+                if let Err(audit_error) = self.write_plan_completion_audit(&run_dir, &audit).await {
+                    let _ = self
+                        .record_event(
+                            run_id,
+                            None,
+                            "complete",
+                            "orchestrator",
+                            "warning",
+                            &format!("Plan completion audit skipped: {audit_error}"),
+                            &prepared.log_path,
+                        )
+                        .await;
+                }
                 self.mark_blackboard_failed(&message, &run_dir).await?;
                 let lessons = match self.consolidate_run(run_id, &prepared.spec_obj).await {
                     Ok(lessons) => lessons,
@@ -9809,7 +9870,128 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
             render_validation_repair_markdown(report),
         )
         .await?;
+        let records = code_review_learning_records_from_validation_repair(report);
+        self.insert_code_review_learning_records(&records).await?;
         Ok(())
+    }
+
+    async fn write_plan_completion_audit(
+        &self,
+        run_dir: &Path,
+        audit: &PlanCompletionAuditArtifact,
+    ) -> Result<()> {
+        tokio::fs::create_dir_all(run_dir)
+            .await
+            .with_context(|| format!("creating run dir {}", run_dir.display()))?;
+        self.write_json_file(&run_dir.join("plan_completion_audit.json"), audit)
+            .await?;
+        tokio::fs::write(
+            run_dir.join("plan_completion_audit.md"),
+            render_plan_completion_audit_markdown(audit),
+        )
+        .await?;
+        let mut board = self.blackboard.write().await;
+        push_unique(&mut board.artifact_refs, "plan_completion_audit.json");
+        push_unique(&mut board.artifact_refs, "plan_completion_audit.md");
+        Ok(())
+    }
+
+    pub async fn load_plan_completion_audit(
+        &self,
+        run_id: &str,
+    ) -> Result<Option<serde_json::Value>> {
+        let path = self.run_dir(run_id).join("plan_completion_audit.json");
+        if !path.exists() {
+            return Ok(None);
+        }
+        let raw = tokio::fs::read_to_string(&path)
+            .await
+            .with_context(|| format!("reading {}", path.display()))?;
+        serde_json::from_str(&raw)
+            .map(Some)
+            .with_context(|| format!("parsing {}", path.display()))
+    }
+
+    pub async fn insert_code_review_learning_records(
+        &self,
+        records: &[CodeReviewLearningRecord],
+    ) -> Result<()> {
+        for record in records {
+            sqlx::query(
+                r#"
+                INSERT OR IGNORE INTO code_review_learning_records (
+                    record_id,
+                    run_id,
+                    source_agent,
+                    reviewer_agent,
+                    finding_fingerprint,
+                    files_json,
+                    severity,
+                    resolution,
+                    lesson,
+                    evidence_refs_json,
+                    stale_if_file_changed_json,
+                    status,
+                    created_at
+                )
+                VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?12, ?13)
+                "#,
+            )
+            .bind(&record.record_id)
+            .bind(&record.run_id)
+            .bind(&record.source_agent)
+            .bind(&record.reviewer_agent)
+            .bind(&record.finding_fingerprint)
+            .bind(serde_json::to_string(&record.files)?)
+            .bind(&record.severity)
+            .bind(&record.resolution)
+            .bind(&record.lesson)
+            .bind(serde_json::to_string(&record.evidence_refs)?)
+            .bind(serde_json::to_string(&record.stale_if_file_changed)?)
+            .bind(&record.status)
+            .bind(&record.created_at)
+            .execute(&self.pool)
+            .await?;
+        }
+        Ok(())
+    }
+
+    pub async fn list_code_review_learning_records(
+        &self,
+        run_id: Option<&str>,
+    ) -> Result<Vec<CodeReviewLearningRecord>> {
+        let rows = if let Some(run_id) = run_id {
+            sqlx::query(
+                r#"
+                SELECT record_id, run_id, source_agent, reviewer_agent, finding_fingerprint,
+                       files_json, severity, resolution, lesson, evidence_refs_json,
+                       stale_if_file_changed_json, status, created_at
+                FROM code_review_learning_records
+                WHERE run_id = ?1
+                ORDER BY created_at DESC
+                "#,
+            )
+            .bind(run_id)
+            .fetch_all(&self.pool)
+            .await?
+        } else {
+            sqlx::query(
+                r#"
+                SELECT record_id, run_id, source_agent, reviewer_agent, finding_fingerprint,
+                       files_json, severity, resolution, lesson, evidence_refs_json,
+                       stale_if_file_changed_json, status, created_at
+                FROM code_review_learning_records
+                ORDER BY created_at DESC
+                LIMIT 200
+                "#,
+            )
+            .fetch_all(&self.pool)
+            .await?
+        };
+
+        rows.into_iter()
+            .map(parse_code_review_learning_record)
+            .collect()
     }
 
     fn agent_prompt_support(
@@ -16082,6 +16264,9 @@ Return JSON only.",
                 .clone()
                 .filter(|key| !key.trim().is_empty())
                 .unwrap_or_else(|| memory_candidate_dedupe_key(&candidate));
+            summary.reconsolidations += self
+                .apply_memory_reconsolidation_triggers(&candidate)
+                .await?;
             if candidate.sensitivity_label != "normal" {
                 self.chat
                     .update_memory_candidate_processing(
@@ -16241,6 +16426,38 @@ Return JSON only.",
         .fetch_optional(&self.pool)
         .await?;
         Ok(row.is_some())
+    }
+
+    async fn apply_memory_reconsolidation_triggers(
+        &self,
+        candidate: &crate::chat::MemoryCandidate,
+    ) -> Result<usize> {
+        let triggers = extract_memory_reconsolidation_triggers(candidate);
+        let mut updated = 0;
+        for candidate_id in triggers.candidate_ids {
+            if self
+                .chat
+                .mark_memory_candidate_needs_reconsolidation(
+                    &candidate_id,
+                    candidate,
+                    &triggers.reason,
+                )
+                .await?
+            {
+                updated += 1;
+            }
+        }
+        for source_event_id in triggers.source_event_ids {
+            updated += self
+                .chat
+                .mark_memory_source_needs_reconsolidation(
+                    &source_event_id,
+                    candidate,
+                    &triggers.reason,
+                )
+                .await?;
+        }
+        Ok(updated)
     }
 
     async fn enqueue_calvin_promotion_candidate(
@@ -24028,11 +24245,16 @@ fn render_validation_repair_markdown(report: &ValidationRepairArtifact) -> Strin
             .iter()
             .map(|attempt| {
                 format!(
-                    "## Iteration {}\n\n- Outcome: {}\n- Passed after: {}\n- Edits applied: {}\n- Failure kind before: {}\n- Failure kind after: {}\n- Proposal summary: {}\n- Guidance: {}\n\n### Before\n{}\n\n### After\n{}\n\n### Before failing checks\n{}\n\n### After failing checks\n{}\n\n### Proposal rationale\n{}",
+                    "## Iteration {}\n\n- Outcome: {}\n- Passed after: {}\n- Edits applied: {}\n- Edited files: {}\n- Failure kind before: {}\n- Failure kind after: {}\n- Proposal summary: {}\n- Guidance: {}\n\n### Before\n{}\n\n### After\n{}\n\n### Before failing checks\n{}\n\n### After failing checks\n{}\n\n### Proposal rationale\n{}",
                     attempt.iteration,
                     attempt.outcome,
                     if attempt.passed_after { "true" } else { "false" },
                     attempt.edits_applied,
+                    if attempt.edited_files.is_empty() {
+                        "<none>".to_string()
+                    } else {
+                        attempt.edited_files.join(", ")
+                    },
                     attempt.failure_kind_before.as_deref().unwrap_or("unknown"),
                     attempt.failure_kind_after.as_deref().unwrap_or("unknown"),
                     attempt.proposal_summary,
@@ -24069,6 +24291,353 @@ fn render_validation_repair_markdown(report: &ValidationRepairArtifact) -> Strin
         report.generated_at,
         attempts,
     )
+}
+
+fn build_plan_completion_audit(
+    run_id: &str,
+    spec_obj: &Spec,
+    target_source: &TargetSourceMetadata,
+    final_status: &str,
+    validation: Option<&ValidationSummary>,
+    hidden_scenarios: Option<&HiddenScenarioSummary>,
+    run_dir: &Path,
+) -> PlanCompletionAuditArtifact {
+    let mut items = Vec::new();
+    items.push(plan_audit_core_item(
+        "core.visible_validation",
+        "evidence",
+        "Visible validation evidence must exist before run close.",
+        validation.is_some_and(|summary| summary.passed),
+        validation.is_some(),
+        run_dir,
+        &["validation.json"],
+    ));
+    items.push(plan_audit_core_item(
+        "core.hidden_scenarios",
+        "evidence",
+        "Hidden scenario evidence must exist before run close.",
+        hidden_scenarios.is_some_and(|summary| summary.passed),
+        hidden_scenarios.is_some(),
+        run_dir,
+        &["hidden_scenarios.json"],
+    ));
+
+    for (index, criterion) in spec_obj.acceptance_criteria.iter().enumerate() {
+        items.push(plan_audit_requirement_item(
+            &format!("spec.acceptance.{}", index + 1),
+            "spec.acceptance_criteria",
+            criterion,
+            final_status,
+            validation,
+            hidden_scenarios,
+            run_dir,
+        ));
+    }
+    for (index, output) in spec_obj.outputs.iter().enumerate() {
+        items.push(plan_audit_requirement_item(
+            &format!("spec.output.{}", index + 1),
+            "spec.outputs",
+            output,
+            final_status,
+            validation,
+            hidden_scenarios,
+            run_dir,
+        ));
+    }
+    if let Some(blueprint) = spec_obj.scenario_blueprint.as_ref() {
+        for (index, artifact) in blueprint.required_artifacts.iter().enumerate() {
+            let exists = run_dir.join(artifact).exists();
+            items.push(PlanCompletionAuditItem {
+                item_id: format!("scenario.required_artifact.{}", index + 1),
+                source: "spec.scenario_blueprint.required_artifacts".to_string(),
+                requirement: artifact.clone(),
+                status: if exists { "fulfilled" } else { "missing" }.to_string(),
+                evidence_refs: if exists {
+                    vec![artifact.clone()]
+                } else {
+                    Vec::new()
+                },
+                note: if exists {
+                    "Required scenario artifact exists.".to_string()
+                } else {
+                    "Required scenario artifact was not found in the run directory.".to_string()
+                },
+            });
+        }
+    }
+
+    let unresolved_count = items
+        .iter()
+        .filter(|item| item.status != "fulfilled")
+        .count();
+    let summary = if unresolved_count == 0 {
+        "All audited plan/spec items have supporting evidence.".to_string()
+    } else {
+        format!(
+            "{unresolved_count} audited item(s) need review before treating the run as complete."
+        )
+    };
+
+    PlanCompletionAuditArtifact {
+        run_id: run_id.to_string(),
+        spec_id: spec_obj.id.clone(),
+        product: target_source.label.clone(),
+        final_status: final_status.to_string(),
+        generated_at: Utc::now().to_rfc3339(),
+        summary,
+        unresolved_count,
+        items,
+    }
+}
+
+fn plan_audit_core_item(
+    item_id: &str,
+    source: &str,
+    requirement: &str,
+    passed: bool,
+    evidence_present: bool,
+    run_dir: &Path,
+    artifact_candidates: &[&str],
+) -> PlanCompletionAuditItem {
+    let evidence_refs = artifact_candidates
+        .iter()
+        .filter(|artifact| run_dir.join(artifact).exists())
+        .map(|artifact| (*artifact).to_string())
+        .collect::<Vec<_>>();
+    let status = if passed {
+        "fulfilled"
+    } else if evidence_present {
+        "partial"
+    } else {
+        "missing"
+    };
+    let note = match status {
+        "fulfilled" => "Evidence exists and the check passed.",
+        "partial" => "Evidence exists but the check did not fully pass.",
+        _ => "No evidence artifact was available for this check.",
+    };
+    PlanCompletionAuditItem {
+        item_id: item_id.to_string(),
+        source: source.to_string(),
+        requirement: requirement.to_string(),
+        status: status.to_string(),
+        evidence_refs,
+        note: note.to_string(),
+    }
+}
+
+fn plan_audit_requirement_item(
+    item_id: &str,
+    source: &str,
+    requirement: &str,
+    final_status: &str,
+    validation: Option<&ValidationSummary>,
+    hidden_scenarios: Option<&HiddenScenarioSummary>,
+    run_dir: &Path,
+) -> PlanCompletionAuditItem {
+    let lower = requirement.to_ascii_lowercase();
+    let wants_validation = lower.contains("test")
+        || lower.contains("build")
+        || lower.contains("compile")
+        || lower.contains("validat");
+    let wants_hidden = lower.contains("scenario")
+        || lower.contains("hidden")
+        || lower.contains("behavior")
+        || lower.contains("behaviour");
+    let validation_ok = validation.is_some_and(|summary| summary.passed);
+    let hidden_ok = hidden_scenarios.is_some_and(|summary| summary.passed);
+    let status = if wants_validation {
+        if validation_ok {
+            "fulfilled"
+        } else if validation.is_some() {
+            "partial"
+        } else {
+            "missing"
+        }
+    } else if wants_hidden {
+        if hidden_ok {
+            "fulfilled"
+        } else if hidden_scenarios.is_some() {
+            "partial"
+        } else {
+            "missing"
+        }
+    } else if final_status == "completed" {
+        "fulfilled"
+    } else if validation.is_some() || hidden_scenarios.is_some() {
+        "partial"
+    } else {
+        "missing"
+    };
+    let mut evidence_refs = Vec::new();
+    for artifact in [
+        "validation.json",
+        "hidden_scenarios.json",
+        "mason_edit_application.json",
+        "causal_report.json",
+        "blackboard.json",
+    ] {
+        if run_dir.join(artifact).exists() {
+            evidence_refs.push(artifact.to_string());
+        }
+    }
+    let note = match status {
+        "fulfilled" => "Requirement has supporting completion evidence.",
+        "partial" => "Requirement has some evidence, but the run did not fully satisfy it.",
+        _ => "Requirement has no supporting evidence in this run.",
+    };
+    PlanCompletionAuditItem {
+        item_id: item_id.to_string(),
+        source: source.to_string(),
+        requirement: requirement.to_string(),
+        status: status.to_string(),
+        evidence_refs,
+        note: note.to_string(),
+    }
+}
+
+fn render_plan_completion_audit_markdown(audit: &PlanCompletionAuditArtifact) -> String {
+    let items = if audit.items.is_empty() {
+        "- No audit items were generated.".to_string()
+    } else {
+        audit
+            .items
+            .iter()
+            .map(|item| {
+                format!(
+                    "- [{}] {} — {} ({})\n  Evidence: {}\n  Note: {}",
+                    item.status,
+                    item.item_id,
+                    item.requirement,
+                    item.source,
+                    render_inline_list(&item.evidence_refs, "none"),
+                    item.note
+                )
+            })
+            .collect::<Vec<_>>()
+            .join("\n")
+    };
+    format!(
+        "# Plan Completion Audit\n\n- Run: {}\n- Spec: {}\n- Product: {}\n- Final status: {}\n- Generated at: {}\n- Unresolved items: {}\n\n{}\n\n## Items\n{}",
+        audit.run_id,
+        audit.spec_id,
+        audit.product,
+        audit.final_status,
+        audit.generated_at,
+        audit.unresolved_count,
+        audit.summary,
+        items,
+    )
+}
+
+fn code_review_learning_records_from_validation_repair(
+    report: &ValidationRepairArtifact,
+) -> Vec<CodeReviewLearningRecord> {
+    report
+        .attempts
+        .iter()
+        .map(|attempt| {
+            let fingerprint = code_review_learning_fingerprint(report, attempt);
+            let severity = match attempt.outcome.as_str() {
+                "regressed" => "high",
+                "stalled" => "medium",
+                "improved" => "medium",
+                _ => "low",
+            };
+            let resolution = match attempt.outcome.as_str() {
+                "resolved" | "improved" => "auto_fixed",
+                _ => "skipped",
+            };
+            let lesson = match attempt.outcome.as_str() {
+                "resolved" => format!(
+                    "Mason repair resolved Bramble validation after iteration {}: {}",
+                    attempt.iteration, attempt.proposal_summary
+                ),
+                "improved" => format!(
+                    "Mason repair improved Bramble validation but left follow-up checks: {}",
+                    render_inline_list(&attempt.after_failing_checks, "none")
+                ),
+                "regressed" => format!(
+                    "Mason repair regressed validation; avoid repeating this edit pattern: {}",
+                    attempt.proposal_summary
+                ),
+                _ => format!(
+                    "Mason repair stalled validation; choose a different implementation strategy than: {}",
+                    attempt.proposal_summary
+                ),
+            };
+            CodeReviewLearningRecord {
+                record_id: format!("review-learning-{}-{}", report.run_id, fingerprint),
+                run_id: report.run_id.clone(),
+                source_agent: "mason".to_string(),
+                reviewer_agent: "bramble".to_string(),
+                finding_fingerprint: fingerprint,
+                files: attempt.edited_files.clone(),
+                severity: severity.to_string(),
+                resolution: resolution.to_string(),
+                lesson,
+                evidence_refs: vec![
+                    "validation_repair_attempts.json".to_string(),
+                    "validation_repair_attempts.md".to_string(),
+                ],
+                stale_if_file_changed: attempt.edited_files.clone(),
+                status: "active".to_string(),
+                created_at: report.generated_at.clone(),
+            }
+        })
+        .collect()
+}
+
+fn code_review_learning_fingerprint(
+    report: &ValidationRepairArtifact,
+    attempt: &ValidationRepairAttemptRecord,
+) -> String {
+    let mut hasher = DefaultHasher::new();
+    report.spec_id.hash(&mut hasher);
+    report.product.hash(&mut hasher);
+    attempt.outcome.hash(&mut hasher);
+    attempt.failure_kind_before.hash(&mut hasher);
+    attempt.failure_kind_after.hash(&mut hasher);
+    attempt.proposal_summary.hash(&mut hasher);
+    attempt.edited_files.hash(&mut hasher);
+    format!("{:016x}", hasher.finish())
+}
+
+fn parse_code_review_learning_record(
+    row: sqlx::sqlite::SqliteRow,
+) -> Result<CodeReviewLearningRecord> {
+    Ok(CodeReviewLearningRecord {
+        record_id: row.get("record_id"),
+        run_id: row.get("run_id"),
+        source_agent: row.get("source_agent"),
+        reviewer_agent: row.get("reviewer_agent"),
+        finding_fingerprint: row.get("finding_fingerprint"),
+        files: row
+            .get::<Option<String>, _>("files_json")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default(),
+        severity: row.get("severity"),
+        resolution: row.get("resolution"),
+        lesson: row.get("lesson"),
+        evidence_refs: row
+            .get::<Option<String>, _>("evidence_refs_json")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default(),
+        stale_if_file_changed: row
+            .get::<Option<String>, _>("stale_if_file_changed_json")
+            .and_then(|value| serde_json::from_str(&value).ok())
+            .unwrap_or_default(),
+        status: row.get("status"),
+        created_at: row.get("created_at"),
+    })
+}
+
+fn render_inline_list(items: &[String], empty: &str) -> String {
+    if items.is_empty() {
+        empty.to_string()
+    } else {
+        items.join(", ")
+    }
 }
 
 fn command_trial_pattern_key(phase: &str, raw_command: &str, classification: &str) -> String {
@@ -25202,6 +25771,13 @@ fn assess_validation_repair_attempt(
         iteration,
         proposal_summary: proposal.summary.clone(),
         proposal_rationale: proposal.rationale.clone(),
+        edited_files: proposal
+            .edits
+            .iter()
+            .map(|edit| edit.path.clone())
+            .collect::<BTreeSet<_>>()
+            .into_iter()
+            .collect(),
         edits_applied,
         before_summary: summarize_validation(before),
         after_summary: summarize_validation(after),
@@ -27421,6 +27997,170 @@ fn normalize_text_key(content: &str) -> String {
         .join(" ")
 }
 
+#[derive(Debug, Default)]
+struct MemoryReconsolidationTriggers {
+    candidate_ids: BTreeSet<String>,
+    source_event_ids: BTreeSet<String>,
+    reason: String,
+}
+
+fn extract_memory_reconsolidation_triggers(
+    candidate: &crate::chat::MemoryCandidate,
+) -> MemoryReconsolidationTriggers {
+    let mut triggers = MemoryReconsolidationTriggers {
+        reason: "newer PackChat evidence superseded or revised an earlier memory candidate"
+            .to_string(),
+        ..Default::default()
+    };
+
+    collect_reconsolidation_targets_from_json(&candidate.raw_payload, &mut triggers);
+    if let Some(metadata) = candidate.raw_payload.get("metadata_json") {
+        collect_reconsolidation_targets_from_json(metadata, &mut triggers);
+    }
+    collect_reconsolidation_targets_from_json(&candidate.evidence_refs, &mut triggers);
+
+    triggers
+}
+
+fn collect_reconsolidation_targets_from_json(
+    value: &serde_json::Value,
+    triggers: &mut MemoryReconsolidationTriggers,
+) {
+    match value {
+        serde_json::Value::Array(items) => {
+            for item in items {
+                collect_reconsolidation_targets_from_json(item, triggers);
+            }
+        }
+        serde_json::Value::Object(map) => {
+            for key in [
+                "revises_candidate_id",
+                "supersedes_candidate_id",
+                "invalidates_candidate_id",
+                "memory_revises_candidate_id",
+                "memory_supersedes_candidate_id",
+            ] {
+                if let Some(target) = map.get(key).and_then(serde_json::Value::as_str) {
+                    if !target.trim().is_empty() {
+                        triggers.candidate_ids.insert(target.trim().to_string());
+                    }
+                }
+            }
+            for key in [
+                "revises_source_event_id",
+                "supersedes_source_event_id",
+                "invalidates_source_event_id",
+                "memory_revises_source_event_id",
+                "memory_supersedes_source_event_id",
+            ] {
+                if let Some(target) = map.get(key).and_then(serde_json::Value::as_str) {
+                    if !target.trim().is_empty() {
+                        triggers.source_event_ids.insert(target.trim().to_string());
+                    }
+                }
+            }
+
+            let ref_type = map
+                .get("ref_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or_default();
+            if matches!(
+                ref_type,
+                "revises_memory_candidate"
+                    | "supersedes_memory_candidate"
+                    | "invalidates_memory_candidate"
+            ) {
+                if let Some(target) = map.get("id").and_then(serde_json::Value::as_str) {
+                    if !target.trim().is_empty() {
+                        triggers.candidate_ids.insert(target.trim().to_string());
+                    }
+                }
+            }
+            if matches!(
+                ref_type,
+                "revises_source_event" | "supersedes_source_event" | "invalidates_source_event"
+            ) {
+                if let Some(target) = map.get("id").and_then(serde_json::Value::as_str) {
+                    if !target.trim().is_empty() {
+                        triggers.source_event_ids.insert(target.trim().to_string());
+                    }
+                }
+            }
+
+            if let Some(reason) = map
+                .get("reconsolidation_reason")
+                .or_else(|| map.get("supersession_reason"))
+                .and_then(serde_json::Value::as_str)
+            {
+                if !reason.trim().is_empty() {
+                    triggers.reason = reason.trim().to_string();
+                }
+            }
+        }
+        _ => {}
+    }
+}
+
+fn memory_candidate_plain_content(candidate: &crate::chat::MemoryCandidate) -> String {
+    candidate
+        .raw_payload
+        .get("content")
+        .and_then(serde_json::Value::as_str)
+        .or_else(|| {
+            candidate
+                .raw_payload
+                .get("content_preview")
+                .and_then(serde_json::Value::as_str)
+        })
+        .or(candidate.distilled_content.as_deref())
+        .unwrap_or("PackChat event with no textual content")
+        .trim()
+        .to_string()
+}
+
+fn calvin_evidence_timeline(
+    candidate: &crate::chat::MemoryCandidate,
+    distilled: &str,
+) -> serde_json::Value {
+    let refs = candidate
+        .evidence_refs
+        .as_array()
+        .cloned()
+        .unwrap_or_default();
+    let entries = refs
+        .into_iter()
+        .enumerate()
+        .map(|(index, evidence_ref)| {
+            let ref_type = evidence_ref
+                .get("ref_type")
+                .and_then(serde_json::Value::as_str)
+                .unwrap_or("unknown");
+            serde_json::json!({
+                "sequence": index + 1,
+                "observed_at": candidate.created_at.to_rfc3339(),
+                "source_authority": crate::chat::evidence_ref_source_authority(ref_type),
+                "evidence_ref": evidence_ref,
+                "claim_fragment": distilled,
+            })
+        })
+        .collect::<Vec<_>>();
+
+    if entries.is_empty() {
+        serde_json::json!([{
+            "sequence": 1,
+            "observed_at": candidate.created_at.to_rfc3339(),
+            "source_authority": "agent_observation",
+            "evidence_ref": {
+                "ref_type": "memory_candidate",
+                "id": candidate.candidate_id,
+            },
+            "claim_fragment": distilled,
+        }])
+    } else {
+        serde_json::Value::Array(entries)
+    }
+}
+
 fn build_calvin_promotion_contract(
     candidate: &crate::chat::MemoryCandidate,
     distilled: &str,
@@ -27435,9 +28175,26 @@ fn build_calvin_promotion_contract(
     contract["schema"] = serde_json::Value::String("harkonnen.calvin.promotion.v1".to_string());
     contract["candidate_id"] = serde_json::Value::String(candidate.candidate_id.clone());
     contract["source_event_id"] = serde_json::Value::String(candidate.source_event_id.clone());
+    contract["compiled_claim"] =
+        serde_json::Value::String(memory_candidate_plain_content(candidate));
     contract["distilled_content"] = serde_json::Value::String(distilled.to_string());
     contract["retention_class"] = serde_json::Value::String(candidate.retention_class.clone());
     contract["sensitivity_label"] = serde_json::Value::String(candidate.sensitivity_label.clone());
+    contract["source_authority"] = serde_json::Value::String(candidate.source_authority.clone());
+    contract["evidence_timeline"] = calvin_evidence_timeline(candidate, distilled);
+    contract["staleness_triggers"] = serde_json::json!([
+        "newer_conflicting_evidence",
+        "source_event_superseded",
+        "confidence_changed",
+        "sensitivity_label_changed",
+        "operator_rejected_or_modified_claim"
+    ]);
+    contract["review_state"] = serde_json::json!({
+        "status": "pending",
+        "review_required": true,
+        "reason": "calvin promotion requires governed review before canonical archive mutation"
+    });
+    contract["integration_recommendation"] = serde_json::Value::String("quarantine".to_string());
     contract["recommended_governance_outcome"] =
         serde_json::Value::String("quarantine".to_string());
     contract["preservation_note"] = serde_json::Value::String(
@@ -28825,6 +29582,28 @@ mod tests {
             .as_ref()
             .expect("calvin promotion contract");
         assert_eq!(contract["schema"], "harkonnen.calvin.promotion.v1");
+        assert_eq!(contract["compiled_claim"], content);
+        assert_eq!(contract["source_authority"], "packchat_statement");
+        assert_eq!(contract["integration_recommendation"], "quarantine");
+        assert_eq!(contract["review_state"]["status"], "pending");
+        assert_eq!(contract["review_state"]["review_required"], true);
+        assert!(contract["staleness_triggers"]
+            .as_array()
+            .expect("staleness triggers")
+            .iter()
+            .any(|trigger| trigger == "newer_conflicting_evidence"));
+        let evidence_timeline = contract["evidence_timeline"]
+            .as_array()
+            .expect("evidence timeline");
+        assert_eq!(evidence_timeline.len(), 1);
+        assert_eq!(
+            evidence_timeline[0]["evidence_ref"]["ref_type"],
+            "packchat_message"
+        );
+        assert_eq!(
+            evidence_timeline[0]["source_authority"],
+            "packchat_statement"
+        );
         assert_eq!(contract["recommended_governance_outcome"], "quarantine");
         assert!(contract["preservation_note"]
             .as_str()
@@ -28845,6 +29624,93 @@ mod tests {
             promotion.content_json["schema"],
             "harkonnen.calvin.promotion.v1"
         );
+    }
+
+    #[tokio::test]
+    async fn newer_packchat_evidence_marks_prior_memory_needs_reconsolidation() {
+        let (openbrain_url, _thoughts) = spawn_openbrain_round_trip_mock().await;
+        let (_dir, app) = test_app_with_openbrain(openbrain_url).await;
+        let run_id = format!("run-{}", Uuid::new_v4());
+        let old_candidate_id = format!("candidate-{}", Uuid::new_v4());
+        let new_candidate_id = format!("candidate-{}", Uuid::new_v4());
+
+        insert_memory_candidate_for_test(
+            &app,
+            &run_id,
+            &old_candidate_id,
+            "shared_recall",
+            "normal",
+            "Deployment target is AWS.",
+        )
+        .await;
+        app.chat
+            .update_memory_candidate_processing(
+                &old_candidate_id,
+                "captured_openbrain",
+                Some("Deployment target is AWS."),
+                Some(&format!("openbrain:{old_candidate_id}")),
+                Some("deployment target"),
+                None,
+            )
+            .await
+            .expect("mark old candidate captured");
+
+        insert_memory_candidate_for_test(
+            &app,
+            &run_id,
+            &new_candidate_id,
+            "shared_recall",
+            "normal",
+            "Correction: deployment target is on-prem, not AWS.",
+        )
+        .await;
+        sqlx::query(
+            r#"
+            UPDATE memory_candidates
+            SET evidence_refs = ?2
+            WHERE candidate_id = ?1
+            "#,
+        )
+        .bind(&new_candidate_id)
+        .bind(
+            json!([
+                {
+                    "ref_type": "supersedes_memory_candidate",
+                    "id": old_candidate_id
+                }
+            ])
+            .to_string(),
+        )
+        .execute(&app.pool)
+        .await
+        .expect("attach reconsolidation evidence ref");
+
+        let summary = app
+            .process_memory_candidates(Some(&run_id), 10)
+            .await
+            .expect("process reconsolidation trigger");
+        assert_eq!(summary.scanned, 1);
+        assert_eq!(summary.reconsolidations, 1);
+
+        let candidates = app
+            .list_memory_candidates_for_run(&run_id)
+            .await
+            .expect("list memory candidates");
+        let old_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == old_candidate_id)
+            .expect("old candidate");
+        assert_eq!(old_candidate.status, "needs_reconsolidation");
+        let reconsolidation = &old_candidate
+            .calvin_contract_json
+            .as_ref()
+            .expect("reconsolidation contract")["reconsolidation"];
+        assert_eq!(
+            reconsolidation["schema"],
+            "harkonnen.memory.reconsolidation.v1"
+        );
+        assert_eq!(reconsolidation["status"], "needs_reconsolidation");
+        assert_eq!(reconsolidation["trigger_candidate_id"], new_candidate_id);
     }
 
     #[tokio::test]
@@ -29241,11 +30107,17 @@ mod tests {
         let proposal = MasonEditProposal {
             summary: "Fix edge-case handling".to_string(),
             rationale: vec!["The first case now passes.".to_string()],
-            edits: Vec::new(),
+            edits: vec![MasonEdit {
+                path: "src/lib.rs".to_string(),
+                action: "replace".to_string(),
+                summary: "Fix edge-case handling".to_string(),
+                content: "patched".to_string(),
+            }],
         };
 
         let attempt = assess_validation_repair_attempt(1, &proposal, 1, &before, &after);
         assert_eq!(attempt.outcome, "improved");
+        assert_eq!(attempt.edited_files, vec!["src/lib.rs"]);
         assert!(attempt
             .guidance_for_next_attempt
             .contains("target only the remaining failures"));
@@ -29262,6 +30134,7 @@ mod tests {
                 iteration: 1,
                 proposal_summary: "Fix sum logic".to_string(),
                 proposal_rationale: vec!["The loop skipped the final value.".to_string()],
+                edited_files: vec!["src/math.rs".to_string()],
                 edits_applied: 1,
                 before_summary: "before".to_string(),
                 after_summary: "after".to_string(),
@@ -29279,7 +30152,160 @@ mod tests {
         let markdown = render_validation_repair_markdown(&artifact);
         assert!(markdown.contains("# Validation Repair Attempts"));
         assert!(markdown.contains("Outcome: stalled"));
+        assert!(markdown.contains("Edited files: src/math.rs"));
         assert!(markdown.contains("Previous attempt did not change the failing signal."));
+    }
+
+    #[test]
+    fn validation_repair_attempts_become_code_review_learning_records() {
+        let artifact = ValidationRepairArtifact {
+            run_id: "run-1".to_string(),
+            spec_id: "spec-1".to_string(),
+            product: "product".to_string(),
+            generated_at: "2026-04-29T00:00:00Z".to_string(),
+            attempts: vec![ValidationRepairAttemptRecord {
+                iteration: 1,
+                proposal_summary: "Fix wrong total".to_string(),
+                proposal_rationale: vec!["Bramble showed expected 8 got 7.".to_string()],
+                edited_files: vec!["src/math.rs".to_string()],
+                edits_applied: 1,
+                before_summary: "failure_kind=WrongAnswer".to_string(),
+                after_summary: "all tests passed".to_string(),
+                failure_kind_before: Some("WrongAnswer".to_string()),
+                failure_kind_after: None,
+                before_failing_checks: vec!["test_command_1 (expected 8 got 7)".to_string()],
+                after_failing_checks: Vec::new(),
+                outcome: "resolved".to_string(),
+                guidance_for_next_attempt:
+                    "Previous attempt resolved visible validation; no further retry is needed."
+                        .to_string(),
+                passed_after: true,
+            }],
+        };
+
+        let records = code_review_learning_records_from_validation_repair(&artifact);
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].source_agent, "mason");
+        assert_eq!(records[0].reviewer_agent, "bramble");
+        assert_eq!(records[0].resolution, "auto_fixed");
+        assert_eq!(records[0].files, vec!["src/math.rs"]);
+        assert_eq!(records[0].stale_if_file_changed, vec!["src/math.rs"]);
+        assert!(records[0].lesson.contains("resolved Bramble validation"));
+    }
+
+    #[test]
+    fn plan_completion_audit_flags_missing_evidence_before_close() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let spec = Spec {
+            id: "spec-audit".to_string(),
+            title: "Audit spec".to_string(),
+            purpose: "Prove audit behavior".to_string(),
+            scope: Vec::new(),
+            constraints: Vec::new(),
+            inputs: Vec::new(),
+            outputs: vec!["Ship a visible report".to_string()],
+            acceptance_criteria: vec![
+                "Visible validation must pass.".to_string(),
+                "Hidden scenario behavior must pass.".to_string(),
+            ],
+            forbidden_behaviors: Vec::new(),
+            rollback_requirements: Vec::new(),
+            dependencies: Vec::new(),
+            performance_expectations: Vec::new(),
+            security_expectations: Vec::new(),
+            twin_services: Vec::new(),
+            project_components: Vec::new(),
+            scenario_blueprint: None,
+            worker_harness: None,
+            test_commands: Vec::new(),
+        };
+        let target = TargetSourceMetadata {
+            label: "product".to_string(),
+            source_kind: "local".to_string(),
+            source_path: "product".to_string(),
+            git: None,
+        };
+
+        let audit = build_plan_completion_audit(
+            "run-audit",
+            &spec,
+            &target,
+            "failed",
+            None,
+            None,
+            dir.path(),
+        );
+
+        assert!(audit.unresolved_count >= 2);
+        assert!(audit
+            .items
+            .iter()
+            .any(|item| item.item_id == "core.visible_validation" && item.status == "missing"));
+        assert!(render_plan_completion_audit_markdown(&audit).contains("Plan Completion Audit"));
+    }
+
+    #[test]
+    fn plan_completion_audit_marks_validation_and_hidden_evidence_fulfilled() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        std::fs::write(dir.path().join("validation.json"), "{}").expect("validation artifact");
+        std::fs::write(dir.path().join("hidden_scenarios.json"), "{}").expect("hidden artifact");
+        let spec = Spec {
+            id: "spec-audit".to_string(),
+            title: "Audit spec".to_string(),
+            purpose: "Prove audit behavior".to_string(),
+            scope: Vec::new(),
+            constraints: Vec::new(),
+            inputs: Vec::new(),
+            outputs: Vec::new(),
+            acceptance_criteria: vec!["Visible validation must pass.".to_string()],
+            forbidden_behaviors: Vec::new(),
+            rollback_requirements: Vec::new(),
+            dependencies: Vec::new(),
+            performance_expectations: Vec::new(),
+            security_expectations: Vec::new(),
+            twin_services: Vec::new(),
+            project_components: Vec::new(),
+            scenario_blueprint: None,
+            worker_harness: None,
+            test_commands: Vec::new(),
+        };
+        let target = TargetSourceMetadata {
+            label: "product".to_string(),
+            source_kind: "local".to_string(),
+            source_path: "product".to_string(),
+            git: None,
+        };
+        let validation = ValidationSummary {
+            passed: true,
+            scored_checks: 1,
+            passed_scored_checks: 1,
+            real_test_commands: 1,
+            passed_real_test_commands: 1,
+            results: Vec::new(),
+            wrong_answer_evidence: BTreeMap::new(),
+            failure_kind: None,
+        };
+        let hidden = HiddenScenarioSummary {
+            passed: true,
+            results: Vec::new(),
+        };
+
+        let audit = build_plan_completion_audit(
+            "run-audit",
+            &spec,
+            &target,
+            "completed",
+            Some(&validation),
+            Some(&hidden),
+            dir.path(),
+        );
+
+        assert_eq!(audit.unresolved_count, 0);
+        assert!(audit
+            .items
+            .iter()
+            .any(|item| item.item_id == "core.visible_validation"
+                && item.evidence_refs.contains(&"validation.json".to_string())));
     }
 
     #[test]

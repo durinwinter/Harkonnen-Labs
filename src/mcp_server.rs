@@ -3368,7 +3368,7 @@ mod mcp_e2e {
     }
 
     #[tokio::test]
-    async fn list_run_checkpoints_empty_for_new_run() {
+    async fn list_run_checkpoints_returns_current_array_for_queued_run() {
         let (state, _dir) = build_test_state().await;
         let spec = write_test_spec(&state.app.paths, "checkpoint-spec").await;
         let product = make_product_dir(&state.app.paths, "checkpoint-product").await;
@@ -3393,9 +3393,14 @@ mod mcp_e2e {
         )
         .await;
         let checkpoints = parse_tool_json(&cp_result);
+        let checkpoints = checkpoints
+            .as_array()
+            .expect("list_run_checkpoints must return an array");
         assert!(
-            checkpoints.as_array().map(|a| a.is_empty()).unwrap_or(true),
-            "freshly queued run should have no open checkpoints"
+            checkpoints
+                .iter()
+                .all(|checkpoint| checkpoint["run_id"] == run_id),
+            "list_run_checkpoints must only return checkpoints for the requested run"
         );
     }
 

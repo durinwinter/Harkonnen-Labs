@@ -1314,6 +1314,26 @@ pub struct MemoryUpdateRecord {
     pub created_at: String,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct CodeReviewLearningRecord {
+    pub record_id: String,
+    pub run_id: String,
+    pub source_agent: String,
+    pub reviewer_agent: String,
+    pub finding_fingerprint: String,
+    #[serde(default)]
+    pub files: Vec<String>,
+    pub severity: String,
+    pub resolution: String,
+    pub lesson: String,
+    #[serde(default)]
+    pub evidence_refs: Vec<String>,
+    #[serde(default)]
+    pub stale_if_file_changed: Vec<String>,
+    pub status: String,
+    pub created_at: String,
+}
+
 #[allow(dead_code)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct OperatorModelExport {

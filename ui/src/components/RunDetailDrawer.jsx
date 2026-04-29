@@ -4,6 +4,7 @@ import ConsolidationWorkbench from './ConsolidationWorkbench';
 import ValidationPanel from './ValidationPanel';
 import CoobieSignalPanel from './CoobieSignalPanel';
 import MemoryCandidatesPanel from './MemoryCandidatesPanel';
+import RunReviewPanel from './RunReviewPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
@@ -136,7 +137,7 @@ export default function RunDetailDrawer({ runId, onClose }) {
 
   const hasExploreLog = blackboard?.artifact_refs?.includes('exploration_log.md');
   const hasCorpusResults = blackboard?.artifact_refs?.includes('corpus_results.json');
-  const TABS = ['overview', 'timeline', 'decisions', 'agents', 'causal', 'lessons', 'memory', 'workbench', 'explore', 'corpus'];
+  const TABS = ['overview', 'timeline', 'decisions', 'agents', 'causal', 'lessons', 'memory', 'review', 'workbench', 'explore', 'corpus'];
 
   return (
     <div className="drawer-overlay">
@@ -400,6 +401,10 @@ export default function RunDetailDrawer({ runId, onClose }) {
 
           {tab === 'memory' && (
             <MemoryCandidatesPanel runId={runId} />
+          )}
+
+          {tab === 'review' && (
+            <RunReviewPanel runId={runId} />
           )}
 
           {tab === 'workbench' && (

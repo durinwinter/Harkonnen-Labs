@@ -4,6 +4,8 @@
 
 Harkonnen Labs is a **multi-agent software execution system** that transforms specifications into validated software artifacts while accumulating **structured operational knowledge** across runs.
 
+For a higher-level product explanation of the feature set and how Harkonnen gets smarter over time without training a new model, see [docs/HARKONNEN_LABS_FEATURES.md](docs/HARKONNEN_LABS_FEATURES.md).
+
 At its core, Harkonnen is designed to solve a specific failure mode in modern LLM systems:
 
 > LLM pipelines are *stateless, similarity-driven, and non-causal* — they cannot reliably improve from experience.

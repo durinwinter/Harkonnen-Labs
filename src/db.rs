@@ -1031,6 +1031,47 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
     .execute(&pool)
     .await?;
 
+    // ── Phase 5b: Code-review learning records ───────────────────────────────
+    sqlx::query(
+        r#"
+        CREATE TABLE IF NOT EXISTS code_review_learning_records (
+            record_id                  TEXT PRIMARY KEY,
+            run_id                     TEXT NOT NULL,
+            source_agent               TEXT NOT NULL,
+            reviewer_agent             TEXT NOT NULL,
+            finding_fingerprint        TEXT NOT NULL,
+            files_json                 TEXT NOT NULL DEFAULT '[]',
+            severity                   TEXT NOT NULL,
+            resolution                 TEXT NOT NULL,
+            lesson                     TEXT NOT NULL,
+            evidence_refs_json         TEXT NOT NULL DEFAULT '[]',
+            stale_if_file_changed_json TEXT NOT NULL DEFAULT '[]',
+            status                     TEXT NOT NULL DEFAULT 'active',
+            created_at                 TEXT NOT NULL
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_code_review_learning_records_run
+        ON code_review_learning_records (run_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE UNIQUE INDEX IF NOT EXISTS idx_code_review_learning_records_fingerprint
+        ON code_review_learning_records (run_id, finding_fingerprint)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
     // ── Phase B: Agent Trace Spine ────────────────────────────────────────────
     sqlx::query(
         r#"

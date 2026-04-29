@@ -3,6 +3,7 @@ use reqwest::Client;
 use serde_json::Value;
 use std::time::Duration;
 
+use crate::memory::SemanticMemoryMetadata;
 use crate::setup::OpenBrainConfig;
 
 #[derive(Debug, Clone)]
@@ -56,12 +57,16 @@ impl OpenBrainClient {
     }
 
     pub async fn search_thoughts(&self, query: &str) -> Result<Vec<String>> {
+        self.search_thoughts_limited(query, self.search_limit).await
+    }
+
+    pub async fn search_thoughts_limited(&self, query: &str, limit: usize) -> Result<Vec<String>> {
         let response = self
             .call_tool(
                 "search_thoughts",
                 serde_json::json!({
                     "query": query,
-                    "limit": self.search_limit,
+                    "limit": limit.min(self.search_limit).max(1),
                     "threshold": self.search_threshold,
                 }),
             )
@@ -76,6 +81,27 @@ impl OpenBrainClient {
         let mut args = serde_json::json!({ "content": content });
         if let Some(thought_type) = thought_type {
             args["type"] = Value::String(thought_type.to_string());
+        }
+        self.call_tool("capture_thought", args).await?;
+        Ok(())
+    }
+
+    pub async fn capture_thought_with_metadata(
+        &self,
+        content: &str,
+        metadata: &SemanticMemoryMetadata,
+    ) -> Result<()> {
+        let mut args = serde_json::json!({ "content": content });
+        if let Some(memory_type) = metadata.memory_type.as_deref() {
+            args["type"] = Value::String(memory_type.to_string());
+        }
+        let metadata_value = serde_json::to_value(metadata)?;
+        if metadata_value
+            .as_object()
+            .map(|object| object.values().any(|value| !value.is_null()))
+            .unwrap_or(false)
+        {
+            args["metadata"] = metadata_value;
         }
         self.call_tool("capture_thought", args).await?;
         Ok(())

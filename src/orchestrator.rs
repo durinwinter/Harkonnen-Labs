@@ -22,7 +22,7 @@ use crate::{
     models::{
         AgentExecution, AgentRuntimeState, BlackboardState, BriefingScope, CausalEventEdge,
         CausalEventNode, CheckpointAnswerRecord, CodeReviewLearningRecord, CommissioningBrief,
-        ConsolidationCandidate, ContextSection, ContextTarget, CoobieBriefing,
+        ConsolidationCandidate, ContextPullRecord, ContextSection, ContextTarget, CoobieBriefing,
         CoobieEvidenceCitation, EpisodeCausalState, EpisodeRecord, EpisodeStateDiff,
         EvidenceAnnotation, EvidenceAnnotationBundle, EvidenceAnnotationHistoryEvent,
         EvidenceMatchAssessment, EvidenceMatchReport, EvidenceSource, EvidenceTimeRange,
@@ -73,6 +73,8 @@ pub struct AppContext {
     pub calvin: Option<crate::calvin_client::CalvinClient>,
     /// Open Brain MCP-backed memory client — default cross-client recall path.
     pub open_brain: Option<crate::openbrain::OpenBrainClient>,
+    /// Default long-term semantic memory. OB1-backed when configured.
+    pub semantic_memory: Option<Arc<dyn crate::memory::SemanticMemory>>,
     /// Sub-agent dispatcher — routes high-context tasks to isolated backends.
     pub dispatcher: crate::subagent::SubAgentDispatcher,
 }
@@ -1033,6 +1035,10 @@ impl AppContext {
                 None
             }
         };
+        let semantic_memory = open_brain.as_ref().map(|client| {
+            Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
+                as Arc<dyn crate::memory::SemanticMemory>
+        });
         let dispatcher = crate::subagent::SubAgentDispatcher::new(
             paths.setup.sub_agents.clone(),
             paths.setup.clone(),
@@ -1050,6 +1056,7 @@ impl AppContext {
             started_at: std::time::Instant::now(),
             calvin,
             open_brain,
+            semantic_memory,
             dispatcher,
         })
     }
@@ -16218,6 +16225,84 @@ Return JSON only.",
         Ok(records)
     }
 
+    pub async fn record_context_pull(
+        &self,
+        run_id: &str,
+        query: &str,
+        scope: &str,
+        max_tokens: u32,
+        tokens_returned: u32,
+        hits_returned: u32,
+        hit_previews: &[String],
+    ) -> Result<ContextPullRecord> {
+        let record = ContextPullRecord {
+            pull_id: Uuid::new_v4().to_string(),
+            run_id: run_id.to_string(),
+            query: query.to_string(),
+            scope: scope.to_string(),
+            max_tokens,
+            tokens_returned,
+            hits_returned,
+            hit_previews: hit_previews.to_vec(),
+            created_at: Utc::now(),
+        };
+        sqlx::query(
+            r#"
+            INSERT INTO context_pull_records (
+                pull_id, run_id, query, scope, max_tokens, tokens_returned,
+                hits_returned, hit_previews, created_at
+            ) VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
+            "#,
+        )
+        .bind(&record.pull_id)
+        .bind(&record.run_id)
+        .bind(&record.query)
+        .bind(&record.scope)
+        .bind(i64::from(record.max_tokens))
+        .bind(i64::from(record.tokens_returned))
+        .bind(i64::from(record.hits_returned))
+        .bind(serde_json::to_string(&record.hit_previews)?)
+        .bind(record.created_at.to_rfc3339())
+        .execute(&self.pool)
+        .await?;
+        Ok(record)
+    }
+
+    pub async fn list_context_pull_records(&self, run_id: &str) -> Result<Vec<ContextPullRecord>> {
+        let rows = sqlx::query(
+            r#"
+            SELECT pull_id, run_id, query, scope, max_tokens, tokens_returned,
+                   hits_returned, hit_previews, created_at
+            FROM context_pull_records
+            WHERE run_id = ?1
+            ORDER BY created_at ASC, pull_id ASC
+            "#,
+        )
+        .bind(run_id)
+        .fetch_all(&self.pool)
+        .await?;
+
+        let mut records = Vec::new();
+        for row in rows {
+            records.push(ContextPullRecord {
+                pull_id: row.get::<String, _>("pull_id"),
+                run_id: row.get::<String, _>("run_id"),
+                query: row.get::<String, _>("query"),
+                scope: row.get::<String, _>("scope"),
+                max_tokens: row.get::<i64, _>("max_tokens") as u32,
+                tokens_returned: row.get::<i64, _>("tokens_returned") as u32,
+                hits_returned: row.get::<i64, _>("hits_returned") as u32,
+                hit_previews: serde_json::from_str(row.get::<String, _>("hit_previews").as_str())
+                    .with_context(|| "parsing context pull hit_previews")?,
+                created_at: chrono::DateTime::parse_from_rfc3339(
+                    row.get::<String, _>("created_at").as_str(),
+                )?
+                .with_timezone(&Utc),
+            });
+        }
+        Ok(records)
+    }
+
     pub async fn consolidate_run_for_operator(&self, run_id: &str) -> Result<Vec<LessonRecord>> {
         let run_dir = self.run_dir(run_id);
         let spec_path = run_dir.join("spec.yaml");
@@ -29282,6 +29367,10 @@ mod tests {
             paths.setup.sub_agents.clone(),
             paths.setup.clone(),
         );
+        let semantic_memory = open_brain.as_ref().map(|client| {
+            Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
+                as Arc<dyn crate::memory::SemanticMemory>
+        });
         let app = AppContext {
             paths,
             pool,
@@ -29295,6 +29384,7 @@ mod tests {
             started_at: std::time::Instant::now(),
             calvin: None,
             open_brain,
+            semantic_memory,
             dispatcher,
         };
         (dir, app)

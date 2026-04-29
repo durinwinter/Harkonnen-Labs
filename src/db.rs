@@ -175,6 +175,34 @@ pub async fn init_db(paths: &Paths) -> Result<SqlitePool> {
 
     sqlx::query(
         r#"
+        CREATE TABLE IF NOT EXISTS context_pull_records (
+            pull_id TEXT PRIMARY KEY,
+            run_id TEXT NOT NULL,
+            query TEXT NOT NULL,
+            scope TEXT NOT NULL,
+            max_tokens INTEGER NOT NULL,
+            tokens_returned INTEGER NOT NULL,
+            hits_returned INTEGER NOT NULL,
+            hit_previews TEXT NOT NULL DEFAULT '[]',
+            created_at TEXT NOT NULL,
+            FOREIGN KEY (run_id) REFERENCES runs(run_id)
+        )
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
+        CREATE INDEX IF NOT EXISTS idx_context_pull_records_run_created
+        ON context_pull_records (run_id, created_at)
+        "#,
+    )
+    .execute(&pool)
+    .await?;
+
+    sqlx::query(
+        r#"
         CREATE TABLE IF NOT EXISTS run_checkpoints (
             checkpoint_id TEXT PRIMARY KEY,
             run_id TEXT NOT NULL,

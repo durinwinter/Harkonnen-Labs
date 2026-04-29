@@ -859,6 +859,7 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
 
         // ── memory_pull: on-demand context retrieval mid-task (Phase 5b) ─────
         "memory_pull" => {
+            let run_id = optional_string(&arguments, "run_id");
             let query = required_string(&arguments, "query")
                 .map_err(|_| (-32602, "memory_pull requires query".to_string()))?;
             let scope = optional_string(&arguments, "scope").unwrap_or_else(|| "general".into());
@@ -907,8 +908,36 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
             let hits_returned = output_lines.len() as u32;
             let tokens_approx = (total / 4) as u32;
 
+            if let Some(run_id) = run_id.as_deref() {
+                let hit_previews = output_lines
+                    .iter()
+                    .take(5)
+                    .map(|hit| hit.chars().take(220).collect::<String>())
+                    .collect::<Vec<_>>();
+                if let Err(error) = state
+                    .app
+                    .record_context_pull(
+                        run_id,
+                        &query,
+                        &scope,
+                        max_tokens as u32,
+                        tokens_approx,
+                        hits_returned,
+                        &hit_previews,
+                    )
+                    .await
+                {
+                    tracing::warn!(
+                        run_id = %run_id,
+                        error = %error,
+                        "memory_pull context utilization persistence failed"
+                    );
+                }
+            }
+
             // Log the pull call for context utilization tracking.
             tracing::info!(
+                run_id = run_id.as_deref().unwrap_or(""),
                 query = %query,
                 scope = %scope,
                 hits_returned = hits_returned,
@@ -1940,6 +1969,10 @@ fn tool_descriptors() -> Vec<Value> {
                 "required": ["query"],
                 "properties": {
                     "query": { "type": "string", "description": "The retrieval query" },
+                    "run_id": {
+                        "type": "string",
+                        "description": "Optional run id; when supplied the pull is persisted for context utilization tracking."
+                    },
                     "scope": {
                         "type": "string",
                         "description": "Isolation scope: general | sable | mason | scout | keeper",
@@ -2630,6 +2663,7 @@ mod mcp_e2e {
             started_at: Instant::now(),
             calvin: None,
             open_brain: None,
+            semantic_memory: None,
             dispatcher,
         };
 
@@ -3072,6 +3106,58 @@ mod mcp_e2e {
         .await;
         let text = tool_text(&result);
         assert!(!text.is_empty(), "memory_pull must return non-empty text");
+    }
+
+    #[tokio::test]
+    async fn memory_pull_with_run_id_persists_context_pull_record() {
+        let (state, _dir) = build_test_state().await;
+        let run_id = "run-context-pull";
+        let now = chrono::Utc::now().to_rfc3339();
+        sqlx::query(
+            "INSERT INTO runs (run_id, spec_id, product, status, created_at, updated_at) VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+        )
+        .bind(run_id)
+        .bind("spec-context-pull")
+        .bind("product-context-pull")
+        .bind("running")
+        .bind(&now)
+        .bind(&now)
+        .execute(&state.app.pool)
+        .await
+        .unwrap();
+        rpc(
+            &state,
+            call(
+                27,
+                "memory_store",
+                json!({ "content": "Keeper policy check: preserve run scoped context utilization records." }),
+            ),
+        )
+        .await;
+
+        rpc(
+            &state,
+            call(
+                28,
+                "memory_pull",
+                json!({
+                    "run_id": run_id,
+                    "query": "keeper policy context utilization",
+                    "scope": "keeper",
+                    "max_tokens": 300
+                }),
+            ),
+        )
+        .await;
+
+        let records = state.app.list_context_pull_records(run_id).await.unwrap();
+        assert_eq!(records.len(), 1);
+        assert_eq!(records[0].scope, "keeper");
+        assert_eq!(records[0].query, "keeper policy context utilization");
+        assert!(
+            records[0].tokens_returned <= 300,
+            "memory_pull should persist returned tokens within the requested budget"
+        );
     }
 
     #[tokio::test]

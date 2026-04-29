@@ -10,6 +10,14 @@ use uuid::Uuid;
 
 use crate::setup::{command_available, SetupConfig};
 
+pub mod semantic;
+pub mod semantic_openbrain;
+
+pub use semantic::{
+    SemanticMemory, SemanticMemoryHit, SemanticMemoryMetadata, SemanticMemoryWrite,
+};
+pub use semantic_openbrain::OpenBrainSemanticMemory;
+
 #[derive(Debug, Clone)]
 pub struct MemorySupersessionCandidate {
     pub stale_memory_id: String,

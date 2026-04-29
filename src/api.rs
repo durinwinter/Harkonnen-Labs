@@ -811,6 +811,10 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
             "/api/runs/:id/plan-completion-audit",
             get(get_plan_completion_audit),
         )
+        .route(
+            "/api/runs/:id/context-utilization",
+            get(get_context_utilization),
+        )
         .route("/api/chat", post(post_chat))
         .route("/api/coobie/query", post(post_coobie_query))
         .route("/api/agents/:id/chat", post(post_agent_chat))
@@ -1805,6 +1809,58 @@ async fn get_plan_completion_audit(
                 .into_response(),
             Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
         },
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
+    }
+}
+
+async fn get_context_utilization(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match app.get_run(&id).await {
+        Ok(Some(_)) => {
+            let phase_attributions = match app.list_phase_attributions_for_run(&id).await {
+                Ok(records) => records,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+                }
+            };
+            let pull_records = match app.list_context_pull_records(&id).await {
+                Ok(records) => records,
+                Err(err) => {
+                    return (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response()
+                }
+            };
+            let briefing_hits_provided: usize = phase_attributions
+                .iter()
+                .map(|record| record.briefing_hits_provided)
+                .sum();
+            let briefing_tokens_used: u32 = phase_attributions
+                .iter()
+                .map(|record| record.briefing_tokens_used)
+                .sum();
+            let pull_tokens_returned: u32 = pull_records
+                .iter()
+                .map(|record| record.tokens_returned)
+                .sum();
+            (
+                StatusCode::OK,
+                Json(serde_json::json!({
+                    "run_id": id,
+                    "summary": {
+                        "phase_attribution_count": phase_attributions.len(),
+                        "briefing_hits_provided": briefing_hits_provided,
+                        "briefing_tokens_used": briefing_tokens_used,
+                        "mid_task_pull_count": pull_records.len(),
+                        "mid_task_pull_tokens": pull_tokens_returned,
+                    },
+                    "phase_attributions": phase_attributions,
+                    "pull_records": pull_records,
+                })),
+            )
+                .into_response()
+        }
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }

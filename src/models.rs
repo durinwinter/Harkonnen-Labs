@@ -506,6 +506,20 @@ pub struct PhaseAttributionRecord {
     pub created_at: DateTime<Utc>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct ContextPullRecord {
+    pub pull_id: String,
+    pub run_id: String,
+    pub query: String,
+    pub scope: String,
+    pub max_tokens: u32,
+    pub tokens_returned: u32,
+    pub hits_returned: u32,
+    #[serde(default)]
+    pub hit_previews: Vec<String>,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct StakeholderAlignmentSummary {
     #[serde(default)]

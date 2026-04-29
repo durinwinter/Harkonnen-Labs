@@ -488,6 +488,8 @@ Searches file-backed memory → OB1 → deduplicates → filters by scope (sable
 
 Pull records are logged (not yet persisted to SQLite episode store — episode record extension remains in the context utilization tracking item below).
 
+**Persistence slice shipped 2026-04-29:** `memory_pull` now accepts optional `run_id`; when supplied, Harkonnen persists a `context_pull_records` row with query, scope, budget, returned tokens, hit count, and hit previews. `GET /api/runs/{id}/context-utilization` combines phase attribution briefing counts with mid-task pull records, and the Review tab renders the context-utilization summary.
+
 ### Context utilization tracking
 
 The episode record gains a `ContextUtilization` section:

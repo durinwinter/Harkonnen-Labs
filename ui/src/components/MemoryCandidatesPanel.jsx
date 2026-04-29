@@ -87,6 +87,30 @@ function extractContent(candidate) {
     || candidate.candidate_id;
 }
 
+function CalvinContractPreview({ contract }) {
+  if (!contract || contract.schema !== 'harkonnen.calvin.promotion.v1') return null;
+  const chambers = Array.isArray(contract.chamber_targets) ? contract.chamber_targets.join(', ') : 'calvin';
+  const outcome = contract.recommended_governance_outcome || 'review';
+  const note = contract.preservation_note || 'Governed archive proposal.';
+  return (
+    <div style={{
+      marginTop: 8,
+      padding: '8px 10px',
+      borderRadius: 6,
+      border: '1px solid rgba(223,159,99,0.22)',
+      background: 'rgba(223,159,99,0.08)',
+      color: '#d8d3ca',
+      fontSize: 12,
+      lineHeight: 1.4,
+    }}>
+      <div style={{ color: '#df9f63', fontWeight: 700, marginBottom: 3 }}>
+        Calvin proposal · {outcome} · {chambers}
+      </div>
+      <div>{note}</div>
+    </div>
+  );
+}
+
 export default function MemoryCandidatesPanel({ runId }) {
   const [data, setData] = useState(null);
   const [loading, setLoading] = useState(false);
@@ -205,6 +229,7 @@ export default function MemoryCandidatesPanel({ runId }) {
             <div style={{ color: '#e5e1d8', fontSize: 13, lineHeight: 1.4 }}>
               {extractContent(candidate)}
             </div>
+            <CalvinContractPreview contract={candidate.calvin_contract_json} />
             {(candidate.status === 'held_for_review'
               || candidate.status === 'retry_pending'
               || candidate.status === 'waiting_openbrain') && (

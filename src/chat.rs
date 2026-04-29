@@ -2860,6 +2860,235 @@ mod tests {
     }
 
     #[tokio::test]
+    async fn five_message_packchat_thread_produces_memory_candidates() {
+        let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_threads (
+                thread_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                spec_id TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                thread_kind TEXT NOT NULL DEFAULT 'general',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("threads table");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_messages (
+                message_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES chat_threads(thread_id),
+                role TEXT NOT NULL,
+                agent TEXT,
+                agent_runtime_id TEXT,
+                content TEXT NOT NULL,
+                checkpoint_id TEXT,
+                created_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("messages table");
+        create_memory_candidates_table(&pool).await;
+
+        let store = ChatStore::new(pool.clone());
+        let thread = store
+            .open_thread(&OpenThreadRequest {
+                run_id: Some("run-five-message".to_string()),
+                spec_id: Some("spec-five-message".to_string()),
+                title: Some("Five Message Gate".to_string()),
+                thread_kind: ChatThreadKind::Run,
+                metadata_json: None,
+            })
+            .await
+            .expect("open thread");
+
+        for (idx, content) in [
+            "We need to bind PackChat to the memory chain.",
+            "Coobie should preserve provenance before distillation.",
+            "remember this: OB1 is the default shared recall path for this project.",
+            "Calvin promotion contracts must remain governed proposals.",
+            "Sensitivity labels should hold secrets for review.",
+        ]
+        .iter()
+        .enumerate()
+        {
+            store
+                .append_message(
+                    &thread.thread_id,
+                    if idx % 2 == 0 { "operator" } else { "agent" },
+                    Some("coobie"),
+                    Some("coobie#test"),
+                    content,
+                    None,
+                )
+                .await
+                .expect("append message");
+        }
+
+        let candidates = store
+            .list_memory_candidates_for_run("run-five-message")
+            .await
+            .expect("candidates");
+        assert!(
+            !candidates.is_empty(),
+            "a realistic five-message PackChat thread should create memory candidates"
+        );
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.retention_class == "shared_recall"));
+        assert!(candidates
+            .iter()
+            .any(|candidate| candidate.retention_class == "calvin_candidate"));
+    }
+
+    #[cfg(unix)]
+    #[tokio::test]
+    async fn twilight_publish_smoke_preserves_memory_candidate_and_calvin_contract() {
+        use std::io::{BufRead, BufReader, Write};
+        use std::os::unix::net::UnixListener;
+        use std::sync::{Arc, Mutex};
+
+        let dir = tempdir().expect("tempdir");
+        let socket_path = dir.path().join("twilight-smoke.sock");
+        let log: Arc<Mutex<Vec<Value>>> = Arc::new(Mutex::new(Vec::new()));
+        let listener = UnixListener::bind(&socket_path).expect("bind twilight mock");
+        let log_for_task = Arc::clone(&log);
+        std::thread::spawn(move || {
+            for stream in listener.incoming().flatten() {
+                let mut writer = stream.try_clone().expect("clone stream");
+                let lines = BufReader::new(stream).lines();
+                for line in lines.map_while(Result::ok) {
+                    let value: Value = serde_json::from_str(&line).expect("ipc json");
+                    log_for_task
+                        .lock()
+                        .expect("twilight log lock")
+                        .push(value.clone());
+                    let response = match value["cmd"].as_str() {
+                        Some("register") => {
+                            serde_json::json!({"ok": true, "agent_uuid": "mock-agent"})
+                        }
+                        Some("publish_task") => {
+                            serde_json::json!({"ok": true, "task_id": "mock-task"})
+                        }
+                        _ => serde_json::json!({"ok": false}),
+                    };
+                    if writer
+                        .write_all(format!("{response}\n").as_bytes())
+                        .is_err()
+                    {
+                        break;
+                    }
+                }
+            }
+        });
+
+        let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_threads (
+                thread_id TEXT PRIMARY KEY,
+                run_id TEXT,
+                spec_id TEXT,
+                title TEXT NOT NULL DEFAULT '',
+                status TEXT NOT NULL DEFAULT 'open',
+                thread_kind TEXT NOT NULL DEFAULT 'general',
+                metadata_json TEXT NOT NULL DEFAULT '{}',
+                created_at TEXT NOT NULL,
+                updated_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("threads table");
+        sqlx::query(
+            r#"
+            CREATE TABLE chat_messages (
+                message_id TEXT PRIMARY KEY,
+                thread_id TEXT NOT NULL REFERENCES chat_threads(thread_id),
+                role TEXT NOT NULL,
+                agent TEXT,
+                agent_runtime_id TEXT,
+                content TEXT NOT NULL,
+                checkpoint_id TEXT,
+                created_at TEXT NOT NULL
+            )
+            "#,
+        )
+        .execute(&pool)
+        .await
+        .expect("messages table");
+        create_memory_candidates_table(&pool).await;
+
+        let twilight_bus = Arc::new(TwilightPackChatBus::new(
+            socket_path,
+            "harkonnen-packchat",
+            "packchat-bridge",
+            "test-setup",
+        ));
+        let store = ChatStore::with_bus(pool.clone(), twilight_bus);
+        let thread = store
+            .open_thread(&OpenThreadRequest {
+                run_id: Some("run-twilight-smoke".to_string()),
+                spec_id: Some("spec-twilight-smoke".to_string()),
+                title: Some("Twilight Smoke".to_string()),
+                thread_kind: ChatThreadKind::Run,
+                metadata_json: None,
+            })
+            .await
+            .expect("open thread");
+        store
+            .append_message(
+                &thread.thread_id,
+                "operator",
+                Some("coobie"),
+                Some("coobie#test"),
+                "remember this: Twilight Bark carries PackChat memories into the governed chain.",
+                None,
+            )
+            .await
+            .expect("append message");
+
+        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+        let candidates = store
+            .list_memory_candidates_for_run("run-twilight-smoke")
+            .await
+            .expect("memory candidates");
+        assert_eq!(candidates.len(), 1);
+        assert_eq!(candidates[0].retention_class, "shared_recall");
+
+        let published_message = log
+            .lock()
+            .expect("twilight log lock")
+            .iter()
+            .filter(|command| command["cmd"] == "publish_task")
+            .filter_map(|command| command["input_json"].as_str())
+            .filter_map(|raw| serde_json::from_str::<PackChatWireEnvelope>(raw).ok())
+            .find(|envelope| envelope.event.kind == PackChatBusEventKind::MessageAppended)
+            .expect("message publish envelope");
+        assert_eq!(
+            published_message
+                .archive_contract
+                .as_ref()
+                .map(|contract| contract.schema.as_str()),
+            Some("harkonnen.calvin.ingress.v1")
+        );
+        assert_eq!(
+            published_message.event.topic,
+            format!("harkonnen/test-setup/chat/{}/message", thread.thread_id)
+        );
+    }
+
+    #[tokio::test]
     async fn pending_memory_candidate_scan_includes_retry_pending() {
         let pool = SqlitePool::connect("sqlite::memory:").await.expect("pool");
         create_memory_candidates_table(&pool).await;

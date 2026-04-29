@@ -2554,3 +2554,1077 @@ mod tests {
         assert!(text.contains("\"ok\":true"));
     }
 }
+
+// ─────────────────────────────────────────────────────────────────────────────
+// MCP SERVER END-TO-END TESTS
+// Tests exercise handle_rpc_body directly using an in-process McpState backed
+// by a temporary directory and an isolated SQLite database.
+// ─────────────────────────────────────────────────────────────────────────────
+#[cfg(test)]
+mod mcp_e2e {
+    use super::*;
+    use serde_json::json;
+    use std::{sync::Arc, time::Instant};
+    use tokio::sync::RwLock;
+
+    // ── Test helpers ──────────────────────────────────────────────────────────
+
+    /// Build a minimal McpState backed by a temp directory.
+    /// Returns `(state, _dir)` — keep `_dir` alive for the test duration.
+    async fn build_test_state() -> (McpState, tempfile::TempDir) {
+        let tmp = tempfile::TempDir::new().unwrap();
+        let root = tmp.path().to_path_buf();
+        let factory = root.join("factory");
+        for sub in [
+            "specs",
+            "scenarios",
+            "artifacts",
+            "logs",
+            "workspaces",
+            "memory",
+        ] {
+            tokio::fs::create_dir_all(factory.join(sub)).await.unwrap();
+        }
+        tokio::fs::create_dir_all(root.join("products"))
+            .await
+            .unwrap();
+
+        let setup = crate::setup::SetupConfig::discover(&root).unwrap();
+        let paths = crate::config::Paths {
+            root: root.clone(),
+            factory: factory.clone(),
+            specs: factory.join("specs"),
+            scenarios: factory.join("scenarios"),
+            artifacts: factory.join("artifacts"),
+            logs: factory.join("logs"),
+            workspaces: factory.join("workspaces"),
+            memory: factory.join("memory"),
+            db_file: factory.join("state.db"),
+            products: root.join("products"),
+            setup: setup.clone(),
+        };
+
+        let pool = crate::db::init_db(&paths).await.unwrap();
+        let memory_store = crate::memory::MemoryStore::new(paths.memory.clone());
+        let coobie = crate::coobie::SqliteCoobie::new(pool.clone());
+        let (event_tx, _) = tokio::sync::broadcast::channel(512);
+        let bus = Arc::new(crate::chat::LocalJsonlPackChatBus::new(
+            paths.logs.join("packchat-bus.jsonl"),
+            "test",
+        ));
+        let chat = crate::chat::ChatStore::with_bus(pool.clone(), bus);
+        let operator_models = crate::operator_model::OperatorModelStore::new(pool.clone());
+        let dispatcher =
+            crate::subagent::SubAgentDispatcher::new(Default::default(), setup.clone());
+
+        let app = crate::orchestrator::AppContext {
+            paths,
+            pool,
+            memory_store,
+            blackboard: Arc::new(RwLock::new(crate::models::BlackboardState::default())),
+            coobie,
+            embedding_store: None,
+            event_tx,
+            chat,
+            operator_models,
+            started_at: Instant::now(),
+            calvin: None,
+            open_brain: None,
+            dispatcher,
+        };
+
+        let state = McpState {
+            app,
+            started_at: Instant::now(),
+        };
+        (state, tmp)
+    }
+
+    /// Call `handle_rpc_body` and return the inner `result` field.
+    /// Panics if the RPC response carries an error.
+    async fn rpc(state: &McpState, body: serde_json::Value) -> serde_json::Value {
+        match handle_rpc_body(state, body)
+            .await
+            .expect("handle_rpc_body returned Err")
+        {
+            Some(resp) => {
+                assert!(
+                    resp.get("error").is_none(),
+                    "unexpected RPC error: {}",
+                    resp
+                );
+                resp["result"].clone()
+            }
+            None => serde_json::Value::Null,
+        }
+    }
+
+    /// Call `handle_rpc_body` and expect an error.  Returns `(code, message)`.
+    async fn rpc_err(state: &McpState, body: serde_json::Value) -> (i64, String) {
+        match handle_rpc_body(state, body).await {
+            Err(err) => {
+                let code = err["error"]["code"].as_i64().unwrap_or(0);
+                let message = err["error"]["message"].as_str().unwrap_or("").to_string();
+                (code, message)
+            }
+            Ok(Some(resp)) if resp.get("error").is_some() => {
+                let code = resp["error"]["code"].as_i64().unwrap_or(0);
+                let message = resp["error"]["message"].as_str().unwrap_or("").to_string();
+                (code, message)
+            }
+            Ok(other) => panic!("expected error, got: {other:?}"),
+        }
+    }
+
+    /// Build a tools/call envelope.
+    fn call(id: u64, tool: &str, args: serde_json::Value) -> serde_json::Value {
+        json!({
+            "jsonrpc": "2.0",
+            "id": id,
+            "method": "tools/call",
+            "params": { "name": tool, "arguments": args }
+        })
+    }
+
+    /// Parse the text content of a tool result as JSON.
+    fn parse_tool_json(result: &serde_json::Value) -> serde_json::Value {
+        let text = result["content"][0]["text"]
+            .as_str()
+            .expect("expected text content");
+        serde_json::from_str(text).expect("expected JSON in tool result text")
+    }
+
+    /// Get the plain-text content of a tool result.
+    fn tool_text(result: &serde_json::Value) -> &str {
+        result["content"][0]["text"]
+            .as_str()
+            .expect("expected text content")
+    }
+
+    /// Write a minimal valid spec YAML and return the absolute path.
+    async fn write_test_spec(paths: &crate::config::Paths, name: &str) -> String {
+        let spec_path = paths.specs.join(format!("{name}.yaml"));
+        let yaml = format!(
+            "id: {name}\ntitle: {name} Test Spec\npurpose: MCP E2E test\n\
+             scope: [test]\nconstraints: []\ninputs: []\noutputs: []\n\
+             acceptance_criteria: [test passes]\nforbidden_behaviors: []\n\
+             rollback_requirements: []\ndependencies: []\n\
+             performance_expectations: []\nsecurity_expectations: []\n"
+        );
+        tokio::fs::write(&spec_path, yaml).await.unwrap();
+        spec_path.to_string_lossy().into_owned()
+    }
+
+    /// Create a product directory and return the absolute path.
+    async fn make_product_dir(paths: &crate::config::Paths, name: &str) -> String {
+        let product_dir = paths.products.join(name);
+        tokio::fs::create_dir_all(&product_dir).await.unwrap();
+        product_dir.to_string_lossy().into_owned()
+    }
+
+    // ── Protocol ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn initialize_returns_server_info() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 1,
+                "method": "initialize",
+                "params": { "protocolVersion": "2025-11-25" }
+            }),
+        )
+        .await;
+        assert_eq!(result["serverInfo"]["name"], "harkonnen-labs");
+        assert!(result["capabilities"]["tools"].is_object());
+        assert_eq!(result["protocolVersion"], "2025-11-25");
+    }
+
+    #[tokio::test]
+    async fn ping_returns_ok() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": 2, "method": "ping", "params": {} }),
+        )
+        .await;
+        assert_eq!(result["ok"], true);
+    }
+
+    #[tokio::test]
+    async fn notifications_initialized_returns_no_content() {
+        let (state, _dir) = build_test_state().await;
+        let result = handle_rpc_body(
+            &state,
+            json!({ "jsonrpc": "2.0", "method": "notifications/initialized", "params": {} }),
+        )
+        .await
+        .unwrap();
+        assert!(
+            result.is_none(),
+            "notifications/initialized must return None"
+        );
+    }
+
+    #[tokio::test]
+    async fn tools_list_includes_all_expected_tools() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": 3, "method": "tools/list", "params": {} }),
+        )
+        .await;
+        let names: Vec<String> = result["tools"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|t| t["name"].as_str().unwrap().to_string())
+            .collect();
+
+        for expected in [
+            "list_runs",
+            "get_run",
+            "get_run_report",
+            "start_run",
+            "queue_run",
+            "watch_run",
+            "list_run_decisions",
+            "get_run_reasoning_snapshot",
+            "get_run_board_snapshot",
+            "list_chat_threads",
+            "open_chat_thread",
+            "get_chat_thread",
+            "list_chat_messages",
+            "post_chat_message",
+            "list_run_checkpoints",
+            "reply_to_checkpoint",
+            "unblock_agent",
+            "read_file",
+            "write_file",
+            "list_directory",
+            "create_directory",
+            "memory_store",
+            "memory_retrieve",
+            "memory_list",
+            "memory_pull",
+            "db_list_tables",
+            "db_query",
+            "list_benchmark_suites",
+            "run_benchmarks",
+            "list_benchmark_reports",
+            "get_benchmark_report",
+        ] {
+            assert!(
+                names.contains(&expected.to_string()),
+                "missing tool: {expected}"
+            );
+        }
+    }
+
+    #[tokio::test]
+    async fn resources_list_includes_core_uris() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": 4, "method": "resources/list", "params": {} }),
+        )
+        .await;
+        let resources = result["resources"].as_array().unwrap();
+        let uris: Vec<&str> = resources
+            .iter()
+            .filter_map(|r| r["uri"].as_str().or_else(|| r["uriTemplate"].as_str()))
+            .collect();
+        assert!(
+            uris.contains(&"harkonnen://runs"),
+            "missing harkonnen://runs"
+        );
+        assert!(
+            uris.contains(&"harkonnen://chat/threads"),
+            "missing harkonnen://chat/threads"
+        );
+        assert!(
+            uris.contains(&"harkonnen://benchmarks/suites"),
+            "missing harkonnen://benchmarks/suites"
+        );
+    }
+
+    #[tokio::test]
+    async fn prompts_list_includes_live_hydrated_prompts() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": 5, "method": "prompts/list", "params": {} }),
+        )
+        .await;
+        let names: Vec<&str> = result["prompts"]
+            .as_array()
+            .unwrap()
+            .iter()
+            .map(|p| p["name"].as_str().unwrap())
+            .collect();
+        for expected in [
+            "coobie/briefing",
+            "sable/eval-setup",
+            "scout/preflight",
+            "keeper/policy-check",
+        ] {
+            assert!(names.contains(&expected), "missing prompt: {expected}");
+        }
+    }
+
+    #[tokio::test]
+    async fn batch_request_is_rejected() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            json!([{ "jsonrpc": "2.0", "id": 1, "method": "ping", "params": {} }]),
+        )
+        .await;
+        assert_eq!(code, -32600);
+        assert!(
+            msg.contains("batch"),
+            "expected 'batch' in error message, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_method_returns_method_not_found() {
+        let (state, _dir) = build_test_state().await;
+        let (code, _msg) = rpc_err(
+            &state,
+            json!({ "jsonrpc": "2.0", "id": 6, "method": "no_such_method", "params": {} }),
+        )
+        .await;
+        assert_eq!(code, -32601);
+    }
+
+    // ── DB tools ──────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn db_list_tables_returns_core_schema_tables() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(&state, call(10, "db_list_tables", json!({}))).await;
+        let text = tool_text(&result);
+        assert!(text.contains("runs"), "'runs' table not found: {text}");
+        assert!(
+            text.contains("run_events"),
+            "'run_events' table not found: {text}"
+        );
+        assert!(
+            text.contains("chat_threads"),
+            "'chat_threads' table not found: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn db_query_select_on_empty_runs_returns_no_rows() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            call(
+                11,
+                "db_query",
+                json!({ "sql": "SELECT run_id, status FROM runs LIMIT 10" }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            text.contains("(no rows)"),
+            "expected '(no rows)' on empty DB, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn db_query_rejects_non_select_statements() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            call(
+                12,
+                "db_query",
+                json!({ "sql": "INSERT INTO runs VALUES ('x','y','z','q','n','n')" }),
+            ),
+        )
+        .await;
+        assert_eq!(code, -32602);
+        assert!(
+            msg.to_lowercase().contains("select"),
+            "expected SELECT-only message, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn db_query_with_prefix_returns_rows() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            call(
+                13,
+                "db_query",
+                json!({ "sql": "SELECT name FROM sqlite_master WHERE type='table' ORDER BY name LIMIT 5" }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            text.contains("row(s)"),
+            "expected 'row(s)' in output, got: {text}"
+        );
+    }
+
+    // ── Memory tools ──────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn memory_store_confirms_write() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            call(
+                20,
+                "memory_store",
+                json!({
+                    "content": "Thin evidence requires explicit preflight checks.",
+                    "tags": ["coobie", "preflight"]
+                }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            text.contains("stored"),
+            "expected store confirmation, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_list_shows_entry_after_store() {
+        let (state, _dir) = build_test_state().await;
+        rpc(
+            &state,
+            call(
+                21,
+                "memory_store",
+                json!({ "content": "Mason succeeded on auth module." }),
+            ),
+        )
+        .await;
+
+        let result = rpc(&state, call(22, "memory_list", json!({ "limit": 10 }))).await;
+        let text = tool_text(&result);
+        assert!(
+            !text.contains("Memory is empty."),
+            "memory_list should show stored entry, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_retrieve_returns_non_empty_text() {
+        let (state, _dir) = build_test_state().await;
+        rpc(
+            &state,
+            call(
+                23,
+                "memory_store",
+                json!({ "content": "Scout flagged ambiguity in the auth scope definition." }),
+            ),
+        )
+        .await;
+
+        let result = rpc(
+            &state,
+            call(
+                24,
+                "memory_retrieve",
+                json!({ "query": "scout auth scope ambiguity", "limit": 5 }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            !text.is_empty(),
+            "memory_retrieve must return non-empty text"
+        );
+    }
+
+    #[tokio::test]
+    async fn memory_pull_returns_structured_header() {
+        let (state, _dir) = build_test_state().await;
+        rpc(
+            &state,
+            call(
+                25,
+                "memory_store",
+                json!({ "content": "Coobie preflight: check for stale runs before starting." }),
+            ),
+        )
+        .await;
+
+        let result = rpc(
+            &state,
+            call(
+                26,
+                "memory_pull",
+                json!({ "query": "coobie preflight stale runs", "scope": "general", "max_tokens": 300 }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(!text.is_empty(), "memory_pull must return non-empty text");
+    }
+
+    #[tokio::test]
+    async fn memory_pull_sable_scope_filters_implementation_notes() {
+        let (state, _dir) = build_test_state().await;
+        // Store content that contains the disallowed tag text
+        rpc(
+            &state,
+            call(
+                27,
+                "memory_store",
+                json!({ "content": "[implementation_notes] Mason used trait objects for the auth abstraction." }),
+            ),
+        )
+        .await;
+
+        let result = rpc(
+            &state,
+            call(
+                28,
+                "memory_pull",
+                json!({
+                    "query": "implementation notes auth mason",
+                    "scope": "sable",
+                    "max_tokens": 400
+                }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        // Under sable scope, hits containing "implementation_notes" are filtered out
+        assert!(
+            !text.contains("Mason used trait objects"),
+            "sable scope must suppress implementation_notes content"
+        );
+    }
+
+    // ── File tools ────────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn write_and_read_file_round_trip() {
+        let (state, _dir) = build_test_state().await;
+        let ws_run = state.app.paths.workspaces.join("rw-test");
+        tokio::fs::create_dir_all(&ws_run).await.unwrap();
+        let ws_path = "factory/workspaces/rw-test/output.txt";
+
+        let write_result = rpc(
+            &state,
+            call(
+                30,
+                "write_file",
+                json!({ "path": ws_path, "content": "Hello from write_file." }),
+            ),
+        )
+        .await;
+        assert!(
+            tool_text(&write_result).contains("wrote"),
+            "expected write confirmation"
+        );
+
+        let read_result = rpc(&state, call(31, "read_file", json!({ "path": ws_path }))).await;
+        assert_eq!(tool_text(&read_result), "Hello from write_file.");
+    }
+
+    #[tokio::test]
+    async fn read_file_outside_allowed_paths_rejected() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            call(32, "read_file", json!({ "path": "/etc/passwd" })),
+        )
+        .await;
+        assert_eq!(code, -32602);
+        assert!(
+            msg.contains("outside"),
+            "expected 'outside allowed' in error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn write_file_outside_workspaces_rejected() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            call(
+                33,
+                "write_file",
+                json!({ "path": "factory/memory/sneaky.md", "content": "should not write" }),
+            ),
+        )
+        .await;
+        assert_eq!(code, -32602);
+        assert!(
+            msg.contains("outside"),
+            "expected 'outside allowed write' in error, got: {msg}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_directory_shows_written_file() {
+        let (state, _dir) = build_test_state().await;
+        let ws_dir = state.app.paths.workspaces.join("dir-test");
+        tokio::fs::create_dir_all(&ws_dir).await.unwrap();
+        tokio::fs::write(ws_dir.join("result.json"), b"{}")
+            .await
+            .unwrap();
+
+        let result = rpc(
+            &state,
+            call(
+                34,
+                "list_directory",
+                json!({ "path": "factory/workspaces/dir-test" }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            text.contains("result.json"),
+            "expected result.json in listing, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn create_directory_in_workspace() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            call(
+                35,
+                "create_directory",
+                json!({ "path": "factory/workspaces/new-dir/sub" }),
+            ),
+        )
+        .await;
+        let text = tool_text(&result);
+        assert!(
+            text.contains("created"),
+            "expected 'created' confirmation, got: {text}"
+        );
+        assert!(
+            state.app.paths.workspaces.join("new-dir/sub").exists(),
+            "directory must exist after create_directory"
+        );
+    }
+
+    // ── Run lifecycle via MCP ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn list_runs_empty_on_fresh_database() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(&state, call(40, "list_runs", json!({ "limit": 20 }))).await;
+        let runs = parse_tool_json(&result);
+        assert!(
+            runs.as_array().map(|a| a.is_empty()).unwrap_or(false),
+            "expected empty run list, got: {runs}"
+        );
+    }
+
+    #[tokio::test]
+    async fn queue_run_creates_queued_record() {
+        let (state, _dir) = build_test_state().await;
+        let spec = write_test_spec(&state.app.paths, "queue-run-spec").await;
+        let product = make_product_dir(&state.app.paths, "queue-run-product").await;
+
+        let result = rpc(
+            &state,
+            call(
+                41,
+                "queue_run",
+                json!({ "spec": spec, "product_path": product, "run_hidden_scenarios": false }),
+            ),
+        )
+        .await;
+        let info = parse_tool_json(&result);
+        let run_id = info["run_id"]
+            .as_str()
+            .expect("queue_run must return run_id");
+        // Status is initially "queued" but the background task may complete (and fail
+        // without a real LLM) before queue_run returns its record in test contexts.
+        let status = info["status"].as_str().unwrap_or("");
+        assert!(
+            ["queued", "running", "failed", "completed"].contains(&status),
+            "run must have a valid status, got: {status}"
+        );
+        assert!(info["spec_id"].as_str().is_some(), "run must carry spec_id");
+        assert!(!run_id.is_empty(), "run_id must not be empty");
+    }
+
+    #[tokio::test]
+    async fn get_run_returns_matching_queued_record() {
+        let (state, _dir) = build_test_state().await;
+        let spec = write_test_spec(&state.app.paths, "get-run-spec").await;
+        let product = make_product_dir(&state.app.paths, "get-run-product").await;
+
+        let queue_result = rpc(
+            &state,
+            call(
+                42,
+                "queue_run",
+                json!({ "spec": spec, "product_path": product, "run_hidden_scenarios": false }),
+            ),
+        )
+        .await;
+        let run_id = parse_tool_json(&queue_result)["run_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let get_result = rpc(&state, call(43, "get_run", json!({ "run_id": &run_id }))).await;
+        let run = parse_tool_json(&get_result);
+        assert_eq!(run["run_id"], run_id);
+        // Status may have transitioned from "queued" to "failed" by the time we
+        // call get_run (background execution fails fast without a real LLM).
+        let status = run["status"].as_str().unwrap_or("");
+        assert!(
+            ["queued", "running", "failed", "completed"].contains(&status),
+            "run status must be a valid value, got: {status}"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_runs_shows_queued_run() {
+        let (state, _dir) = build_test_state().await;
+        let spec = write_test_spec(&state.app.paths, "list-runs-spec").await;
+        let product = make_product_dir(&state.app.paths, "list-runs-product").await;
+
+        let queue_result = rpc(
+            &state,
+            call(
+                44,
+                "queue_run",
+                json!({ "spec": spec, "product_path": product, "run_hidden_scenarios": false }),
+            ),
+        )
+        .await;
+        let run_id = parse_tool_json(&queue_result)["run_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let list_result = rpc(&state, call(45, "list_runs", json!({ "limit": 10 }))).await;
+        let runs = parse_tool_json(&list_result);
+        let arr = runs.as_array().unwrap();
+        assert!(!arr.is_empty(), "list_runs must show the queued run");
+        assert!(
+            arr.iter().any(|r| r["run_id"] == run_id),
+            "queued run_id must appear in list"
+        );
+    }
+
+    #[tokio::test]
+    async fn watch_run_snapshot_contains_required_fields() {
+        let (state, _dir) = build_test_state().await;
+        let spec = write_test_spec(&state.app.paths, "watch-run-spec").await;
+        let product = make_product_dir(&state.app.paths, "watch-run-product").await;
+
+        let queue_result = rpc(
+            &state,
+            call(
+                46,
+                "queue_run",
+                json!({ "spec": spec, "product_path": product, "run_hidden_scenarios": false }),
+            ),
+        )
+        .await;
+        let run_id = parse_tool_json(&queue_result)["run_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let watch_result = rpc(
+            &state,
+            call(
+                47,
+                "watch_run",
+                json!({ "run_id": &run_id, "event_limit": 5 }),
+            ),
+        )
+        .await;
+        let payload = parse_tool_json(&watch_result);
+        assert_eq!(
+            payload["run"]["run_id"], run_id,
+            "watch_run must include run record"
+        );
+        assert!(
+            payload["recent_events"].is_array(),
+            "watch_run must include recent_events"
+        );
+        assert!(
+            payload["active_checkpoints"].is_array(),
+            "watch_run must include active_checkpoints"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_run_checkpoints_empty_for_new_run() {
+        let (state, _dir) = build_test_state().await;
+        let spec = write_test_spec(&state.app.paths, "checkpoint-spec").await;
+        let product = make_product_dir(&state.app.paths, "checkpoint-product").await;
+
+        let queue_result = rpc(
+            &state,
+            call(
+                48,
+                "queue_run",
+                json!({ "spec": spec, "product_path": product, "run_hidden_scenarios": false }),
+            ),
+        )
+        .await;
+        let run_id = parse_tool_json(&queue_result)["run_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let cp_result = rpc(
+            &state,
+            call(49, "list_run_checkpoints", json!({ "run_id": &run_id })),
+        )
+        .await;
+        let checkpoints = parse_tool_json(&cp_result);
+        assert!(
+            checkpoints.as_array().map(|a| a.is_empty()).unwrap_or(true),
+            "freshly queued run should have no open checkpoints"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_run_not_found_returns_error() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            call(50, "get_run", json!({ "run_id": "nonexistent-xyz" })),
+        )
+        .await;
+        assert_eq!(code, -32004, "missing run must return -32004");
+        assert!(
+            msg.contains("nonexistent-xyz"),
+            "error must name the missing run_id"
+        );
+    }
+
+    // ── Chat / PackChat tools ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn open_and_get_chat_thread_round_trip() {
+        let (state, _dir) = build_test_state().await;
+
+        let open_result = rpc(
+            &state,
+            call(
+                60,
+                "open_chat_thread",
+                json!({ "title": "E2E Thread", "thread_kind": "general" }),
+            ),
+        )
+        .await;
+        let thread = parse_tool_json(&open_result);
+        let thread_id = thread["thread_id"]
+            .as_str()
+            .expect("open_chat_thread must return thread_id")
+            .to_string();
+
+        let get_result = rpc(
+            &state,
+            call(61, "get_chat_thread", json!({ "thread_id": &thread_id })),
+        )
+        .await;
+        let fetched = parse_tool_json(&get_result);
+        assert_eq!(
+            fetched["thread_id"], thread_id,
+            "get_chat_thread must return matching thread_id"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_chat_threads_shows_opened_thread() {
+        let (state, _dir) = build_test_state().await;
+
+        rpc(
+            &state,
+            call(
+                62,
+                "open_chat_thread",
+                json!({ "title": "List Test Thread", "thread_kind": "general" }),
+            ),
+        )
+        .await;
+
+        let list_result = rpc(
+            &state,
+            call(
+                63,
+                "list_chat_threads",
+                json!({ "thread_kind": "general", "limit": 10 }),
+            ),
+        )
+        .await;
+        let threads = parse_tool_json(&list_result);
+        assert!(
+            threads.as_array().map(|a| !a.is_empty()).unwrap_or(false),
+            "list_chat_threads must show the opened thread"
+        );
+    }
+
+    #[tokio::test]
+    async fn list_chat_messages_empty_on_new_thread() {
+        let (state, _dir) = build_test_state().await;
+
+        let open_result = rpc(
+            &state,
+            call(
+                64,
+                "open_chat_thread",
+                json!({ "title": "Empty Thread", "thread_kind": "general" }),
+            ),
+        )
+        .await;
+        let thread_id = parse_tool_json(&open_result)["thread_id"]
+            .as_str()
+            .unwrap()
+            .to_string();
+
+        let msg_result = rpc(
+            &state,
+            call(65, "list_chat_messages", json!({ "thread_id": &thread_id })),
+        )
+        .await;
+        let messages = parse_tool_json(&msg_result);
+        assert!(
+            messages.as_array().map(|a| a.is_empty()).unwrap_or(true),
+            "new thread must have no messages"
+        );
+    }
+
+    #[tokio::test]
+    async fn get_chat_thread_not_found_returns_error() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(
+            &state,
+            call(
+                66,
+                "get_chat_thread",
+                json!({ "thread_id": "nonexistent-thread-abc" }),
+            ),
+        )
+        .await;
+        assert_eq!(code, -32004);
+        assert!(
+            msg.contains("nonexistent-thread-abc"),
+            "error must name the missing thread_id"
+        );
+    }
+
+    // ── Error handling ────────────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn missing_required_param_returns_invalid_params() {
+        let (state, _dir) = build_test_state().await;
+        // get_run requires run_id
+        let (code, msg) = rpc_err(&state, call(70, "get_run", json!({}))).await;
+        assert_eq!(code, -32602, "missing required param must return -32602");
+        assert!(
+            msg.contains("run_id"),
+            "error must name the missing parameter"
+        );
+    }
+
+    #[tokio::test]
+    async fn unknown_tool_name_returns_method_not_found() {
+        let (state, _dir) = build_test_state().await;
+        let (code, msg) = rpc_err(&state, call(71, "no_such_tool_ever_xyz", json!({}))).await;
+        assert_eq!(code, -32601);
+        assert!(
+            msg.contains("no_such_tool_ever_xyz"),
+            "error must name the unknown tool"
+        );
+    }
+
+    // ── Live-hydrated prompts ─────────────────────────────────────────────────
+
+    #[tokio::test]
+    async fn coobie_briefing_prompt_returns_messages() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 80,
+                "method": "prompts/get",
+                "params": {
+                    "name": "coobie/briefing",
+                    "arguments": {
+                        "keywords": "scout,spec,ambiguity",
+                        "phase": "preflight"
+                    }
+                }
+            }),
+        )
+        .await;
+        let messages = result["messages"]
+            .as_array()
+            .expect("must have messages array");
+        assert!(!messages.is_empty(), "coobie/briefing must return messages");
+        let text = messages[0]["content"]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("Coobie"),
+            "coobie/briefing text must reference Coobie, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn keeper_policy_check_prompt_echoes_action() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 81,
+                "method": "prompts/get",
+                "params": {
+                    "name": "keeper/policy-check",
+                    "arguments": {
+                        "action": "write to factory/scenarios",
+                        "context": "Sable wants to add a hidden scenario file"
+                    }
+                }
+            }),
+        )
+        .await;
+        let messages = result["messages"].as_array().unwrap();
+        assert!(!messages.is_empty());
+        let text = messages[0]["content"]["text"].as_str().unwrap_or("");
+        assert!(
+            text.contains("write to factory/scenarios"),
+            "keeper prompt must echo the action, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn scout_preflight_prompt_returns_messages() {
+        let (state, _dir) = build_test_state().await;
+        let result = rpc(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 82,
+                "method": "prompts/get",
+                "params": {
+                    "name": "scout/preflight",
+                    "arguments": { "spec_id": "auth-spec-001" }
+                }
+            }),
+        )
+        .await;
+        let messages = result["messages"].as_array().unwrap();
+        assert!(!messages.is_empty(), "scout/preflight must return messages");
+    }
+}

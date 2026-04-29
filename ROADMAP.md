@@ -335,6 +335,10 @@ Twilight Bark / PackChat envelope
 - OB1 reader path already started by `OpenBrainClient::search_thoughts`; complete the ranking so OB1 hits sit beside repo-local memory, PackChat recency, and Calvin-approved facts in targeted Coobie briefings.
 - Calvin promotion contract for `calvin_candidate` rows. The contract includes proposed chamber targets, evidence refs, inference posture, confidence, Pathos score, preservation note, and recommended governance outcome: `accept`, `modify`, `reject`, or `quarantine`.
 - Operator review surface in the Consolidation Workbench for memory candidates and Calvin promotions. OB1 shared recall may be automatic for low-risk approved classes; Calvin promotion remains governed.
+- **Compiled Calvin promotion contracts** — **NEXT**. Extend `harkonnen.calvin.promotion.v1` with the gbrain-inspired shape Harkonnen needs: `compiled_claim`, append-only `evidence_timeline`, `source_authority`, `staleness_triggers`, `review_state`, and `integration_recommendation`. This is a contract upgrade only; Calvin canonical state still changes only after governance accepts or modifies the proposal.
+- **`needs_reconsolidation` stale-memory status** — **NEXT**. When newer evidence contradicts, narrows, broadens, or changes confidence for a distilled OB1 memory or Calvin proposal, mark it `needs_reconsolidation` instead of overwriting the previous compiled claim. The operator/API surface should show why the item became stale and which evidence triggered it.
+- **Memory chain health report** — **NEXT**. Add a report/API/UI panel covering candidate backlog, OB1 capture failures, Calvin promotion backlog, stale distillations, missing evidence refs, duplicate OB1 thoughts, sensitivity holds, and OpenZiti readiness for `twilight-bark.packchat`, `openbrain.mcp`, `calvin.archive`, and `harkonnen.api`.
+- **Source authority taxonomy** — **NEXT**. Classify evidence sources as operator, agent observation, tool output, test result, code diff, PackChat statement, OB1 recall, or Calvin-approved fact. Use the taxonomy in compiled claims, dedupe, staleness checks, and promotion confidence.
 - **Automatic candidate processing on run close** — **SHIPPED 2026-04-28**. `try_process_memory_candidates_on_close(run_id)` is now called immediately after `try_close_calvin_run()` at both successful and failed run completion paths in `orchestrator.rs`. Processing failures log a warning and leave candidates as `pending` for manual retry (retry scheduler remains future work). E2E test: `memory_candidates::run_close_triggers_candidate_processing` — green.
 - **Candidate retry semantics** — **SHIPPED 2026-04-28**. OB1 capture failures and Calvin promotion enqueue failures now mark candidates as `retry_pending`, and the candidate processor scans both `pending` and `retry_pending` rows so manual/API-triggered processing retries transient failures instead of silently stalling. `OpenBrainClient` now uses a configurable short timeout (`open_brain.timeout_ms`, default 2500 ms) so OB1 outages do not block productive run close for 30 seconds. Regression test: `chat::tests::pending_memory_candidate_scan_includes_retry_pending` — green.
 - **Candidate retry/operator surface** — **SHIPPED 2026-04-28**. `GET /api/runs/{id}/memory/candidates` now returns `status_counts`, `retryable`, and `actionable` totals covering `pending`, `retry_pending`, `waiting_openbrain`, `held_for_review`, `captured_openbrain`, and `promotion_pending`; `POST /api/runs/{id}/memory/candidates/retry` is a clear retry alias for the processing endpoint. The Run Detail drawer now includes a Memory tab with candidate counts, status chips, recent candidate previews, and a one-click retry action.
@@ -346,6 +350,11 @@ Twilight Bark / PackChat envelope
 - **Agent presence TTL watcher → Calvin agent status** — **SHIPPED 2026-04-28**. `spawn_twilight_ingest_loop()` now maintains a `HashMap<agent_id, Instant>` presence tracker that persists across reconnect cycles. On each loop iteration, agents not seen for > 600 s are marked `"offline"` via `PATCH /agents/{name}/status`. Activity events reset the last-seen timestamp. New endpoint added: `PATCH /agents/{name}/status` on Calvin, `update_agent_status()` on `CalvinClient` and `ArchiveStore`. E2E test: `twilight::agent_presence_expiry_updates_calvin_agent_status` — green.
 - **Twilight Bark dependency-direction guard** — **SHIPPED 2026-04-28**. `src/chat.rs` now names the Harkonnen-owned PackChat topic root and Twilight operation label explicitly, and the publish path builds a generic Twilight `publish_task` command carrying an opaque `harkonnen.packchat.event` payload. Regression test: `chat::tests::twilight_bridge_uses_harkonnen_owned_operation_over_generic_task_ipc` — green. This protects the boundary that Harkonnen depends on Twilight Bark as transport while Twilight Bark remains Harkonnen-agnostic.
 - **OB1 capture-to-briefing round trip** — **SHIPPED 2026-04-29**. The Phase 5-D product gate now has a real in-process smoke test for the Harkonnen side of the chain: a `shared_recall` memory candidate is processed by `process_memory_candidates()`, captured through `OpenBrainClient::capture_thought`, marked `captured_openbrain`, and then retrieved through Coobie's `collect_memory_hits()` briefing path via `OpenBrainClient::search_thoughts`. Regression test: `orchestrator::tests::memory_candidate_capture_is_retrievable_from_openbrain_briefing_path` — green.
+- **Calvin governed promotion round trip** — **SHIPPED 2026-04-29**. A `calvin_candidate` memory candidate now has an executable smoke test proving it becomes a `harkonnen.calvin.promotion.v1` consolidation candidate with `promotion_pending` status and a preservation note that Calvin canonical state must not be mutated until governance accepts, modifies, rejects, or quarantines it. Regression test: `orchestrator::tests::calvin_candidate_becomes_governed_promotion_without_archive_mutation` — green.
+- **Sensitivity gate before OB1** — **SHIPPED 2026-04-29**. Sensitive shared-recall candidates are held as `held_for_review` and are not sent to OB1 until an operator approves them. Regression test: `orchestrator::tests::sensitive_shared_recall_is_held_and_not_sent_to_openbrain` — green.
+- **Five-message PackChat candidate smoke** — **SHIPPED 2026-04-29**. A realistic five-message run-scoped PackChat thread now has a regression test proving it creates memory candidates, including both shared-recall and Calvin-candidate classifications. Regression test: `chat::tests::five_message_packchat_thread_produces_memory_candidates` — green.
+- **Twilight bridge smoke** — **SHIPPED 2026-04-29**. A mock Twilight daemon now receives real `TwilightPackChatBus` publishes from `ChatStore`; the local store records the memory candidate while the outbound `harkonnen.packchat.v1` envelope carries the Calvin ingress contract. Regression test: `chat::tests::twilight_publish_smoke_preserves_memory_candidate_and_calvin_contract` — green.
+- **Operator Calvin proposal visibility** — **SHIPPED 2026-04-29**. The Memory tab renders a Calvin proposal preview for `harkonnen.calvin.promotion.v1` contracts, including governance outcome, chamber targets, and preservation note, so `promotion_pending` is inspectable rather than only counted.
 
 ### OpenZiti service profile
 
@@ -363,16 +372,29 @@ OpenZiti Dial and Bind policies should be separate. Privileged writers should ca
 ### Benchmark / product gate
 
 - **E2E integration test suite green — DONE 2026-04-28:** all 20 tests in `tests/e2e_integration.rs` pass. The six gap tests that were failing at roadmap entry are now green: `calvin::beliefs_scoped_to_named_agent`, `calvin::adaptation_safety_catches_semantic_negation`, `twilight::twilight_ingest_loop_writes_to_calvin`, `twilight::chamber_mapping_covers_all_six_chambers`, `twilight::agent_presence_expiry_updates_calvin_agent_status`, `memory_candidates::run_close_triggers_candidate_processing`.
-- A PackChat thread with at least five messages produces one or more memory candidates.
+- A PackChat thread with at least five messages produces one or more memory candidates. **DONE 2026-04-29:** covered by `chat::tests::five_message_packchat_thread_produces_memory_candidates`.
 - A candidate marked `shared_recall` is captured in OB1 and later retrieved by `search_thoughts` during a targeted briefing. **DONE 2026-04-29:** covered by `orchestrator::tests::memory_candidate_capture_is_retrievable_from_openbrain_briefing_path`.
-- A candidate marked `calvin_candidate` produces a structured promotion contract without directly mutating Calvin canonical state.
+- A candidate marked `calvin_candidate` produces a structured promotion contract without directly mutating Calvin canonical state. **DONE 2026-04-29:** covered by `orchestrator::tests::calvin_candidate_becomes_governed_promotion_without_archive_mutation`.
+- Calvin promotion contracts carry a compiled claim and append-only evidence timeline, with source authority and staleness triggers available to the operator review surface.
+- Stale or superseded distilled memories are surfaced as `needs_reconsolidation`, with enough evidence context to decide whether to refresh OB1, promote to Calvin, quarantine, or discard.
+- A memory chain health endpoint and UI panel can answer whether PackChat -> OB1 -> Calvin is clear, blocked, stale, duplicated, or waiting on OpenZiti/service configuration.
 - Candidate dedupe prevents repeated chat phrasing from producing duplicate OB1 thoughts.
-- Sensitivity labels prevent secrets and high-risk payloads from being sent to OB1 without review.
+- Sensitivity labels prevent secrets and high-risk payloads from being sent to OB1 without review. **DONE 2026-04-29:** covered by `orchestrator::tests::sensitive_shared_recall_is_held_and_not_sent_to_openbrain`.
 - Closing a run automatically triggers candidate processing; transient failures are marked `retry_pending` and retried by the same processing endpoint until zero remain after a clean run close.
 - A `causation_id`-bearing wire envelope produces a `causally_contributed_to` link in the Calvin causal graph.
-- OpenZiti policy documentation exists for all four services, including Dial/Bind identity roles.
+- OpenZiti policy documentation exists for all four services, including Dial/Bind identity roles. **DONE 2026-04-29:** `factory/context/openziti-memory-chain.yaml` now includes identity roles, service profiles, suggested local service configs, service-policy templates, and deployment checks.
 
 **Done when:** a live PackChat/Twilight conversation can become a distilled OB1 memory with provenance, the memory can improve a later briefing, identity-relevant material is routed to Calvin as a governed promotion proposal rather than as unstructured prose, and all six E2E integration gap tests pass.
+
+### GBrain/GStack-inspired hardening queue
+
+These patterns are useful, but Harkonnen implements them inside its own contracts and governance model rather than importing gbrain/gstack wholesale.
+
+- **Memory consolidation:** Use gbrain's compiled-truth idea as `compiled_claim + evidence_timeline` inside Calvin promotion contracts. The compiled claim is readable and reviewable; the timeline stays append-only.
+- **Staleness and reconsolidation:** Add `needs_reconsolidation` as a first-class candidate/proposal status for memories whose evidence has changed since distillation.
+- **Health visibility:** Promote `memory_chain_status` into a broader `memory_chain_health` report that covers service readiness, backlog, stale claims, duplicate captures, missing evidence, and Calvin review load.
+- **Code-review learning records:** Store Sable/Bramble/Mason review outcomes as structured lessons: finding fingerprint, files, severity, resolution, lesson extracted, evidence refs, and invalidation rules.
+- **Plan completion audit:** Before run close, compare the accepted roadmap/spec checklist against the actual diff, tests, and artifacts; emit reviewable notes for missing evidence or unimplemented acceptance items.
 
 ---
 
@@ -477,6 +499,12 @@ pub struct ContextUtilization {
 ```
 
 `utilization_rate` is computed post-run by Coobie: scan the agent's output for references to the content of each briefing hit (embedding similarity above a threshold). A briefing with `utilization_rate < 0.2` over multiple runs for the same scope is a signal that the budget is too high or the category filter is too loose. This data feeds the Phase 7 causal corpus and the Phase 8 Episteme chamber's slow-loop policy revision for scope configuration.
+
+### Code-review learning records and completion audit
+
+Sable, Bramble, and Mason review outcomes should become structured memory rather than scattered prose. Store the finding fingerprint, files, severity, resolution (`fixed`, `skipped`, `auto_fixed`), lesson extracted, evidence refs, and stale-if-file-changed invalidation rules. These records feed OB1 shared recall first, then Calvin only when the lesson is identity-, policy-, or causally significant.
+
+Before run close, Harkonnen should run a plan completion audit: turn the accepted roadmap/spec acceptance items into a checklist and compare them with the actual diff, tests, and artifacts. Any missing evidence or unimplemented item becomes a reviewable run note, not a quiet success.
 
 ### Rust-native MCP server consolidation — **SHIPPED 2026-04-29**
 

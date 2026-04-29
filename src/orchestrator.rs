@@ -28543,6 +28543,44 @@ mod tests {
         (dir, app)
     }
 
+    async fn insert_memory_candidate_for_test(
+        app: &AppContext,
+        run_id: &str,
+        candidate_id: &str,
+        retention_class: &str,
+        sensitivity_label: &str,
+        content: &str,
+    ) {
+        sqlx::query(
+            r#"
+            INSERT INTO memory_candidates
+                (candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
+                 agent_runtime_id, agent, role, operation, raw_payload, distilled_content,
+                 dedupe_key, importance_score, retention_class, sensitivity_label,
+                 evidence_refs, causality_json, status, created_at)
+            VALUES (?1, ?2, 'thread-memory-chain', ?3, 'spec-memory-chain', ?4,
+                    'coobie#test', 'coobie', 'agent', 'packchat.message_appended',
+                    ?5, NULL, NULL, 0.82, ?6, ?7, ?8, ?9, 'pending', ?10)
+            "#,
+        )
+        .bind(candidate_id)
+        .bind(format!("event-{candidate_id}"))
+        .bind(run_id)
+        .bind(format!("msg-{candidate_id}"))
+        .bind(json!({"content": content}).to_string())
+        .bind(retention_class)
+        .bind(sensitivity_label)
+        .bind(
+            json!([{"ref_type": "packchat_message", "id": format!("msg-{candidate_id}")}])
+                .to_string(),
+        )
+        .bind(json!({"correlation_id": run_id, "causation_id": null}).to_string())
+        .bind(Utc::now().to_rfc3339())
+        .execute(&app.pool)
+        .await
+        .expect("insert memory candidate");
+    }
+
     fn sample_run(run_id: &str) -> RunRecord {
         RunRecord {
             run_id: run_id.to_string(),
@@ -28697,30 +28735,15 @@ mod tests {
         let candidate_id = format!("candidate-{}", Uuid::new_v4());
         let content =
             "Thin evidence in PackChat requires explicit checks before Mason edits the auth scope.";
-
-        sqlx::query(
-            r#"
-            INSERT INTO memory_candidates
-                (candidate_id, source_event_id, thread_id, run_id, spec_id, message_id,
-                 agent_runtime_id, agent, role, operation, raw_payload, distilled_content,
-                 dedupe_key, importance_score, retention_class, sensitivity_label,
-                 evidence_refs, causality_json, status, created_at)
-            VALUES (?1, ?2, 'thread-ob1', ?3, 'spec-ob1', 'msg-ob1',
-                    'coobie#test', 'coobie', 'agent', 'packchat.message_appended',
-                    ?4, NULL, NULL, 0.82, 'shared_recall', 'normal',
-                    ?5, ?6, 'pending', ?7)
-            "#,
+        insert_memory_candidate_for_test(
+            &app,
+            &run_id,
+            &candidate_id,
+            "shared_recall",
+            "normal",
+            content,
         )
-        .bind(&candidate_id)
-        .bind(format!("event-{candidate_id}"))
-        .bind(&run_id)
-        .bind(json!({"content": content}).to_string())
-        .bind(json!([{"ref_type": "packchat_message", "id": "msg-ob1"}]).to_string())
-        .bind(json!({"correlation_id": run_id.clone(), "causation_id": null}).to_string())
-        .bind(Utc::now().to_rfc3339())
-        .execute(&app.pool)
-        .await
-        .expect("insert memory candidate");
+        .await;
 
         let summary = app
             .process_memory_candidates(Some(&run_id), 10)
@@ -28754,11 +28777,113 @@ mod tests {
             hits.hits.iter().any(|hit| {
                 hit.contains("[open-brain]")
                     && hit.contains("Thin evidence")
-                    && hit.contains("PackChat thread=thread-ob1")
+                    && hit.contains("PackChat thread=thread-memory-chain")
             }),
             "captured OB1 memory should be retrievable through Coobie briefing collection; hits={:?}",
             hits.hits
         );
+    }
+
+    #[tokio::test]
+    async fn calvin_candidate_becomes_governed_promotion_without_archive_mutation() {
+        let (openbrain_url, _thoughts) = spawn_openbrain_round_trip_mock().await;
+        let (_dir, app) = test_app_with_openbrain(openbrain_url).await;
+        let run_id = format!("run-{}", Uuid::new_v4());
+        let candidate_id = format!("candidate-{}", Uuid::new_v4());
+        let content = "Coobie belief update: Calvin archive policy should require governed promotion contracts.";
+
+        insert_memory_candidate_for_test(
+            &app,
+            &run_id,
+            &candidate_id,
+            "calvin_candidate",
+            "normal",
+            content,
+        )
+        .await;
+
+        let summary = app
+            .process_memory_candidates(Some(&run_id), 10)
+            .await
+            .expect("process calvin candidate");
+        assert_eq!(summary.scanned, 1);
+        assert_eq!(summary.calvin_promotions, 1);
+        assert!(app.calvin.is_none(), "test app has no direct Calvin writer");
+
+        let candidates = app
+            .list_memory_candidates_for_run(&run_id)
+            .await
+            .expect("list memory candidates");
+        let memory_candidate = candidates
+            .iter()
+            .find(|candidate| candidate.candidate_id == candidate_id)
+            .expect("memory candidate");
+        assert_eq!(memory_candidate.status, "promotion_pending");
+
+        let contract = memory_candidate
+            .calvin_contract_json
+            .as_ref()
+            .expect("calvin promotion contract");
+        assert_eq!(contract["schema"], "harkonnen.calvin.promotion.v1");
+        assert_eq!(contract["recommended_governance_outcome"], "quarantine");
+        assert!(contract["preservation_note"]
+            .as_str()
+            .unwrap_or_default()
+            .contains("must not be mutated"));
+
+        let promotion_rows = app
+            .list_consolidation_candidates(&run_id)
+            .await
+            .expect("list consolidation candidates");
+        let promotion = promotion_rows
+            .iter()
+            .find(|candidate| candidate.candidate_id == format!("calvin-promotion-{candidate_id}"))
+            .expect("promotion candidate");
+        assert_eq!(promotion.kind, "calvin_promotion");
+        assert_eq!(promotion.status, "pending");
+        assert_eq!(
+            promotion.content_json["schema"],
+            "harkonnen.calvin.promotion.v1"
+        );
+    }
+
+    #[tokio::test]
+    async fn sensitive_shared_recall_is_held_and_not_sent_to_openbrain() {
+        let (openbrain_url, thoughts) = spawn_openbrain_round_trip_mock().await;
+        let (_dir, app) = test_app_with_openbrain(openbrain_url).await;
+        let run_id = format!("run-{}", Uuid::new_v4());
+        let candidate_id = format!("candidate-{}", Uuid::new_v4());
+        let content =
+            "remember this: the staging API key is secret and must stay out of shared recall.";
+
+        insert_memory_candidate_for_test(
+            &app,
+            &run_id,
+            &candidate_id,
+            "shared_recall",
+            "sensitive_review",
+            content,
+        )
+        .await;
+
+        let summary = app
+            .process_memory_candidates(Some(&run_id), 10)
+            .await
+            .expect("process sensitive candidate");
+        assert_eq!(summary.scanned, 1);
+        assert_eq!(summary.held_for_review, 1);
+        assert_eq!(summary.captured_openbrain, 0);
+        assert!(
+            thoughts.lock().expect("thoughts lock").is_empty(),
+            "sensitive candidate must not be sent to OB1 before review"
+        );
+
+        let candidates = app
+            .list_memory_candidates_for_run(&run_id)
+            .await
+            .expect("list memory candidates");
+        assert_eq!(candidates[0].status, "held_for_review");
+        assert!(candidates[0].openbrain_ref.is_none());
     }
 
     #[test]

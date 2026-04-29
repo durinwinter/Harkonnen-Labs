@@ -349,6 +349,8 @@ Twilight Bark / PackChat
 
 **Calvin Archive** is the governed continuity layer. Calvin receives structured promotion contracts, not loose chat prose. Promotion candidates must carry evidence, inference posture, preservation notes, chamber targets, and an integration recommendation: `accept`, `modify`, `reject`, or `quarantine`.
 
+**Compiled claim + evidence timeline** is the promotion shape for Calvin-worthy memory. Borrow the useful gbrain pattern without adopting its storage model: each promotion contract carries an operator-readable `compiled_claim`, append-only `evidence_timeline`, `source_authority`, `staleness_triggers`, `review_state`, and `integration_recommendation`. Newer conflicting evidence should mark the proposal or distilled memory as `needs_reconsolidation`; it must not silently overwrite OB1 recall or Calvin canonical state.
+
 ### OpenZiti Trust Boundary
 
 OpenZiti is the zero-trust connective tissue for the distributed version of the chain. Harkonnen should define separate services and policies for each trust surface:
@@ -845,10 +847,12 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 - Coobie distiller: summarize, dedupe, score importance, classify retention, attach provenance
 - Open Brain writer: `capture_thought` for accepted shared-recall candidates
 - Open Brain reader: `search_thoughts` integrated into targeted Coobie briefings
-- Calvin promotion contract: identity-, belief-, policy-, and high-Pathos candidates become governed archive proposals
+- Calvin promotion contract: identity-, belief-, policy-, and high-Pathos candidates become governed archive proposals with `compiled_claim`, append-only `evidence_timeline`, `source_authority`, `staleness_triggers`, and `review_state`
+- Memory reconsolidation status: stale distilled memories and superseded promotion candidates become `needs_reconsolidation` when newer evidence changes the claim, confidence, sensitivity, or archive recommendation
+- Memory chain health report/API/UI panel: candidate backlog, OB1 capture failures, Calvin promotion backlog, stale distillations, missing evidence refs, duplicate OB1 thoughts, and OpenZiti service readiness
 - OpenZiti service profile for `twilight-bark.packchat`, `openbrain.mcp`, `calvin.archive`, and `harkonnen.api`
 
-**Done when:** a PackChat conversation can produce a durable memory candidate, the candidate can be distilled into an OB1 thought with provenance, the thought can be retrieved in a later briefing, and a Calvin-worthy candidate can be emitted as a structured promotion contract without writing ungoverned prose directly into the archive.
+**Done when:** a PackChat conversation can produce a durable memory candidate, the candidate can be distilled into an OB1 thought with provenance, the thought can be retrieved in a later briefing, and a Calvin-worthy candidate can be emitted as a structured promotion contract without writing ungoverned prose directly into the archive. The health report must make stalled, stale, duplicated, or policy-blocked memory items visible before an operator assumes the chain is clear.
 
 ### Phase 5b — Memory Infrastructure (OB1 + OCR + MCP Prompts)
 
@@ -856,6 +860,8 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 - Qdrant/local vectors remain optional accelerators, not the default path
 - OCR pipeline via Tesseract for scanned PDFs and images
 - Memory module refactor: split `src/memory.rs` into the COOBIE_SPEC module tree
+- Code-review learning records: Sable/Bramble/Mason review outcomes produce structured records with finding fingerprint, files, severity, resolution (`fixed`, `skipped`, `auto_fixed`), lesson extracted, evidence refs, and stale-if-file-changed invalidation rules
+- Plan completion audit: before a run closes, Harkonnen compares the accepted spec/roadmap checklist against the actual diff, tests, and artifacts; mismatches become reviewable run notes rather than quiet success
 
 **Done when:** OB1 serves shared semantic queries through the Harkonnen memory abstraction, OCR-scanned PDFs can be ingested, MCP prompts expose scoped briefings, and `src/memory.rs` is split into the module tree.
 

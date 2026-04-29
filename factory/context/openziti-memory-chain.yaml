@@ -34,6 +34,11 @@ services:
     host_roles: ["#packchat-host"]
     dial_roles: ["#packchat-client", "#memory-writer"]
     posture_roles: ["#enrolled-device"]
+    suggested_config:
+      protocol: tcp
+      address: twilight-bark.packchat.ziti
+      port: 7447
+      upstream: 127.0.0.1:7447
     notes: >
       Live PackChat event bus. Agents may dial to publish and subscribe.
       Only Twilight daemon identities bind the service.
@@ -43,6 +48,11 @@ services:
     dial_roles: ["#recall-reader", "#memory-writer"]
     write_roles: ["#memory-writer"]
     posture_roles: ["#enrolled-device"]
+    suggested_config:
+      protocol: tcp
+      address: openbrain.mcp.ziti
+      port: 7777
+      upstream: 127.0.0.1:7777
     notes: >
       Shared semantic recall. Read access can be broader than write access.
       Harkonnen distiller is the default writer for captured thoughts.
@@ -52,6 +62,11 @@ services:
     dial_roles: ["#calvin-promoter", "#operator"]
     write_roles: ["#calvin-promoter"]
     posture_roles: ["#enrolled-device", "#mfa-operator"]
+    suggested_config:
+      protocol: tcp
+      address: calvin.archive.ziti
+      port: 7171
+      upstream: 127.0.0.1:7171
     notes: >
       Narrow governed continuity surface. Remote agents should not write
       directly; they produce PackChat evidence that Harkonnen promotes.
@@ -60,6 +75,11 @@ services:
     host_roles: ["#harkonnen"]
     dial_roles: ["#harkonnen-api-client", "#operator"]
     posture_roles: ["#enrolled-device"]
+    suggested_config:
+      protocol: tcp
+      address: harkonnen.api.ziti
+      port: 3057
+      upstream: 127.0.0.1:3057
     notes: >
       Run control, candidate review, Pack Board, and approval workflow.
 
@@ -85,6 +105,29 @@ policy_rules:
       Calvin promoters and Open Brain writers should require enrolled-device
       posture checks. Operator identities should require MFA posture checks
       for Calvin archive access where supported.
+
+service_policy_templates:
+  - service: twilight-bark.packchat
+    bind: ["#packchat-host"]
+    dial: ["#packchat-client", "#memory-writer"]
+  - service: openbrain.mcp
+    bind: ["#openbrain-host"]
+    dial: ["#recall-reader", "#memory-writer"]
+    write_guard: "#memory-writer"
+  - service: calvin.archive
+    bind: ["#calvin-host"]
+    dial: ["#calvin-promoter", "#operator"]
+    write_guard: "#calvin-promoter"
+  - service: harkonnen.api
+    bind: ["#harkonnen"]
+    dial: ["#harkonnen-api-client", "#operator"]
+
+deployment_checks:
+  - "Each service has one Bind policy and at least one Dial policy; no identity is granted both by accident."
+  - "Remote agent identities can dial twilight-bark.packchat and openbrain.mcp read paths, but cannot dial calvin.archive unless explicitly promoted."
+  - "Harkonnen distiller identity can dial openbrain.mcp and calvin.archive, but Twilight Bark identities do not import Harkonnen semantics."
+  - "Operator console can dial harkonnen.api and calvin.archive review endpoints with MFA posture where available."
+  - "Local development may keep loopback upstreams; distributed deployment replaces upstream with the host-local daemon/API port on each binder."
 
 candidate_flow:
   - step: packchat-event

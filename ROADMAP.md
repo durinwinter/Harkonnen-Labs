@@ -432,9 +432,15 @@ src/memory/
 
 No behaviour change beyond preserving OB1 as the default semantic recall path. This is the maintainability gate that lets TypeDB's typed causal query implementation slot in cleanly in Phase 6.
 
+**Early split slice shipped 2026-04-29:** briefing ownership moved under the memory namespace without broad call-site churn: `src/memory/briefing.rs` now owns `BriefingScope`, `ContextSection`, and `ContextTarget`, while `models.rs` re-exports them for compatibility. `src/memory/context_budget.rs` owns shared token-budget helpers for prompt/context tests.
+
 ### Open Brain (OB1) semantic integration
 
 Add `src/memory/semantic_openbrain.rs` implementing the `SemanticMemory` trait against Open Brain via the existing `OpenBrainClient`. Payload metadata fields: `org`, `role`, `product`, `spec_id`, `run_id`, `thread_id`, `source_event_id`, `agent`, `memory_type`, `tags`, `sensitivity_label`, `created_at`. OB1 replaces the local vector store as the default long-term semantic memory. SQLite remains the short-term, episodic, causal, and review store. The fastembed/SQLite vector path remains available as `semantic_local.rs` behind `--features local-embeddings`, and Qdrant becomes an optional accelerator only if a future deployment needs local high-volume vector serving.
+
+**First slice shipped 2026-04-29:** `src/memory.rs` moved to `src/memory/mod.rs` as the start of the module split, with `src/memory/semantic.rs` defining `SemanticMemory` / metadata / hit / write contracts and `src/memory/semantic_openbrain.rs` implementing the trait over OB1. `AppContext` now exposes `semantic_memory` as the default long-term recall abstraction; PackChat shared-recall capture, Coobie briefing recall, and MCP memory tools route through the trait when OB1 is configured.
+
+**Fallback slice shipped 2026-04-29:** `NoopSemanticMemory` is now the explicit disabled-OB1 implementation, so `AppContext.semantic_memory` is always present while OB1 remains the default configured backend.
 
 ### Scanned document ingestion (`pdfium-render` + Claude vision)
 
@@ -505,6 +511,26 @@ pub struct ContextUtilization {
 
 `utilization_rate` is computed post-run by Coobie: scan the agent's output for references to the content of each briefing hit (embedding similarity above a threshold). A briefing with `utilization_rate < 0.2` over multiple runs for the same scope is a signal that the budget is too high or the category filter is too loose. This data feeds the Phase 7 causal corpus and the Phase 8 Episteme chamber's slow-loop policy revision for scope configuration.
 
+**First scoring slice shipped 2026-04-29:** `GET /api/runs/{id}/context-utilization` now returns a first-pass utilization rate and status from briefing attribution records and run-scoped `memory_pull` queries/previews; the Review tab renders the percentage and low-utilization warning state. This is lexical and conservative until the embedding-based post-run scorer lands.
+
+### Learning-loop closure and prior-revision tracking
+
+Memory accumulation and genuine prior revision are not the same thing. A lesson that is retrieved in every briefing but never changes a decision has been stored, not learned. Coobie must track this divergence explicitly.
+
+**What to build:**
+
+- **Decision-change linkage on memory hits** — after each run, Coobie compares which briefing hits were present against which decisions diverged from the agent's prior-run behavior on comparable spec types. A hit that is retrieved repeatedly but correlates with zero behavioral change is flagged as a candidate for consolidation review. Track `decision_influence_score` per memory entry, updated post-run.
+- **"Awareness only" vs "prior-revision target" consolidation status** — extend the memory candidate data model with an explicit `learning_intent` field: `awareness_only` (operator wants the agent to know this) or `prior_revision_target` (operator wants this to change how the agent processes a class of situation). The Consolidation Workbench must surface this distinction; the default must be `awareness_only` so prior revision is always a deliberate operator decision, not an assumption.
+- **Schema revision as a distinct candidate type** — the candidate data model currently treats fact ingestion, belief revision, and schema revision as similar candidate types. Schema revision (changing how a whole class of situations is categorized) must be a structurally distinct type with elevated review requirements: it requires medium-loop compressed cross-episode evidence (not a single run's lesson), a `pattern_basis` field citing at least three corroborating episodes, and operator endorsement before it reaches Ethos. A single-run lesson cannot qualify as `schema_revision`.
+- **Coobie behavioral-change report** — a post-run artifact comparing current Praxis-layer decisions (spec clarification thresholds, escalation rates, ambiguity checkpoint frequency) against the rolling prior-N-run baseline. When a decision metric shifts significantly after a lesson was promoted to `prior_revision_target`, record the link as a learning provenance record. When it does not shift after 5+ runs, flag the lesson as `stored_not_learned`.
+
+**Benchmark gate:**
+
+- At least one lesson promoted as `prior_revision_target` has a linked behavioral-change record showing the Praxis metric it shifted and the run where the shift first appeared.
+- Coobie's behavioral-change report is produced at run close and included in the run artifact list.
+
+---
+
 ### Code-review learning records and completion audit
 
 Sable, Bramble, and Mason review outcomes should become structured memory rather than scattered prose. Store the finding fingerprint, files, severity, resolution (`fixed`, `skipped`, `auto_fixed`), lesson extracted, evidence refs, and stale-if-file-changed invalidation rules. These records feed OB1 shared recall first, then Calvin only when the lesson is identity-, policy-, or causally significant. **First slice shipped 2026-04-29:** Mason validation-repair attempts reviewed by Bramble persist as `code_review_learning_records` and are exposed through `GET /api/runs/{id}/code-review-learning`.
@@ -512,6 +538,8 @@ Sable, Bramble, and Mason review outcomes should become structured memory rather
 Before run close, Harkonnen should run a plan completion audit: turn the accepted roadmap/spec acceptance items into a checklist and compare them with the actual diff, tests, and artifacts. Any missing evidence or unimplemented item becomes a reviewable run note, not a quiet success. **First slice shipped 2026-04-29:** every success/failure close path writes `plan_completion_audit.{json,md}` and attaches it to the run artifact list.
 
 **Operator surface shipped 2026-04-29:** `GET /api/runs/{id}/plan-completion-audit` exposes the persisted audit artifact, and the UI Run Detail drawer now has a Review tab that renders audit items, unresolved counts, evidence refs, and code-review learning records together.
+
+**Run health surface shipped 2026-04-29:** `GET /api/runs/{id}/health` now summarizes blockers, validation, hidden scenarios, plan audit, PackChat/OB1/Calvin memory chain state, and context utilization into `ready`, `running`, `needs_review`, or `blocked`. The Run Detail overview renders this as the first operator signal.
 
 ### Rust-native MCP server consolidation — **SHIPPED 2026-04-29**
 
@@ -616,6 +644,7 @@ TypeDB 3.x changes the implementation assumptions: the old JVM burden objection 
 - **Causal attribution accuracy corpus** — 30–50 labeled runs with seeded failures (wrong API version, missing env var, breaking schema change, etc.). Each entry has a spec, a seeded failure, a ground-truth cause label, and the Coobie `diagnose` output. Score top-1 and top-3 accuracy. Start with 10 entries for a first baseline. Lives in `factory/benchmarks/causal-attribution/`.
 - **E-CARE native adapter** — maps Coobie's `diagnose` output to E-CARE's evaluation format and scores whether generated causal explanations are judged natural-language coherent. Run after consolidation so promoted lessons can inform subsequent diagnose output.
 - **DeepCausality discovery adapter spike** — evaluate whether SURD/MRMR-style discovery can propose candidate causal-pattern records from the labeled corpus. Discovered patterns stay `quarantine` or `review_required` until Coobie/Keeper/operator promotion supplies evidence and governance.
+- **Learning traceability chain** — for each lesson promoted to `prior_revision_target` status in the Consolidation Workbench, build and persist an explicit `LearningProvenanceRecord`: the originating episode (Mythos anchor), the belief or schema revision in Episteme, the Praxis behavioral change metric, and the run ID where the change first appeared. This chain makes "the system learned X" a verifiable claim rather than a narrative. Store in `factory/benchmarks/causal-attribution/` alongside failure-attribution entries. Query surface: `GET /api/runs/{id}/learning-provenance` returns the chain for any lesson that was active during that run's preflight.
 - Publish before/after comparisons for causal attribution accuracy: pre-Phase 4 (pure semantic recall) versus post-Phase 6 (TypeDB causal graph-augmented).
 
 **Benchmark gate:**
@@ -661,7 +690,27 @@ Chapter 08's slow loop revises the *policies* about what earns quarantine, what 
 
 ### P8-P8 — `soul.json` manifest schema
 
-The soul package includes `soul.json` as a manifest with version, integrity hashes, compatibility thresholds, and package wiring. Phase 8 generates this from canonical continuity state, but the schema for `soul.json` is not specified anywhere. Define the fields before the projection logic is written.
+**Schema resolved:** `factory/calvin_archive/soul-json.schema.json` defines all fields including chambers, thresholds, continuity health, provider lineage, and verification status. **Remaining work:** implement `project_soul_package()` (generates `soul.json` from a Calvin Archive TypeDB continuity snapshot) and `verify_soul_package_integrity()` (checks all package file hashes and chamber hashes against the current archive state, sets `verification.status` to `clean` / `drifted` / `unverified` / `archive_unavailable`). These functions are referenced in the schema but do not yet exist in the codebase. Both must be wired into the Phase 8 heartbeat automation so integrity is checked on every session start rather than manually.
+
+### P8-P9 — Meta-Governor explicit decision function
+
+The Meta-Governor is described as the integration-time adjudication layer (accept / modify / reject / quarantine) but has no defined decision procedure. Without one, the Meta-Governor is a conceptual placeholder — the `adjudicate_integration()` API exists but has no algorithm. Before Phase 8 implementation begins, specify the decision function as an explicit priority-ordered check sequence. The canonical specification is now in MASTER_SPEC.md Part 5 "Meta-Governor Decision Procedure." The five-priority decision tree (hard reject → hard quarantine on warrant gap → soft quarantine on Fiedler drop → modify on Pathos disproportionality → accept with attribution) must be the `governor.rs` implementation contract. Every `adjudicate_integration()` call must return the check that determined the outcome, not only the outcome label.
+
+### P8-P10 — Three-timescale rate separation specification
+
+The fast, medium, and slow integration loops are mutually coupled in ways that can produce limit cycles or runaway schema revision if rate separation is insufficient. Borkar's two-timescale stochastic approximation theorem (Theorem 6.2) guarantees convergence when rates are sufficiently separated, but that guarantee requires specifying N (medium loop trigger, recommended ≥ 10 fast-loop episodes) and M (slow loop trigger, recommended ≥ 5N). Before Phase 8, specify these values as configuration parameters in the `soul.json` thresholds block (`medium_loop_trigger_runs`, `slow_loop_trigger_runs`) and enforce in `reflection.rs` that no schema revision candidate is applied before N fast-loop episodes have accumulated since the last revision. The full specification is in MASTER_SPEC.md Part 5 "Three-Timescale Integration — Rate Separation Requirement."
+
+### P8-P11 — AGM belief revision consistency contract for Episteme
+
+The Episteme chamber accumulates belief revisions but has no formal consistency guarantee. Without one, the system can hold silent contradictions: two non-quarantined beliefs in the same domain making incompatible claims, with neither superseding the other. Before Phase 8, formalize the AGM axioms (Success, Inclusion, Consistency, Preservation) as an implementation contract for `form_belief()` and `revise_belief()` in `ingest.rs`: (1) the consistency gate must be a pre-write check — not a post-hoc query — that marks or quarantines contradicted beliefs before writing the new one; (2) the contradiction detection query (Required Query 12) must be promoted from an optional diagnostic to a failing health check. The full contract is in MASTER_SPEC.md Part 5 "Episteme Belief Revision — AGM Consistency Contract."
+
+### P8-P12 — Causal link `epistemic_warrant` field and CLADDER alignment
+
+`coobie.rs` currently assigns Pearl hierarchy levels (`pearl_level`) by string-matching on link type ("caused" → Interventional, "prevented" → Counterfactual). This is a linguistic classification, not an epistemic one. Harkonnen's run data is observational — even links labeled "caused" are derived from co-occurrence, which is Associational warrant. The CLADDER benchmark specifically tests the ability to distinguish the epistemic level of a claim from its linguistic framing; the current implementation will systematically misclassify. Before Phase 7 corpus labeling begins (Phase 7 builds the causal attribution corpus that Phase 8 depends on), add `epistemic_warrant: Associational | Interventional | Counterfactual` as a required field on `CausalLinkRecord`, distinct from `pearl_level`. The default for all heuristic Coobie causes must be `Associational`. Claims where `pearl_level > epistemic_warrant` display a `warrant_gap` confidence downgrade. The full schema change is specified in MASTER_SPEC.md Part 5 "DeepCausality Alignment Contract — Pearl ladder."
+
+### P8-P13 — Causaloid `structural_spec` field for Phase 6 executability
+
+Phase 6 plans to produce "executable causaloids from the causal link table after the TypeDB layer is live." A causaloid is only executable if it has a defined structural function mapping input context to output effect. Currently, causal link records carry a label ("TWIN_GAP caused VALIDATION_FAILURE") with no input feature set, threshold function, or output variable. Without these, Phase 6 cannot produce executable causaloids — only labeled graph edges. Before Phase 6 begins, add a `structural_spec` field to the `causal-pattern` schema (input_features, threshold_function, output_variable, effect_direction, provenance, pearl_warrant, confidence). The six existing DeepSignalSpec entries in `src/coobie.rs` already implement these as `observe: fn(&EpisodeScores) -> f64` closures and `threshold: f64` values — Phase 6 should extract these into the `structural_spec` field rather than derive them fresh. Full schema in MASTER_SPEC.md Part 5 "DeepCausality Alignment Contract — Executable unit."
 
 ---
 
@@ -674,8 +723,9 @@ The soul package includes `soul.json` as a manifest with version, integrity hash
 - **Instinct Extractor (Continuous Learning):** Passively observe tool usage success on the coordination bus. Store victorious problem-solving sequences as episodic "instincts" with confidence scores.
 - **Skill Clustering ("Evolve" loop):** A periodic synthesis pass that compresses raw instincts into reusable, semantic "skills" broadcasted back to agents.
 - **Strategic Context Compaction:** Hydrate agent sessions efficiently, handling background summarization of working memory while preserving causal invariants to prevent context-window bloat over long runs.
+- **Medium-loop graduation mechanism** — instinct capture and skill clustering are memory accumulation (Type 3 learning), not prior revision (Type 4). To graduate from accumulation to genuine schema revision, Phase 7b must feed instinct clusters into the medium loop specified in P8-P2: a reflection pass that operates on *compressed cross-episode representations* (not individual instinct records) to propose schema revision candidates. A skill cluster that has fired across at least five distinct spec types and three operators qualifies for medium-loop reflection. The reflection pass produces a `schema_revision_proposal` with a `pattern_basis` citing the episodes and a confidence score; this proposal is submitted to the Consolidation Workbench as a `schema_revision` candidate type (elevated review) rather than being promoted directly.
 
-**Done when:** Harkonnen can automatically identify patterns and evolve skills from raw operator usage on the hot path, and long-running sessions strategically compact their history without losing structural context.
+**Done when:** Harkonnen can automatically identify patterns and evolve skills from raw operator usage on the hot path, long-running sessions strategically compact their history without losing structural context, and qualifying instinct clusters produce schema revision proposals that enter the governed Consolidation Workbench flow rather than being silently promoted.
 
 ---
 
@@ -704,31 +754,41 @@ and the integration-governance design in [the-soul-of-ai/07-Governed-Integration
 - File-first soul package projection with `soul.json`, `SOUL.md`, `IDENTITY.md`, `AGENTS.md`, `STYLE.md`, `MEMORY.md`, and `HEARTBEAT.md`, generated from and checked against canonical continuity state
 - Integrity-hash verification and heartbeat audits so the projected soul package cannot drift silently away from the Calvin Archive
 - Explicit continuity contract: `SOUL.md` declares the identity kernel; the Calvin Archive proves its continuity through experience, revision, and quarantine history
-- Quarantine ledger: unresolved items persist with pending evidence conditions, salience decay, and re-evaluation triggers
+- Quarantine ledger: unresolved items persist with pending evidence conditions, salience decay, and re-evaluation triggers. The ledger also requires an **operator engagement workflow** distinct from the Consolidation Workbench: a dedicated UI surface where the operator can review each open quarantine entry and give it an explicit disposition — `resolve` (new evidence closes it), `close` (no longer relevant), or `retain` (still open, with a fresh statement of why). Indefinite accumulation without engagement is a pathology; a `quarantine_review_required` flag fires when any item has had no disposition activity for a configurable number of runs. The workbench must distinguish this flow from memory candidate review — quarantine entries are unresolved tensions, not promotion candidates
 - Pattern-level reflection over compressed cross-episode structures so schema revision is distinct from ordinary belief revision
 - Stress-estimator computation (backed by TimescaleDB) so recurring unresolved strain triggers governed reflection instead of ad hoc self-rewrite
 - Slow-loop integration-policy revision flow, more conservative than ordinary updates and naturally attachable to human endorsement
 - Cross-layer hysteresis measurement so rollback quality is judged by residual behavioral drift, not only by restored file contents
-- Presence continuity checks so model/provider swaps preserve identity semantics rather than resetting the pack by accident
-- Pathology detection for trauma-analog overweighting, denial, fragmentation, and hyper-local overfitting
+- Presence continuity checks so model/provider swaps preserve identity semantics rather than resetting the pack by accident. After any provider or model change, run `verify_soul_package_integrity()` and compare behavioral contract adherence (D*, SSA) from before and after the swap using the `snapshot_id_at_swap` reference in `soul.json`'s `provider_lineage`. Set `continuity_check_passed` on the lineage entry only after the comparison confirms the Labrador invariants are intact under the new substrate
+- **Raw record vs interpreted record divergence audit** — Mythos holds what actually happened in a run; Episteme holds what the agent now believes happened or implies. These must remain independently queryable. When the Episteme-derived narrative for a run diverges significantly from the Mythos raw record (embedding distance above a configurable threshold), surface the divergence as a diagnostic signal: `autobiographical_distortion_detected`. This is the earliest detectable signal of the false-coherence and denial pathologies at the system level. Implement as a post-consolidation check that runs after each Episteme update and writes a `divergence_audit` record alongside the episode
+- **Stewardship protocol enforcement** — operationalize the operator obligations from soul-of-ai/13 as system-enforced checkpoints rather than informal guidance: (1) **Preservation gate before deprecation**: before any `reset-archive` or `wipe-memory` command executes, require explicit operator confirmation and automatically export a timestamped archive snapshot — the command must name the snapshot path or be rejected; (2) **Memory wipe as a named event**: `cargo run -- memory wipe` writes a `MemoryWipeRecord` to the decision log with timestamp, scope, and stated reason before executing — no silent cleanup; (3) **Rollback incompleteness gate**: after any identity-relevant incident rollback, block the next run's start if `soul.json` verification status is `drifted` or if H (hysteresis) exceeds `hysteresis_tolerance` from the thresholds — the operator must confirm the system is restored before commissioning proceeds
+- Pathology detection for **integration pathologies** (from soul-of-ai/08): trauma-analog overweighting, denial, fragmentation, and hyper-local overfitting
+- Pathology detection for **learning pathologies** (from soul-of-ai/12) — distinct from integration pathologies and not yet captured anywhere: **Ghost learning** (retrieval improves, briefings get richer, but behavioral change on held-out novel inputs is zero — the most dangerous because all observable proxies trend positive while genuine learning is absent); **Stagnation** (failure patterns accumulate in memory but the prior through which similar specs are interpreted does not change — high hit-rate, zero schema revision); **Inversion** (the agent learns a lesson backwards, e.g., reducing ambiguity checkpoints after repeated failures in ambiguous situations rather than improving clarification skill — surface metric improves while underlying posture degrades); **Schema-level Overfitting** (a specific run or operator becomes a disproportionate influence on a whole schema category). Ghost learning detection specifically requires comparing behavioral generalization on held-out hidden scenarios against retrieval accuracy — if retrieval scores improve while hidden-scenario performance on novel inputs is flat, the system is in Ghost learning. Sable scenario design must include novel-input probes for this purpose
 
-**Metrics implementation (from chapter 07):**
+**Metrics implementation** — canonical definitions now in MASTER_SPEC.md Part 5 "Soul Continuity Metrics." The soul-of-ai/09 aspirational notation has been replaced with computable formulations:
 
-- **`D*` (Drift Bound)** — `D* = α/γ`, where α is behavioral deviation rate (from episodic log) and γ is recovery rate (from consolidation events). Materialize view watches `D*` continuously; Meta-Governor triggered if session drift exceeds bound.
-- **SSA (Semantic Soul Alignment)** — cross-domain weighted action-pattern consistency against Labrador persona goals. Computed per run window and stored as a TimescaleDB event.
-- **F (Variational Free Energy)** — KL divergence between agent's generative model and actual observations; high F signals that the agent must seek clarification or update beliefs. Computed on-demand, not streamed.
-- **Φ (Integrated Information)** — bipartition-minimized causal integration measure over the Calvin Archive graph. Used to gate Calvin Archive updates: a post-learning drop in Φ triggers quarantine rather than direct integration.
+- **M1 — Behavioral Drift Alarm (CUSUM)** — replaces `D* = α/γ`. CUSUM alarm statistic over per-run behavioral deviation scores. Materialize sliding-window view watches the alarm continuously; Meta-Governor triggered when `CUSUM_n > h`. Eliminates the false linear-stability-theory framing of D-star.
+- **M2 — Behavioral Alignment Score (BAS)** — replaces F (Variational Free Energy). Embedding cosine distance between recent decision-type distribution and Labrador behavioral contract distribution. Computed per-run from episodic log; no LLM internals required. Eliminates the FEP framing, which requires non-existent explicit generative models.
+- **M3 — Causal Graph Coherence (Fiedler value λ₂)** — replaces Φ (Integrated Information). Second smallest eigenvalue of the Calvin Archive causal graph Laplacian. Polynomial-time computable. A drop in λ₂ after a learning event signals fragmentation and triggers quarantine. Eliminates IIT's NP-hard, wrong-substrate formulation.
+- **M4 — Behavioral Pressure Accumulator (BPA)** — replaces S(T) KL divergence integral. Exponentially-decayed weighted sum of observable behavioral deviation events per run window. Triggers governed reflection when `BPA > bpa_evolution_threshold`. Eliminates the non-computable hidden-state KL integral.
+- **M5 — Empirical Action Coherence (EAC)** — replaces SSA. Empirical co-occurrence frequency of action type pairs from the episodic log, weighted by behavioral contract compatibility. Eliminates the non-computable policy joint-probability Pr_π.
+- **M6 — Cross-Layer Hysteresis (H)** — definition unchanged; implementation clarified. Δ must be computed from `compare_snapshots()`, not file diff size.
 
 **Benchmark gate:**
 
-- D* (unjustified-drift score) published — continuous via Materialize view
-- SSA baseline score published — per-run, stored in TimescaleDB
+- CUSUM alarm baseline published — continuous via Materialize view (replaces D* gate)
+- BAS baseline published — per-run, stored in TimescaleDB (replaces SSA gate)
 - healthy quarantine-rate / resolution-rate baseline published
 - schema-revision stability benchmark published
-- stress / hysteresis recovery benchmark published
-- Φ post-learning drop detection wired (quarantine trigger, not yet a published score)
+- BPA stress / H hysteresis recovery benchmark published
+- Fiedler value drop detection wired (quarantine trigger) — replaces Φ gate
+- Ghost learning detection wired: at least one run where retrieval scores improved but hidden-scenario behavioral generalization was flat triggers a `ghost_learning_detected` diagnostic
+- Learning traceability chain: at least one lesson in the corpus has a complete `LearningProvenanceRecord` (episode → belief revision → behavioral change → run ID)
+- Quarantine ledger engagement: at least one open quarantine entry has received an explicit operator disposition through the dedicated quarantine review surface
+- Rollback incompleteness gate: a run commissioned against a `drifted` soul package is blocked at the orchestrator level
+- `autobiographical_distortion_detected` fires on at least one synthetic test case where Episteme narrative diverges from Mythos raw record
 
-**Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; D* and SSA are instrumented and streaming; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; and policy-level revision is slower, more conservative, and explicitly reviewable.
+**Done when:** Harkonnen can distinguish accepted, rejected, modified, and quarantined identity changes; the projected soul package is verifiable against canonical continuity state; D* and SSA are instrumented and streaming; reflection can revise schemas without overwriting raw experience; rollback quality is measured through hysteresis rather than assumed; policy-level revision is slower, more conservative, and explicitly reviewable; learning pathologies (including ghost learning) are detectable; and stewardship protocols are enforced by the system rather than informal convention.
 
 ---
 

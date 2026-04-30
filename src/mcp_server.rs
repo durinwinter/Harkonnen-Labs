@@ -739,10 +739,14 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
             )
             .await
             .map_err(internal_error)?;
-            // Also capture to OB1 if available.
-            if let Some(ob) = state.app.open_brain.as_ref() {
-                let _ = ob.capture_thought(&entry, Some("mcp_store")).await;
-            }
+            // Also capture to the default semantic memory when available.
+            let metadata = crate::memory::SemanticMemoryMetadata {
+                memory_type: Some("mcp_store".to_string()),
+                tags,
+                created_at: Some(chrono::Utc::now()),
+                ..Default::default()
+            };
+            let _ = state.app.semantic_memory_store(&entry, metadata).await;
             return Ok(text_tool_result(&format!("stored memory entry: {id}")));
         }
 
@@ -755,12 +759,10 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
                 .retrieve_context(&query)
                 .await
                 .unwrap_or_default();
-            if let Some(ob) = state.app.open_brain.as_ref() {
-                if let Ok(ob_hits) = ob.search_thoughts(&query).await {
-                    for h in ob_hits {
-                        if !hits.contains(&h) {
-                            hits.push(h);
-                        }
+            if let Ok(ob_hits) = state.app.semantic_memory_search(&query, limit).await {
+                for h in ob_hits {
+                    if !hits.contains(&h) {
+                        hits.push(h);
                     }
                 }
             }
@@ -875,13 +877,11 @@ async fn call_tool(state: &McpState, params: &Value) -> std::result::Result<Valu
                 hits.extend(h);
             }
 
-            // OB1 semantic search.
-            if let Some(ob) = state.app.open_brain.as_ref() {
-                if let Ok(ob_hits) = ob.search_thoughts(&query).await {
-                    for hit in ob_hits {
-                        if !hits.contains(&hit) {
-                            hits.push(hit);
-                        }
+            // Default semantic search (OB1 when configured).
+            if let Ok(ob_hits) = state.app.semantic_memory_search(&query, 20).await {
+                for hit in ob_hits {
+                    if !hits.contains(&hit) {
+                        hits.push(hit);
                     }
                 }
             }
@@ -1310,26 +1310,26 @@ async fn build_coobie_briefing_prompt(
         }
     }
 
-    // Pull from OB1.
+    // Pull from default semantic memory.
     if !query_terms.is_empty() {
-        if let Some(ob) = state.app.open_brain.as_ref() {
-            let q = query_terms.join(" ");
-            if let Ok(ob_hits) = ob.search_thoughts(&q).await {
-                for hit in ob_hits {
-                    if !hits.contains(&hit) {
-                        hits.push(hit);
-                    }
+        let q = query_terms.join(" ");
+        if let Ok(ob_hits) = state.app.semantic_memory_search(&q, 20).await {
+            for hit in ob_hits {
+                if !hits.contains(&hit) {
+                    hits.push(hit);
                 }
             }
         }
     }
 
     // Budget enforcement (approximate: 1 token ≈ 4 chars).
-    let char_budget = max_tokens * 4;
     let mut total_chars = 0usize;
     let mut budgeted_hits: Vec<&str> = Vec::new();
     for hit in &hits {
-        if total_chars + hit.len() > char_budget {
+        if !crate::memory::text_within_token_budget(
+            &format!("{}{}", "x".repeat(total_chars), hit),
+            max_tokens,
+        ) {
             break;
         }
         total_chars += hit.len();
@@ -1409,18 +1409,17 @@ async fn build_sable_eval_prompt(state: &McpState, run_id: &str) -> String {
     }
 
     // Pull scenario-pattern memory (no implementation content).
-    if let Some(ob) = state.app.open_brain.as_ref() {
-        if let Ok(hits) = ob
-            .search_thoughts("scenario failure acceptance criteria")
-            .await
-        {
-            if !hits.is_empty() {
-                lines.push("## Prior scenario patterns".into());
-                for hit in hits.iter().take(4) {
-                    lines.push(format!("- {}", hit.trim()));
-                }
-                lines.push(String::new());
+    if let Ok(hits) = state
+        .app
+        .semantic_memory_search("scenario failure acceptance criteria", 4)
+        .await
+    {
+        if !hits.is_empty() {
+            lines.push("## Prior scenario patterns".into());
+            for hit in hits.iter().take(4) {
+                lines.push(format!("- {}", hit.trim()));
             }
+            lines.push(String::new());
         }
     }
 
@@ -1458,12 +1457,10 @@ async fn build_scout_preflight_prompt(
     if let Ok(h) = state.app.memory_store.retrieve_context(&query).await {
         hits.extend(h);
     }
-    if let Some(ob) = state.app.open_brain.as_ref() {
-        if let Ok(ob_hits) = ob.search_thoughts(&query).await {
-            for hit in ob_hits {
-                if !hits.contains(&hit) {
-                    hits.push(hit);
-                }
+    if let Ok(ob_hits) = state.app.semantic_memory_search(&query, 20).await {
+        for hit in ob_hits {
+            if !hits.contains(&hit) {
+                hits.push(hit);
             }
         }
     }
@@ -1521,12 +1518,10 @@ async fn build_keeper_policy_prompt(state: &McpState, action: &str, context: &st
     if let Ok(h) = state.app.memory_store.retrieve_context(&query).await {
         hits.extend(h);
     }
-    if let Some(ob) = state.app.open_brain.as_ref() {
-        if let Ok(ob_hits) = ob.search_thoughts(&query).await {
-            for hit in ob_hits {
-                if !hits.contains(&hit) {
-                    hits.push(hit);
-                }
+    if let Ok(ob_hits) = state.app.semantic_memory_search(&query, 20).await {
+        for hit in ob_hits {
+            if !hits.contains(&hit) {
+                hits.push(hit);
             }
         }
     }
@@ -2663,7 +2658,7 @@ mod mcp_e2e {
             started_at: Instant::now(),
             calvin: None,
             open_brain: None,
-            semantic_memory: None,
+            semantic_memory: Arc::new(crate::memory::NoopSemanticMemory),
             dispatcher,
         };
 
@@ -3647,6 +3642,15 @@ mod mcp_e2e {
     #[tokio::test]
     async fn coobie_briefing_prompt_returns_messages() {
         let (state, _dir) = build_test_state().await;
+        rpc(
+            &state,
+            call(
+                79,
+                "memory_store",
+                json!({ "content": "Coobie briefing should include the scout ambiguity guardrail for auth specs." }),
+            ),
+        )
+        .await;
         let result = rpc(
             &state,
             json!({
@@ -3670,6 +3674,51 @@ mod mcp_e2e {
         assert!(
             text.contains("Coobie"),
             "coobie/briefing text must reference Coobie, got: {text}"
+        );
+        assert!(
+            text.contains("scout ambiguity guardrail"),
+            "coobie/briefing must include a relevant memory hit, got: {text}"
+        );
+    }
+
+    #[tokio::test]
+    async fn coobie_briefing_prompt_respects_max_tokens() {
+        let (state, _dir) = build_test_state().await;
+        rpc(
+            &state,
+            call(
+                83,
+                "memory_store",
+                json!({ "content": "Budget marker: keep the prompt compact when max_tokens is tiny." }),
+            ),
+        )
+        .await;
+        let result = rpc(
+            &state,
+            json!({
+                "jsonrpc": "2.0", "id": 84,
+                "method": "prompts/get",
+                "params": {
+                    "name": "coobie/briefing",
+                    "arguments": {
+                        "keywords": "budget,marker,compact",
+                        "phase": "preflight",
+                        "max_tokens": 5
+                    }
+                }
+            }),
+        )
+        .await;
+        let text = result["messages"][0]["content"]["text"]
+            .as_str()
+            .unwrap_or("");
+        assert!(
+            !text.contains("Budget marker"),
+            "coobie/briefing should suppress oversized memory hits under tiny budgets, got: {text}"
+        );
+        assert!(
+            text.contains("budget: 5 tokens"),
+            "coobie/briefing should report the requested token budget, got: {text}"
         );
     }
 

@@ -2,6 +2,7 @@ use anyhow::Result;
 use async_trait::async_trait;
 use chrono::{DateTime, Utc};
 use serde::{Deserialize, Serialize};
+use std::fmt::Debug;
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct SemanticMemoryMetadata {
@@ -49,7 +50,21 @@ pub struct SemanticMemoryHit {
 }
 
 #[async_trait]
-pub trait SemanticMemory: Send + Sync {
+pub trait SemanticMemory: Debug + Send + Sync {
     async fn store(&self, write: SemanticMemoryWrite) -> Result<()>;
     async fn search(&self, query: &str, limit: usize) -> Result<Vec<SemanticMemoryHit>>;
+}
+
+#[derive(Debug, Clone, Default)]
+pub struct NoopSemanticMemory;
+
+#[async_trait]
+impl SemanticMemory for NoopSemanticMemory {
+    async fn store(&self, _write: SemanticMemoryWrite) -> Result<()> {
+        Ok(())
+    }
+
+    async fn search(&self, _query: &str, _limit: usize) -> Result<Vec<SemanticMemoryHit>> {
+        Ok(Vec::new())
+    }
 }

@@ -770,6 +770,7 @@ pub async fn start_api_server(app: AppContext, port: u16) -> anyhow::Result<()> 
         )
         .route("/api/runs/:id/lessons", get(get_run_lessons))
         .route("/api/runs/:id/state", get(get_run_state))
+        .route("/api/runs/:id/health", get(get_run_health))
         .route("/api/runs/:id/consolidate", post(post_run_consolidate))
         .route(
             "/api/runs/:id/consolidation/candidates",
@@ -1155,6 +1156,17 @@ async fn get_run_lessons(
 async fn get_run_state(Path(id): Path<String>, State(app): State<AppContext>) -> impl IntoResponse {
     match build_run_state(&app, &id).await {
         Ok(Some(state)) => (StatusCode::OK, Json(state)).into_response(),
+        Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
+        Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
+    }
+}
+
+async fn get_run_health(
+    Path(id): Path<String>,
+    State(app): State<AppContext>,
+) -> impl IntoResponse {
+    match build_run_health(&app, &id).await {
+        Ok(Some(health)) => (StatusCode::OK, Json(health)).into_response(),
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(error) => (StatusCode::INTERNAL_SERVER_ERROR, error.to_string()).into_response(),
     }
@@ -1844,6 +1856,27 @@ async fn get_context_utilization(
                 .iter()
                 .map(|record| record.tokens_returned)
                 .sum();
+            let utilized_briefing_hits = phase_attributions
+                .iter()
+                .filter(|record| {
+                    record
+                        .memory_hits
+                        .iter()
+                        .any(|hit| context_hit_referenced_by_pull(hit, &pull_records))
+                })
+                .count();
+            let utilization_rate = if phase_attributions.is_empty() {
+                0.0
+            } else {
+                utilized_briefing_hits as f64 / phase_attributions.len() as f64
+            };
+            let utilization_status = if phase_attributions.is_empty() {
+                "no_briefing"
+            } else if utilization_rate < 0.2 {
+                "low"
+            } else {
+                "healthy"
+            };
             (
                 StatusCode::OK,
                 Json(serde_json::json!({
@@ -1854,6 +1887,9 @@ async fn get_context_utilization(
                         "briefing_tokens_used": briefing_tokens_used,
                         "mid_task_pull_count": pull_records.len(),
                         "mid_task_pull_tokens": pull_tokens_returned,
+                        "utilized_briefing_hits": utilized_briefing_hits,
+                        "utilization_rate": utilization_rate,
+                        "utilization_status": utilization_status,
                     },
                     "phase_attributions": phase_attributions,
                     "pull_records": pull_records,
@@ -1864,6 +1900,30 @@ async fn get_context_utilization(
         Ok(None) => (StatusCode::NOT_FOUND, "Run not found").into_response(),
         Err(err) => (StatusCode::INTERNAL_SERVER_ERROR, err.to_string()).into_response(),
     }
+}
+
+fn context_hit_referenced_by_pull(hit: &str, pulls: &[crate::models::ContextPullRecord]) -> bool {
+    let terms = hit
+        .split(|c: char| !c.is_alphanumeric())
+        .map(str::to_ascii_lowercase)
+        .filter(|term| term.len() >= 5)
+        .take(12)
+        .collect::<Vec<_>>();
+    if terms.is_empty() {
+        return false;
+    }
+    pulls.iter().any(|pull| {
+        let haystack = format!(
+            "{} {}",
+            pull.query.to_ascii_lowercase(),
+            pull.hit_previews
+                .iter()
+                .map(|preview| preview.to_ascii_lowercase())
+                .collect::<Vec<_>>()
+                .join(" ")
+        );
+        terms.iter().any(|term| haystack.contains(term))
+    })
 }
 
 fn plural_suffix(count: usize) -> &'static str {
@@ -3750,6 +3810,146 @@ async fn build_run_state(app: &AppContext, id: &str) -> anyhow::Result<Option<Ru
         evidence_match_report,
         coobie_translations,
     }))
+}
+
+async fn build_run_health(app: &AppContext, id: &str) -> anyhow::Result<Option<serde_json::Value>> {
+    let Some(run) = app.get_run(id).await? else {
+        return Ok(None);
+    };
+
+    let run_dir = app.paths.workspaces.join(id).join("run");
+    let blackboard =
+        read_optional_json::<BlackboardState>(&run_dir.join("blackboard.json")).await?;
+    let validation =
+        read_optional_json::<ValidationSummary>(&run_dir.join("validation.json")).await?;
+    let hidden_scenarios =
+        read_optional_json::<HiddenScenarioSummary>(&run_dir.join("hidden_scenarios.json")).await?;
+    let audit = app.load_plan_completion_audit(id).await?;
+    let phase_attributions = app.list_phase_attributions_for_run(id).await?;
+    let pull_records = app.list_context_pull_records(id).await?;
+    let candidates = app.list_memory_candidates_for_run(id).await?;
+
+    let open_blockers = blackboard
+        .as_ref()
+        .map(|board| board.open_blockers.clone())
+        .unwrap_or_default();
+    let mut memory_status_counts = HashMap::<String, usize>::new();
+    for candidate in &candidates {
+        *memory_status_counts
+            .entry(candidate.status.clone())
+            .or_default() += 1;
+    }
+    let memory_blocked = [
+        "retry_pending",
+        "waiting_openbrain",
+        "held_for_review",
+        "needs_reconsolidation",
+    ]
+    .iter()
+    .any(|status| memory_status_counts.get(*status).copied().unwrap_or(0) > 0);
+    let memory_review = memory_status_counts
+        .get("promotion_pending")
+        .copied()
+        .unwrap_or(0)
+        > 0;
+    let validation_failed = validation.as_ref().is_some_and(|summary| !summary.passed);
+    let hidden_failed = hidden_scenarios
+        .as_ref()
+        .is_some_and(|summary| !summary.passed);
+    let audit_unresolved = audit
+        .as_ref()
+        .and_then(|value| value.get("unresolved_count"))
+        .and_then(serde_json::Value::as_u64)
+        .unwrap_or(0);
+    let utilized_briefing_hits = phase_attributions
+        .iter()
+        .filter(|record| {
+            record
+                .memory_hits
+                .iter()
+                .any(|hit| context_hit_referenced_by_pull(hit, &pull_records))
+        })
+        .count();
+    let utilization_rate = if phase_attributions.is_empty() {
+        0.0
+    } else {
+        utilized_briefing_hits as f64 / phase_attributions.len() as f64
+    };
+    let context_status = if phase_attributions.is_empty() {
+        "no_briefing"
+    } else if utilization_rate < 0.2 {
+        "low"
+    } else {
+        "healthy"
+    };
+
+    let mut blockers = Vec::new();
+    blockers.extend(open_blockers.iter().cloned());
+    if validation_failed {
+        blockers.push("visible_validation_failed".to_string());
+    }
+    if hidden_failed {
+        blockers.push("hidden_scenarios_failed".to_string());
+    }
+    if memory_blocked {
+        blockers.push("memory_chain_blocked".to_string());
+    }
+
+    let mut review_items = Vec::new();
+    if audit_unresolved > 0 {
+        review_items.push(format!("{audit_unresolved} plan audit item(s) unresolved"));
+    }
+    if memory_review {
+        review_items.push("Calvin promotion review pending".to_string());
+    }
+    if context_status == "low" {
+        review_items.push("context utilization is low".to_string());
+    }
+
+    let status = if !blockers.is_empty() {
+        "blocked"
+    } else if !review_items.is_empty() {
+        "needs_review"
+    } else if run.status == "completed" {
+        "ready"
+    } else {
+        "running"
+    };
+
+    Ok(Some(serde_json::json!({
+        "schema": "harkonnen.run_health.v1",
+        "run_id": id,
+        "status": status,
+        "run_status": run.status,
+        "current_phase": blackboard.as_ref().map(|board| board.current_phase.clone()),
+        "blockers": blockers,
+        "review_items": review_items,
+        "checks": {
+            "validation": {
+                "present": validation.is_some(),
+                "passed": validation.as_ref().map(|summary| summary.passed),
+            },
+            "hidden_scenarios": {
+                "present": hidden_scenarios.is_some(),
+                "passed": hidden_scenarios.as_ref().map(|summary| summary.passed),
+            },
+            "plan_audit": {
+                "present": audit.is_some(),
+                "unresolved_count": audit_unresolved,
+            },
+            "memory_chain": {
+                "status": if memory_blocked { "blocked" } else if memory_review { "needs_review" } else { "clear" },
+                "total_candidates": candidates.len(),
+                "status_counts": memory_status_counts,
+            },
+            "context_utilization": {
+                "status": context_status,
+                "rate": utilization_rate,
+                "phase_attribution_count": phase_attributions.len(),
+                "mid_task_pull_count": pull_records.len(),
+            },
+        },
+    })))
 }
 
 async fn read_optional_json<T: DeserializeOwned>(path: &FsPath) -> anyhow::Result<Option<T>> {

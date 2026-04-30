@@ -56,10 +56,6 @@ impl OpenBrainClient {
         }))
     }
 
-    pub async fn search_thoughts(&self, query: &str) -> Result<Vec<String>> {
-        self.search_thoughts_limited(query, self.search_limit).await
-    }
-
     pub async fn search_thoughts_limited(&self, query: &str, limit: usize) -> Result<Vec<String>> {
         let response = self
             .call_tool(
@@ -75,15 +71,6 @@ impl OpenBrainClient {
             .into_iter()
             .map(|text| format!("[open-brain] {text}"))
             .collect())
-    }
-
-    pub async fn capture_thought(&self, content: &str, thought_type: Option<&str>) -> Result<()> {
-        let mut args = serde_json::json!({ "content": content });
-        if let Some(thought_type) = thought_type {
-            args["type"] = Value::String(thought_type.to_string());
-        }
-        self.call_tool("capture_thought", args).await?;
-        Ok(())
     }
 
     pub async fn capture_thought_with_metadata(

@@ -74,7 +74,7 @@ pub struct AppContext {
     /// Open Brain MCP-backed memory client — default cross-client recall path.
     pub open_brain: Option<crate::openbrain::OpenBrainClient>,
     /// Default long-term semantic memory. OB1-backed when configured.
-    pub semantic_memory: Option<Arc<dyn crate::memory::SemanticMemory>>,
+    pub semantic_memory: Arc<dyn crate::memory::SemanticMemory>,
     /// Sub-agent dispatcher — routes high-context tasks to isolated backends.
     pub dispatcher: crate::subagent::SubAgentDispatcher,
 }
@@ -1035,10 +1035,12 @@ impl AppContext {
                 None
             }
         };
-        let semantic_memory = open_brain.as_ref().map(|client| {
-            Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
-                as Arc<dyn crate::memory::SemanticMemory>
-        });
+        let semantic_memory: Arc<dyn crate::memory::SemanticMemory> =
+            if let Some(client) = open_brain.as_ref() {
+                Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
+            } else {
+                Arc::new(crate::memory::NoopSemanticMemory)
+            };
         let dispatcher = crate::subagent::SubAgentDispatcher::new(
             paths.setup.sub_agents.clone(),
             paths.setup.clone(),
@@ -4603,12 +4605,10 @@ Top memory hits:
 
         let mut raw_hits = raw_hits;
         if !semantic_query.is_empty() {
-            if let Some(open_brain) = self.open_brain.as_ref() {
-                match open_brain.search_thoughts(&semantic_query).await {
-                    Ok(mut open_brain_hits) => raw_hits.append(&mut open_brain_hits),
-                    Err(error) => {
-                        tracing::warn!(error = %error, "Open Brain search failed");
-                    }
+            match self.semantic_memory_search(&semantic_query, 20).await {
+                Ok(mut open_brain_hits) => raw_hits.append(&mut open_brain_hits),
+                Err(error) => {
+                    tracing::warn!(error = %error, "semantic memory search failed");
                 }
             }
         }
@@ -16303,6 +16303,29 @@ Return JSON only.",
         Ok(records)
     }
 
+    pub async fn semantic_memory_search(&self, query: &str, limit: usize) -> Result<Vec<String>> {
+        Ok(self
+            .semantic_memory
+            .search(query, limit)
+            .await?
+            .into_iter()
+            .map(|hit| hit.content)
+            .collect())
+    }
+
+    pub async fn semantic_memory_store(
+        &self,
+        content: &str,
+        metadata: crate::memory::SemanticMemoryMetadata,
+    ) -> Result<()> {
+        self.semantic_memory
+            .store(crate::memory::SemanticMemoryWrite {
+                content: content.to_string(),
+                metadata,
+            })
+            .await
+    }
+
     pub async fn consolidate_run_for_operator(&self, run_id: &str) -> Result<Vec<LessonRecord>> {
         let run_dir = self.run_dir(run_id);
         let spec_path = run_dir.join("spec.yaml");
@@ -16388,8 +16411,30 @@ Return JSON only.",
                         continue;
                     }
 
-                    if let Some(open_brain) = self.open_brain.as_ref() {
-                        match open_brain.capture_thought(&distilled, None).await {
+                    if self.open_brain.is_some() {
+                        let metadata = crate::memory::SemanticMemoryMetadata {
+                            org: Some("harkonnen-labs".to_string()),
+                            role: Some("shared_recall".to_string()),
+                            product: candidate.spec_id.clone(),
+                            spec_id: candidate.spec_id.clone(),
+                            run_id: candidate.run_id.clone(),
+                            thread_id: candidate.thread_id.clone(),
+                            source_event_id: Some(candidate.source_event_id.clone()),
+                            agent: candidate
+                                .agent
+                                .clone()
+                                .or_else(|| Some("coobie".to_string())),
+                            memory_type: Some("packchat_distillation".to_string()),
+                            tags: vec![
+                                "packchat".to_string(),
+                                "shared_recall".to_string(),
+                                candidate.retention_class.clone(),
+                            ],
+                            sensitivity_label: Some(candidate.sensitivity_label.clone()),
+                            created_at: Some(candidate.created_at),
+                            ..Default::default()
+                        };
+                        match self.semantic_memory_store(&distilled, metadata).await {
                             Ok(()) => {
                                 self.chat
                                     .update_memory_candidate_processing(
@@ -25225,11 +25270,7 @@ fn briefing_scope_for_agent(agent_name: &str) -> Option<BriefingScope> {
 }
 
 fn estimate_briefing_tokens(text: &str) -> u32 {
-    let trimmed = text.trim();
-    if trimmed.is_empty() {
-        return 0;
-    }
-    ((trimmed.chars().count() as u32) + 3) / 4
+    crate::memory::estimate_briefing_tokens(text)
 }
 
 fn select_budgeted_memory_hits(
@@ -29367,10 +29408,12 @@ mod tests {
             paths.setup.sub_agents.clone(),
             paths.setup.clone(),
         );
-        let semantic_memory = open_brain.as_ref().map(|client| {
-            Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
-                as Arc<dyn crate::memory::SemanticMemory>
-        });
+        let semantic_memory: Arc<dyn crate::memory::SemanticMemory> =
+            if let Some(client) = open_brain.as_ref() {
+                Arc::new(crate::memory::OpenBrainSemanticMemory::new(client.clone()))
+            } else {
+                Arc::new(crate::memory::NoopSemanticMemory)
+            };
         let app = AppContext {
             paths,
             pool,

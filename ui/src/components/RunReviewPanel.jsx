@@ -200,6 +200,11 @@ export default function RunReviewPanel({ runId }) {
         <StatTile label="Unresolved" value={unresolved} tone={statusTone} />
         <StatTile label="Review records" value={learning?.total ?? records.length} tone={records.length ? 'good' : 'neutral'} />
         <StatTile label="Memory pulls" value={contextSummary.mid_task_pull_count ?? pullRecords.length} tone={pullRecords.length ? 'good' : 'neutral'} />
+        <StatTile
+          label="Utilization"
+          value={`${Math.round((contextSummary.utilization_rate ?? 0) * 100)}%`}
+          tone={contextSummary.utilization_status === 'low' ? 'warn' : contextSummary.utilization_status === 'healthy' ? 'good' : 'neutral'}
+        />
       </div>
 
       <section style={{
@@ -242,6 +247,7 @@ export default function RunReviewPanel({ runId }) {
           <Chip label={`briefing hits ${contextSummary.briefing_hits_provided ?? 0}`} />
           <Chip label={`briefing tokens ${contextSummary.briefing_tokens_used ?? 0}`} />
           <Chip label={`pull tokens ${contextSummary.mid_task_pull_tokens ?? 0}`} />
+          <Chip label={contextSummary.utilization_status || 'no_briefing'} />
         </div>
         {pullRecords.length === 0 ? (
           <div style={{ color: '#8f99a8', fontSize: 12 }}>

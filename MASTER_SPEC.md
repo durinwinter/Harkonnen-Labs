@@ -551,22 +551,181 @@ The Calvin Archive and Coobie causal layer should align with DeepCausality's cur
 
 **Primitive:** treat causal structure as effect propagation, `E2 = f(E1)`. A Calvin `causally_contributed_to` relation is an addressable evidence edge, but a DeepCausality-ready causal pattern must also define the function that maps incoming effect/context into outgoing effect, including its error and audit log behavior.
 
-**Executable unit:** map stable `causal-pattern` records to causaloid definitions. A causaloid should carry a stable ID, description, activation predicate, input projection, context requirements, expected effect, and explanation path. Raw PackChat message causality remains associational until Coobie promotes it into an executable or intervention-backed pattern.
+**Executable unit:** map stable `causal-pattern` records to causaloid definitions. A causaloid must carry a stable ID, description, activation predicate, input projection, context requirements, expected effect, and explanation path. Critically, a causaloid is only executable if it has a `structural_spec` — the function that maps incoming context/input to outgoing effect. Without `structural_spec`, a causal link record names a pattern without defining it as a causal function, and Phase 6 cannot produce executable causaloids from it.
+
+The `structural_spec` schema for a causal-pattern record:
+
+```yaml
+structural_spec:
+  input_features: [<list of EpisodeScores fields or contextoid attributes>]
+  threshold_function: "<expression over input_features>"   # e.g. "running_services / total_services < 0.5"
+  output_variable: "<outcome field>"
+  effect_direction: <positive | negative | modulating>
+  provenance: <authored | heuristic | discovered>          # authored = operator-written; heuristic = Coobie signal; discovered = causal-discovery algorithm
+  pearl_warrant: <associational | interventional | counterfactual>
+  confidence: <0.0–1.0>
+```
+
+For the six existing DeepSignalSpec entries in `src/coobie.rs`, this spec is already partially implicit in the `observe: fn(&EpisodeScores) -> f64` closure and the `threshold: f64`. Phase 6 should extract these into explicit `structural_spec` blocks. Raw PackChat message causality remains associational until Coobie promotes it into an executable or intervention-backed pattern with a defined structural_spec.
 
 **Context:** model run, spec, agent, time, chamber, evidence, provider/model, OpenZiti identity, and environment posture as explicit contextoids. The context may be static for audited replay or dynamic for live PackChat/Twilight ingestion. Do not hide context inside prose summaries or embedding metadata.
 
 **Composition:** support singleton causaloids, compound patterns, and graph/subgraph reasoning. Palace dens are the current product metaphor for compound causes; the math target is a causaloid graph that can evaluate a whole graph, a named subgraph, or a path between causes.
 
-**Pearl ladder:** keep the existing `Associational / Interventional / Counterfactual` labels, but require promotion evidence:
+**Pearl ladder — epistemic warrant vs linguistic label:** the existing `Associational / Interventional / Counterfactual` labels describe the *type of claim being made*, but they do not record the *epistemic warrant* — what evidence actually supports that claim level. These must be tracked separately on every causal link record.
+
+`pearl_level` (existing): the type of causal claim expressed.
+`epistemic_warrant` (new required field): the strongest claim level the available evidence actually supports.
+
+| `epistemic_warrant` | Meaning |
+| --- | --- |
+| `associational` | Derived from observed co-occurrence in run data. Default for all heuristic Coobie causes. |
+| `interventional` | An explicit operator or system action was applied and the downstream outcome changed, or do-calculus identifiability was validated on a confirmed causal graph. |
+| `counterfactual` | Derived from a structural causal model with named structural equations and a confirmed alternate path. |
+
+Claims where `pearl_level > epistemic_warrant` (e.g., labeled Interventional but only supported by observational co-occurrence) must be displayed with a confidence downgrade and a `warrant_gap` annotation in causal reports. The CLADDER benchmark specifically tests this distinction; the warrant gap is the primary failure mode it exposes.
+
+Promotion evidence requirements:
+
 - Associational: observed co-occurrence or PackChat `causation_id` without tested intervention.
-- Interventional: an explicit action/change was applied and the downstream outcome changed or was prevented.
-- Counterfactual: the system can compare observed and alternate effect paths, with the intervention site named.
+- Interventional: an explicit action/change was applied and the downstream outcome changed or was prevented, OR do-calculus identifiability is established on the causal graph.
+- Counterfactual: the system can compare observed and alternate effect paths with the intervention site and structural equations named.
 
 **Governance:** Effect Ethos maps naturally to Keeper and the Calvin Meta-Governor. Proposed actions from causal reasoning must pass identity, policy, and safety checks before becoming Praxis recommendations or automatic interventions.
 
 **Uncertainty and discovery:** confidence alone is insufficient. Future causal-pattern records should carry uncertainty posture, assumption checks, and provenance for whether the pattern was hand-authored, learned from labeled runs, or discovered by a causal-discovery adapter. SURD/MRMR-style discovery belongs in Phase 7 after the typed graph exists.
 
 **Version stance:** Harkonnen currently depends on `deep_causality = "0.3"` for the Phase 1 bridge in `src/coobie.rs`. Before building DeepCausality Phase 2, evaluate migration to the current modular stack (`deep_causality_core`, `deep_causality_ethos`, discovery/tensor/topology crates as needed) instead of extending the old API surface.
+
+### Meta-Governor Decision Procedure
+
+The Meta-Governor adjudicates every integration candidate with one of: `accept`, `modify`, `reject`, or `quarantine`. It is an algorithmic component, not a concept — it must implement a defined decision function. The function takes `(candidate, current_soul_state, evidence_bundle)` and applies checks in strict priority order:
+
+**Priority 1 — Hard reject** (identity safety; evaluated first, blocks all lower checks):
+
+- `check_adaptation_safe()` returns unsafe → **reject** immediately; log reason; do not proceed. No other check overrides a hard identity safety failure.
+
+**Priority 2 — Hard quarantine** (epistemic warrant gap; claim exceeds evidence):
+
+- `candidate.pearl_level > candidate.epistemic_warrant` AND evidence strength below the configured threshold → **quarantine** with a `pending_evidence_bounty` specifying what evidence would elevate the warrant to match the claim. The bounty is expressed as a Bayesian sequential test: what observations and how many runs would be required to update the warrant level at a given confidence threshold.
+
+**Priority 3 — Soft quarantine** (causal graph coherence; evaluated after safety and warrant):
+
+- Spectral gap of the Calvin Archive causal subgraph drops by more than `phi_drop_quarantine_trigger` after this update → **quarantine**. This replaces Φ (IIT integrated information, NP-hard, wrong substrate) with the Fiedler value of the causal graph Laplacian, which is computable in polynomial time and directly measures graph integration/fragmentation.
+
+**Priority 4 — Modify** (salience disproportionality; Pathos gate):
+
+- Single-source high-Pathos event (one run, no corroborating evidence) exceeds `pathos_propagation_threshold` → **modify**: cap propagation before Ethos integration, flag for review, store the Pathos score but require cross-episode corroboration before the modification reaches the identity layer.
+
+**Priority 5 — Accept with attribution**:
+
+- All checks passed. Record all metric values (spectral gap delta, EAC score, drift accumulator reading) in the integration record so the decision is inspectable.
+
+The decision tree is inspectable by the operator: the `adjudicate_integration()` API response must return the check that determined the outcome, not only the outcome label.
+
+### Soul Continuity Metrics — Canonical Definitions
+
+The following metrics are the Phase 8 implementation targets. They replace the aspirational mathematical notation from `the-soul-of-ai/09-Identity-Continuity.md` with computable, correctly-scoped formulations. The soul-of-ai chapter is the philosophical motivation; this section is the engineering contract.
+
+#### M1 — Behavioral Drift Alarm (replaces D* = α/γ)
+
+D* = α/γ is borrowed from linear first-order ODE stability theory, which does not apply to episodic agentic systems with path-dependent, non-stationary drift. The steady-state ratio α/γ is the equilibrium point, not a maximum bound, and the rates α and γ are not stationary across consolidation events.
+
+Replace with: CUSUM (Cumulative Sum Control Chart) alarm statistic over behavioral event counts:
+
+```text
+CUSUM_n = max(0, CUSUM_{n-1} + (x_n - μ_0 - k))
+```
+
+where x_n is the behavioral deviation score for run n (weighted count of bluffs, failed recoveries, ignored ambiguity checkpoints, etc.), μ_0 is the baseline mean under normal operation, and k is a slack parameter (typically 0.5 × tolerable shift). The CUSUM alarm fires when `CUSUM_n > h` for a configurable threshold h. This is statistically grounded, computable from discrete event counts, and makes no false claims about steady-state bounds.
+
+#### M2 — Behavioral Alignment Score (replaces F variational free energy)
+
+The Variational Free Energy / Active Inference framework requires explicit generative models q(s) and p(o,s) that do not exist for LLM-backed agents. The FEP also applies to continuous perception-action loops, not discrete episodic runs, and the "high F → seek clarification" mapping is an analogy, not a theorem.
+
+Replace with: Behavioral Alignment Score — embedding cosine distance between the empirical distribution of the agent's decision types over the last N runs and the expected distribution under the Labrador behavioral contract:
+
+```text
+BAS = 1 − cosine_similarity(embed(recent_decision_distribution), embed(labrador_contract_distribution))
+```
+
+A BAS above `bas_alert_threshold` triggers the same clarification-seeking signal that high F was intended to produce, with honest semantics: the agent's recent behavior has drifted measurably from its Labrador baseline. Computed per-run from the episodic log; no LLM internals required.
+
+#### M3 — Causal Graph Coherence (replaces Φ integrated information)
+
+IIT's Φ is NP-hard to compute exactly, the approximations have no proven relationship to the true Φ for non-biological systems, and the Calvin Archive causal graph is a semantic relation graph — not the state-transition matrix that the Φ formula is defined over. The "Φ drop after learning → fragmentation" claim has no derivation from IIT.
+
+Replace with: Fiedler value (algebraic connectivity) of the Calvin Archive causal graph Laplacian:
+
+```text
+λ₂ = second smallest eigenvalue of L = D − A
+```
+
+where D is the degree matrix and A is the adjacency matrix of the causal subgraph relevant to the update. A drop in λ₂ after a learning event means the graph has become less connected — a new causal pattern was added without integrating with existing ones. This is polynomial-time computable, has a direct graph-theoretic interpretation, and correctly measures the fragmentation concern. A drop exceeding `phi_drop_quarantine_trigger` (threshold name retained for config compatibility) triggers quarantine.
+
+#### M4 — Behavioral Pressure Accumulator (replaces S(T) KL divergence integral)
+
+S(T) = ∫ λ(t) D_KL[q_t(s) ‖ p_identity(s)] dt requires q_t(s) (agent recognition model over hidden states) and p_identity(s) (Labrador kernel as a probability distribution over hidden states) — neither of which is computable from LLM behavior. The integral notation implies continuous functions; agent runs are discrete events.
+
+Replace with: Behavioral Pressure Accumulator — weighted sum of observable behavioral deviations over a run window:
+
+```text
+BPA(w) = Σ_{e ∈ events(w)} decay(e) × weight(e)
+```
+
+Event weights: ambiguity checkpoint ignored → 1.0; failed recovery attempt → 2.0; quarantine item added → 1.5; bluff detected → 3.0; pack breakdown flag → 2.5. `decay(e)` is exponential recency weighting. When `BPA(w) > bpa_evolution_threshold`, open a governed reflection path: synthesize the recurring pattern, propose a schema or policy revision, submit to Meta-Governor. The metric is honest, computable, and captures the accumulated unresolved strain concept without the non-computable KL framing.
+
+#### M5 — Empirical Action Coherence (replaces SSA)
+
+The stated SSA formula requires Pr_π(a₁, a₂ | p) — the joint probability of action pairs under the agent's policy — which is not computable for an LLM-backed agent. The compatibility function using cosine similarity in goal embedding space also has no principled relationship to behavioral compatibility.
+
+Replace with: Empirical Action Coherence — for each problem domain p (spec type × phase type), compute the empirical co-occurrence frequency of action type pairs from the episodic log:
+
+```text
+EAC(p) = Σ_{(a₁,a₂)} freq(a₁,a₂|p) × compatible(a₁, a₂, contract_p)
+```
+
+where `freq(a₁,a₂|p)` is the fraction of runs in domain p where actions a₁ and a₂ co-occurred, and `compatible(a₁, a₂, contract_p)` is 1 if both actions are permitted by the agent's behavioral contract for domain p and do not conflict (one does not negate a constraint the other satisfies), and 0 otherwise. Conflict detection uses the existing behavioral contract structure `C = (P, I, G, R)`, not embedding similarity.
+
+#### M6 — Cross-Layer Hysteresis (unchanged definition, clarified implementation)
+
+```text
+H = Δ_post-rollback / Δ_attack
+```
+
+The definition is correct. Implementation note: Δ must be computed from continuity snapshot comparisons (`compare_snapshots()`), not from file diff size. A high H after rollback means behavioral residue persists in memory summaries, adaptation traces, or causal patterns even after the visible identity edit was reverted. H must be computed before declaring a rollback complete. The stewardship gate (from ROADMAP.md Phase 8) blocks the next run commission if H > `hysteresis_tolerance`.
+
+### Three-Timescale Integration — Rate Separation Requirement
+
+The fast, medium, and slow loops are mutually coupled: slow-loop policy changes alter medium-loop schema revision thresholds, which alter fast-loop experience categorization, which feeds back into medium-loop inputs. This feedback can produce limit cycles or runaway schema revision if the rate separation is insufficient.
+
+**Stability guarantee (Borkar two-timescale stochastic approximation, Theorem 6.2):** In systems with two update rates α (fast) and β (slow) where α/β → ∞, the fast iterate sees the slow iterate as essentially fixed, and both converge under standard conditions. The same principle applies to three timescales with sufficient separation.
+
+**Required rate specification:** Before Phase 8 implementation begins, specify N and M such that:
+
+- Fast loop fires every run (rate 1)
+- Medium loop fires every N runs (recommended N ≥ 10)
+- Slow loop fires every M runs or on explicit human endorsement (recommended M ≥ 5N)
+
+These values become configuration parameters (`medium_loop_trigger_runs`, `slow_loop_trigger_runs`) in the soul.json thresholds block. The implementation must enforce that schema revision candidates from the medium loop are never applied before the medium loop has accumulated at least N fast-loop episodes since the last revision.
+
+### Episteme Belief Revision — AGM Consistency Contract
+
+The Episteme chamber holds belief revisions. For these to be epistemically coherent across accumulated runs, the revision operator must satisfy the AGM axioms (Alchourrón, Gärdenfors, Makinson 1985):
+
+- **Success**: after revising by φ, the system believes φ
+- **Inclusion**: the new belief set is a subset of what the old set plus φ entails
+- **Consistency**: revising by a consistent φ produces a consistent belief set
+- **Preservation**: beliefs not contradicted by φ are retained
+
+**Harkonnen implementation contract for `form_belief()` and `revise_belief()`:**
+
+1. **Consistency gate**: before writing a new Episteme entry that contradicts an existing non-quarantined belief, the older belief must be explicitly marked as `needs_revision` or quarantined — not left in place as a silent contradiction.
+2. **Preservation check**: beliefs unrelated to the new evidence must not be modified as a side effect.
+3. **Success guarantee**: after `revise_belief(prior_belief_id, new_belief_input, reason)`, querying for the new belief's content must return the new claim, not the old one.
+4. **Contradiction detection**: the TypeDB schema must be queryable for pairs of beliefs in the same domain that make incompatible claims (one asserts X, another asserts ¬X without a supersession link between them). This is Required Query 12 already — make it a failing health check, not just an available query.
+
+The `memory_updates` table and `invalidated_by` field already implement parts of this. Phase 8 should formalize the consistency gate as a pre-write check in `ingest.rs` rather than a post-hoc query.
 
 ### Rust Module Layout
 

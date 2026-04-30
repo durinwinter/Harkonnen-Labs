@@ -5,6 +5,7 @@ import ValidationPanel from './ValidationPanel';
 import CoobieSignalPanel from './CoobieSignalPanel';
 import MemoryCandidatesPanel from './MemoryCandidatesPanel';
 import RunReviewPanel from './RunReviewPanel';
+import RunHealthPanel from './RunHealthPanel';
 
 const API_BASE = import.meta.env.VITE_API_BASE || 'http://127.0.0.1:3057/api';
 
@@ -177,6 +178,7 @@ export default function RunDetailDrawer({ runId, onClose }) {
         <div className="drawer-body">
           {tab === 'overview' && (
             <div className="overview-grid">
+              <RunHealthPanel runId={runId} />
               <div className="ov-stat">
                 <span className="ov-label">Status</span>
                 <span className="ov-value">{titleCase(run?.status || '—')}</span>

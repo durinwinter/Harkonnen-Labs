@@ -10,11 +10,15 @@ use uuid::Uuid;
 
 use crate::setup::{command_available, SetupConfig};
 
+pub mod briefing;
+pub mod context_budget;
 pub mod semantic;
 pub mod semantic_openbrain;
 
+pub use briefing::{BriefingScope, ContextSection, ContextTarget};
+pub use context_budget::{estimate_briefing_tokens, text_within_token_budget};
 pub use semantic::{
-    SemanticMemory, SemanticMemoryHit, SemanticMemoryMetadata, SemanticMemoryWrite,
+    NoopSemanticMemory, SemanticMemory, SemanticMemoryMetadata, SemanticMemoryWrite,
 };
 pub use semantic_openbrain::OpenBrainSemanticMemory;
 

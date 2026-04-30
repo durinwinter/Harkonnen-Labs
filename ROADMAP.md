@@ -5,7 +5,7 @@ The fastest reasonable path: v1-A (Keeper-backed lease enforcement) → v1-B
 (memory invalidation persistence) → v1-D (operator context MVP) → Phase 2
 (testable harness) → Phase 5-C (context gating, no new infra) → Phase 5-D
 (PackChat conversation memory chain) → Phase 5b (OB1 memory abstraction,
-MCP prompts, OCR, memory refactor) → Phase 6 (TypeDB) → Phase 7 (causal
+MCP prompts, memory refactor) → Phase 6 (TypeDB) → Phase 7 (causal
 corpus) → Phase 8 (Calvin Archive).
 Phase 10 (docs, DevBench, benchmark suites) follows the coordination path rather
 than interrupting it. Live twin provisioning is permanently deferred unless a
@@ -66,7 +66,7 @@ The factory needs a clear line from coordination authority to durable continuity
 4. **Phase 2** — Bramble real test execution. This is the testable harness. `validation_passed` means nothing until it reflects real test output rather than stubs.
 5. **Phase 5-C** — per-phase context gating. Once roles and leases are real, irrelevant context becomes the next quality drag.
 6. **Phase 5-D** — PackChat conversation memory chain. Twilight Bark conversations become durable memory candidates, Coobie distills them, OB1 stores shared recall, and Calvin receives only governed promotion contracts.
-7. **Phase 5b** — OB1 memory abstraction, OCR, MCP prompts, and memory refactor. This prepares the semantic layer without returning to the fragile local vector-store default.
+7. **Phase 5b** — OB1 memory abstraction, MCP prompts, and memory refactor. This prepares the semantic layer without returning to the fragile local vector-store default.
 8. **Phase 6** — TypeDB semantic layer for cross-run typed causal queries.
 9. **Phase 7** — causal attribution corpus so the deeper continuity layer opens with real evidence.
 10. **Phase 8** — the Calvin Archive: persisted identity, governed integration, D*/SSA streaming. This remains the long-horizon destination, but no longer blocks coordination-first engineering.
@@ -403,7 +403,7 @@ These patterns are useful, but Harkonnen implements them inside its own contract
 
 ## Phase 5b — Memory Infrastructure, MCP Prompts + Rust-Native Servers
 
-**Unlocks:** Four things that must land before TypeDB (Phase 6) is viable: a clean memory module structure, document ingest completeness (OCR), a live MCP prompt surface, and an OB1-backed memory abstraction that keeps shared recall available across Claude, ChatGPT, Codex, Cursor, Twilight-connected agents, and Harkonnen itself.
+**Unlocks:** Three things that must land before TypeDB (Phase 6) is viable: a clean memory module structure, a live MCP prompt surface, and an OB1-backed memory abstraction that keeps shared recall available across Claude, ChatGPT, Codex, Cursor, Twilight-connected agents, and Harkonnen itself.
 
 This phase also eliminates Harkonnen's remaining local `npx` MCP helper processes in favour of a single compiled Rust binary where Harkonnen owns the tool surface. OB1 itself may still be reached through its MCP endpoint or a `supergateway` bridge; that is an external service boundary, not a Harkonnen hot-path runtime dependency.
 
@@ -441,31 +441,6 @@ Add `src/memory/semantic_openbrain.rs` implementing the `SemanticMemory` trait a
 **First slice shipped 2026-04-29:** `src/memory.rs` moved to `src/memory/mod.rs` as the start of the module split, with `src/memory/semantic.rs` defining `SemanticMemory` / metadata / hit / write contracts and `src/memory/semantic_openbrain.rs` implementing the trait over OB1. `AppContext` now exposes `semantic_memory` as the default long-term recall abstraction; PackChat shared-recall capture, Coobie briefing recall, and MCP memory tools route through the trait when OB1 is configured.
 
 **Fallback slice shipped 2026-04-29:** `NoopSemanticMemory` is now the explicit disabled-OB1 implementation, so `AppContext.semantic_memory` is always present while OB1 remains the default configured backend.
-
-### Scanned document ingestion (`pdfium-render` + Claude vision)
-
-The existing `memory ingest` path already handles text-forward PDFs — files where the text layer is real and selectable. The gap is image-only PDFs: scanned documents where every page is a rasterized image with no extractable text. The fix is a two-stage pipeline wired into the existing `memory ingest` path:
-
-```text
-memory ingest <file.pdf>
-  │
-  ├─ pdfium-render → text layer present?
-  │     yes → extract directly (current behaviour, unchanged)
-  │
-  └─ no text layer (scanned)
-        │
-        ├─ pdfium-render → rasterize pages to images
-        │
-        ├─ Claude vision API → extract text per page
-        │     structured output: { page, text, confidence }
-        │
-        └─ fallback: tesseract-rs (if vision API unavailable /
-               rate-limited / cost-constrained)
-```
-
-Add `pdfium-render` to `Cargo.toml` as the rasterization layer (Rust bindings to Google's pdfium — the same engine Chrome uses). Claude vision extraction is substantially better than Tesseract on complex layouts, multi-column text, tables, and degraded scans. The existing `src/tesseract.rs` becomes the offline fallback rather than the primary path.
-
-No new CLI surface. The `memory ingest` command detects the absence of a text layer, runs the pipeline silently, and writes the extracted text sidecar alongside the imported asset. A `confidence` field in the sidecar records whether extraction came from the text layer, vision API, or Tesseract fallback, so downstream retrieval can weight hits accordingly.
 
 ### MCP prompts — live dynamic briefings from `mcp_server.rs` — **SHIPPED 2026-04-28**
 
@@ -523,11 +498,35 @@ Memory accumulation and genuine prior revision are not the same thing. A lesson 
 - **"Awareness only" vs "prior-revision target" consolidation status** — extend the memory candidate data model with an explicit `learning_intent` field: `awareness_only` (operator wants the agent to know this) or `prior_revision_target` (operator wants this to change how the agent processes a class of situation). The Consolidation Workbench must surface this distinction; the default must be `awareness_only` so prior revision is always a deliberate operator decision, not an assumption.
 - **Schema revision as a distinct candidate type** — the candidate data model currently treats fact ingestion, belief revision, and schema revision as similar candidate types. Schema revision (changing how a whole class of situations is categorized) must be a structurally distinct type with elevated review requirements: it requires medium-loop compressed cross-episode evidence (not a single run's lesson), a `pattern_basis` field citing at least three corroborating episodes, and operator endorsement before it reaches Ethos. A single-run lesson cannot qualify as `schema_revision`.
 - **Coobie behavioral-change report** — a post-run artifact comparing current Praxis-layer decisions (spec clarification thresholds, escalation rates, ambiguity checkpoint frequency) against the rolling prior-N-run baseline. When a decision metric shifts significantly after a lesson was promoted to `prior_revision_target`, record the link as a learning provenance record. When it does not shift after 5+ runs, flag the lesson as `stored_not_learned`.
+- **`decision_influence_score` calibration A/B design** — `decision_influence_score` per memory entry cannot be computed correctly by counting retrieval frequency. A hit that is always in the briefing looks influential whether or not it changes anything. Add a calibrated exclusion signal: with configurable probability (default 0.05), randomly exclude an eligible briefing hit from the active set for a run on the same spec family. Track whether outcomes differ from the expected rate. Over N exclusion events per hit, the statistical difference in outcome rate becomes the influence score. Without this, `decision_influence_score` reduces to a retrieval-frequency proxy and `stored_not_learned` detection will be systematically wrong on high-frequency, low-influence lessons.
+- **Positive signal reinforcement path** — the prediction system records error on failures but has no reinforcement signal on correct predictions. Over many runs this produces a systematic accumulation bias: memory fills with failure-annotated lessons while correct-prediction runs generate nothing, progressively skewing briefings toward failure-framing even on a healthy factory. Add a `prediction_success_reinforcement` step at run close: when `prediction_error < success_threshold` (configurable, default 0.2), increment a `confirmation_count` on the causal signals that fired during preflight and whose chamber classifications matched the actual outcome. When `confirmation_count` reaches a configurable threshold, the signal's base confidence is eligible for upward revision in the Consolidation Workbench.
+- **Mid-run re-briefing protocol** — Coobie briefs before each phase. If Mason or Bramble encounters something unexpected mid-task (an undocumented dependency, a schema surface not in the spec, an API contract that contradicts the intent package), the phase-entry briefing is stale. Define a `mid_run_rebrief_trigger` contract: agents may issue a scoped `memory_pull` tagged `trigger: unexpected_discovery` when they encounter a condition absent from the briefing. At run close, flagged pulls feed into the briefing-scope review for the spec family: if the same discovery recurs across multiple runs of a family, it becomes a `required_section` injection rule for that scope rather than requiring an agent to ask each time.
 
 **Benchmark gate:**
 
 - At least one lesson promoted as `prior_revision_target` has a linked behavioral-change record showing the Praxis metric it shifted and the run where the shift first appeared.
 - Coobie's behavioral-change report is produced at run close and included in the run artifact list.
+- At least one `decision_influence_score` calibration exclusion event has been recorded and the resulting score is distinguishable from retrieval frequency alone.
+- At least one `prediction_success_reinforcement` event is recorded after a low-error run and the contributing signal's `confirmation_count` increments.
+
+---
+
+### Spec Taxonomy and Cross-Agent Lesson Promotion
+
+Two structurally distinct gaps in how lessons accumulate across runs.
+
+**Spec family clustering** — every spec is currently an independent retrieval entity. Coobie queries by keywords against a flat collection; there is no mechanism to recognize that a new spec is structurally similar to previous auth-module specs and weight those episodes above a random pattern-match. "Thin evidence" fires even when the factory has done the same class of work many times, because the retrieval layer cannot see the family. The behavioral-change report also cannot scope to "on this spec family" — it spans all specs, diluting causal signal.
+
+What to build: embed each spec into a family vector at intake (using the OB1/semantic-memory infrastructure already built in Phase 5-D). Before retrieval, compute the incoming spec's similarity to prior family vectors and bias retrieval toward the closest family. The family vector lives alongside the spec in OB1; Scout's intent package gains an optional `spec_family` tag. This enables the behavioral-change report to filter: "on specs tagged `auth_service`, Coobie's escalation rate shifted from 0.4 to 0.2 after this lesson." That specificity is what makes learning provenance claims verifiable rather than cross-spec noise.
+
+**Cross-agent lesson promotion path** — Scout's ambiguity detection patterns and Mason's failure repair patterns are stored in separate scoped memory. The isolation is correct. But there is a missing signal: when Scout repeatedly flags `SCOPE_CREEP` and Mason repeatedly fails on the same run, there is a cross-agent causal relationship that no single agent is authorized to generate. Coobie produces run-level causal attributions, but her six DeepSignalSpec heuristics are Mason/Bramble-facing; the Scout→Mason linkage is invisible.
+
+What to build: after each run, Coobie checks whether any Scout ambiguity signals co-occurred with Mason failure causes at statistically significant frequency over N runs. When co-occurrence crosses `cross_agent_correlation_threshold`, emit a `cross_agent_pattern_candidate` for operator review in the Consolidation Workbench, tagged `cross_agent_pattern` (elevated review type, spans a role boundary). If promoted, the lesson feeds into both Scout's and Mason's scoped briefings with a `cross_agent` provenance tag visible to both.
+
+**Benchmark gate:**
+
+- At least one run demonstrates spec-family-biased retrieval returning demonstrably higher-relevance hits than flat keyword retrieval on the same spec (assessed by utilization rate).
+- At least one `cross_agent_pattern_candidate` is emitted and surfaced in the Consolidation Workbench after 10+ runs of the same spec family.
 
 ---
 
@@ -580,6 +579,8 @@ pub async fn complete(backend: &ProviderBackend, messages: &[Message]) -> Result
 
 Each variant is a typed `reqwest` call to the provider's REST API. `SubAgentBackend::CodexPlanAgent` routes through `ProviderBackend::OpenAi` (model: `o4-mini` or `gpt-4o`) rather than spawning the codex CLI process. `SubAgentBackend::GeminiAgent` routes through `ProviderBackend::Gemini`. The existing `SubAgentBackend::DirectLlm` path continues to use the current `llm.rs` call site unchanged — this is additive, not a rewrite.
 
+**First slice shipped 2026-04-29:** `src/llm.rs` now exposes `ProviderBackend::{Anthropic, OpenAi, Gemini}`, `build_provider_backend()`, `complete()`, and `complete_request()`. `SubAgentDispatcher` routes isolated `ClaudeCodeAgent`, `CodexPlanAgent`, and `GeminiAgent` calls through typed provider backends with model overrides instead of subprocess spawns or ad hoc provider construction. Regression tests cover OpenAI backend mapping and model-override credential preservation.
+
 **Benchmark gate:**
 
 - Re-run `FRAMES` after OB1 lands as the default semantic recall path to confirm multi-hop recall improves over the SQLite/local-vector baseline
@@ -596,7 +597,6 @@ Each variant is a typed `reqwest` call to the provider's REST API. `SubAgentBack
 - `build_targeted_briefing()` is the sole briefing entry point; no call site uses the old `build_preflight_briefing` or `build_scoped_briefing`
 - OB1 is serving semantic queries for long-term shared recall through the `SemanticMemory` abstraction
 - local fastembed/SQLite vectors remain opt-in and compile-disabled by default
-- OCR-scanned PDFs can be ingested via `memory ingest`
 - `mcp_server.rs` serves all four named prompts with `ContextTarget` budget enforcement; `memory_pull` tool is live; `/mcp coobie/briefing` works in a Claude Code session and respects `max_tokens`
 - Episode records include `ContextUtilization` with `utilization_rate`; 10-run baseline collected
 - Harkonnen-owned local MCP helper entries are replaced by `harkonnen mcp serve` in `harkonnen.toml`; Node.js is no longer required for Harkonnen's local helper surface
@@ -1483,6 +1483,36 @@ Every reportable benchmark claim should include:
 - API routes: `GET /api/runs/:id/consolidation/candidates`, `POST .../candidates` (generate), `POST .../candidates/:id/keep`, `.../discard`, `.../edit`, `POST /api/runs/:id/consolidate` (promote)
 - Pack Board Consolidation Workbench panel: candidate cards with keep/discard/edit controls, confidence bars, expandable JSON, filter bar, promote footer
 - `RunDetailDrawer` updated with workbench tab
+
+---
+
+## Deferred Until Fully Working
+
+These are useful capabilities, but they must not block the current path to a fully working Harkonnen loop. Revisit them only after the PackChat -> OB1 -> Calvin memory chain, learning-loop closure, run health, MCP prompt surface, provider routing, and TypeDB-backed causal query path are productive.
+
+### Scanned document ingestion (`pdfium-render` + vision/OCR)
+
+The existing `memory ingest` path can remain text-first for now. Image-only PDFs and scanned documents move behind the fully-working milestone.
+
+Future implementation shape:
+
+```text
+memory ingest <file.pdf>
+  │
+  ├─ pdfium-render → text layer present?
+  │     yes → extract directly
+  │
+  └─ no text layer
+        │
+        ├─ pdfium-render → rasterize pages to images
+        │
+        ├─ vision API → extract text per page
+        │     structured output: { page, text, confidence }
+        │
+        └─ offline OCR fallback if needed
+```
+
+When this returns to the active roadmap, add confidence/provenance fields so downstream retrieval can distinguish text-layer extraction from vision/OCR extraction. Do not add `pdfium-render`, Tesseract work, or scanned-PDF gates to Phase 5b.
 
 ---
 

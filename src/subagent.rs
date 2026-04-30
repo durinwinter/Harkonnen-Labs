@@ -14,6 +14,7 @@
 use std::collections::HashMap;
 use std::time::Instant;
 
+use crate::llm::{self, LlmRequest};
 use crate::setup::{SetupConfig, SubAgentConfig, SubAgentTaskConfig};
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -150,15 +151,15 @@ impl SubAgentDispatcher {
                 (String::new(), None)
             }
             SubAgentBackend::ClaudeCodeAgent { model, .. } => {
-                self.call_isolated_llm(model, system_override, &user_prompt)
+                self.call_isolated_llm(&backend, model, system_override, &user_prompt)
                     .await
             }
             SubAgentBackend::CodexPlanAgent { model, .. } => {
-                self.call_isolated_llm(model, system_override, &user_prompt)
+                self.call_isolated_llm(&backend, model, system_override, &user_prompt)
                     .await
             }
             SubAgentBackend::GeminiAgent { model } => {
-                self.call_isolated_llm(model, system_override, &user_prompt)
+                self.call_isolated_llm(&backend, model, system_override, &user_prompt)
                     .await
             }
         };
@@ -172,39 +173,32 @@ impl SubAgentDispatcher {
     }
 
     /// Call the LLM with an isolation-enforcing system prompt.
-    /// Uses the same `llm::build_provider` infrastructure as the inline path,
-    /// but with a clean context window and write-prohibition in the system prompt.
+    /// Uses typed provider backends with a clean context window and
+    /// write-prohibition in the system prompt.
     async fn call_isolated_llm(
         &self,
+        backend: &SubAgentBackend,
         model: &str,
         system_override: Option<String>,
         user_prompt: &str,
     ) -> (String, Option<u32>) {
         let system = system_override.unwrap_or_else(isolation_system_prompt);
 
-        // Map model name to a provider tier name defined in harkonnen.toml.
-        let provider_name = if model.contains("opus") {
-            "claude-opus"
-        } else if model.contains("haiku") {
-            "claude-haiku"
-        } else if model.contains("sonnet") || model.contains("claude") {
-            "claude-sonnet"
-        } else if model.starts_with("gpt") || model.starts_with("o4") || model.starts_with("o3") {
-            "codex"
-        } else if model.starts_with("gemini") {
-            "gemini"
-        } else {
-            self.setup.providers.default.as_str()
-        };
-
-        let Some(provider) = crate::llm::build_provider("subagent", provider_name, &self.setup)
+        let provider_name = self.provider_name_for_backend(backend, model);
+        let Some(provider_backend) =
+            llm::build_provider_backend("subagent", provider_name, &self.setup)
+                .map(|provider| provider.with_model(model.to_string()))
         else {
-            tracing::warn!(model = %model, "SubAgentDispatcher: no provider available for isolated call");
+            tracing::warn!(
+                model = %model,
+                provider_name,
+                "SubAgentDispatcher: no typed provider backend available for isolated call"
+            );
             return (String::new(), None);
         };
 
-        let request = crate::llm::LlmRequest::simple(system, user_prompt);
-        match provider.complete(request).await {
+        let request = LlmRequest::simple(system, user_prompt);
+        match llm::complete_request(&provider_backend, request).await {
             Ok(resp) => {
                 let tokens = resp.usage.map(|u| u.input_tokens + u.output_tokens);
                 (resp.content, tokens)
@@ -213,6 +207,29 @@ impl SubAgentDispatcher {
                 tracing::warn!(error = %e, "SubAgentDispatcher: isolated LLM call failed");
                 (String::new(), None)
             }
+        }
+    }
+
+    fn provider_name_for_backend<'a>(
+        &'a self,
+        backend: &'a SubAgentBackend,
+        model: &'a str,
+    ) -> &'a str {
+        match backend {
+            SubAgentBackend::ClaudeCodeAgent { .. } => {
+                if model.contains("opus") {
+                    "claude-opus"
+                } else if model.contains("haiku") {
+                    "claude-haiku"
+                } else if model.contains("sonnet") || model.contains("claude") {
+                    "claude-sonnet"
+                } else {
+                    "claude"
+                }
+            }
+            SubAgentBackend::CodexPlanAgent { .. } => "codex",
+            SubAgentBackend::GeminiAgent { .. } => "gemini",
+            SubAgentBackend::DirectLlm => self.setup.providers.default.as_str(),
         }
     }
 

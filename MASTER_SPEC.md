@@ -109,7 +109,7 @@ src/                    Rust CLI (cargo run -- <command>)
   spec.rs               YAML spec loader and validation
   stamp.rs              Repo stamp interview and .harkonnen/repo.toml generation
   subagent.rs           Sub-agent dispatch and provider handoff
-  tesseract.rs          Workspace isolation and file-write permission model
+  tesseract.rs          Causal Tesseract scene-graph builder
   workspace.rs          Per-run workspace creation
   mcp_registry.rs       MCP server registry — loading and routing
   mcp_server.rs         Harkonnen self-hosted MCP server (ENT-1)
@@ -1013,16 +1013,15 @@ Benchmark gate: StreamingQA first run published — belief-update accuracy, no c
 
 **Done when:** a PackChat conversation can produce a durable memory candidate, the candidate can be distilled into an OB1 thought with provenance, the thought can be retrieved in a later briefing, and a Calvin-worthy candidate can be emitted as a structured promotion contract without writing ungoverned prose directly into the archive. The health report must make stalled, stale, duplicated, or policy-blocked memory items visible before an operator assumes the chain is clear.
 
-### Phase 5b — Memory Infrastructure (OB1 + OCR + MCP Prompts)
+### Phase 5b — Memory Infrastructure (OB1 + MCP Prompts)
 
 - Open Brain (OB1) is the default long-term semantic recall substrate
 - Qdrant/local vectors remain optional accelerators, not the default path
-- OCR pipeline via Tesseract for scanned PDFs and images
 - Memory module refactor: split `src/memory.rs` into the COOBIE_SPEC module tree
 - Code-review learning records: Sable/Bramble/Mason review outcomes produce structured records with finding fingerprint, files, severity, resolution (`fixed`, `skipped`, `auto_fixed`), lesson extracted, evidence refs, and stale-if-file-changed invalidation rules
 - Plan completion audit: before a run closes, Harkonnen compares the accepted spec/roadmap checklist against the actual diff, tests, and artifacts; mismatches become reviewable run notes rather than quiet success
 
-**Done when:** OB1 serves shared semantic queries through the Harkonnen memory abstraction, OCR-scanned PDFs can be ingested, MCP prompts expose scoped briefings, and `src/memory.rs` is split into the module tree.
+**Done when:** OB1 serves shared semantic queries through the Harkonnen memory abstraction, MCP prompts expose scoped briefings, and `src/memory.rs` is split into the module tree. Scanned PDF/image OCR is explicitly deferred until after the system is fully working.
 
 ---
 

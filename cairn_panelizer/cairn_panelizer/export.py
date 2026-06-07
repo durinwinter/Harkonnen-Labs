@@ -1,4 +1,4 @@
-"""Fabrication-file exporters: mesh, panel schedules, family summary, flat DXF."""
+"""Fabrication-file exporters: mesh, panel/family/mold schedules, nested flat patterns."""
 
 from __future__ import annotations
 
@@ -10,8 +10,8 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
-from .flatten2d import flatten_triangle
 from .mold import Mold
+from .nesting import NestingSheet
 from .panel import Panel
 
 try:
@@ -95,34 +95,82 @@ def export_family_summary_csv(panels: list[Panel], path: str | Path) -> None:
             })
 
 
-def export_flat_panels_dxf(panels: list[Panel], path: str | Path, spacing_mm: float = 100.0) -> bool:
-    """Lay out flattened triangular panels on a grid in a single DXF for cutting/nesting.
+def export_nesting_schedule_json(sheets: list[NestingSheet], path: str | Path) -> None:
+    records = [s.to_record() for s in sheets]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(records, fh, indent=2)
 
-    Returns False (and writes nothing) if ezdxf is unavailable or panels are
-    not triangles — flattening quads requires a fold-line decomposition that
-    is left for a later iteration.
+
+def export_nesting_schedule_csv(sheets: list[NestingSheet], path: str | Path) -> None:
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=["sheet_id", "width_mm", "height_mm", "panel_count", "utilization_pct", "panel_ids"])
+        writer.writeheader()
+        for sheet in sheets:
+            record = sheet.to_record()
+            writer.writerow({
+                "sheet_id": record["sheet_id"],
+                "width_mm": record["width_mm"],
+                "height_mm": record["height_mm"],
+                "panel_count": record["panel_count"],
+                "utilization_pct": record["utilization_pct"],
+                "panel_ids": json.dumps([p["panel_id"] for p in record["panels"]]),
+            })
+
+
+def export_nested_sheets_dxf(sheets: list[NestingSheet], path: str | Path, sheet_gap_mm: float = 200.0) -> bool:
+    """Draw each sheet's border plus its nested panel outlines, stacked in a column.
+
+    Each panel keeps the position the shelf-packer already computed for it —
+    this is the actual cut plan, not a re-layout for display purposes.
     """
-    fab_panels = [p for p in panels if not p.is_opening]
-    if ezdxf is None or not fab_panels or len(fab_panels[0].edge_lengths) != 3:
+    if ezdxf is None or not sheets:
         return False
 
     doc = ezdxf.new()
     msp = doc.modelspace()
 
-    cols = max(1, int(math.sqrt(len(fab_panels))))
-    cell = max((p.area_mm2 for p in fab_panels), default=1.0) ** 0.5 + spacing_mm
+    cursor_y = 0.0
+    for sheet in sheets:
+        border = [
+            (0.0, cursor_y), (sheet.width_mm, cursor_y),
+            (sheet.width_mm, cursor_y + sheet.height_mm), (0.0, cursor_y + sheet.height_mm),
+        ]
+        msp.add_lwpolyline(border + [border[0]], dxfattribs={"layer": "SHEET-BORDER"})
+        msp.add_text(
+            f"{sheet.sheet_id}  ({len(sheet.panels)} panels, {sheet.utilization_pct:.1f}% utilized)",
+            dxfattribs={"height": 40.0},
+        ).set_placement((10.0, cursor_y - 50.0))
 
-    for idx, panel in enumerate(fab_panels):
-        outline = flatten_triangle(panel.edge_lengths)
-        row, col = divmod(idx, cols)
-        offset = (col * cell, row * cell)
-        shifted = [(x + offset[0], y + offset[1]) for x, y in outline]
-        msp.add_lwpolyline(shifted + [shifted[0]], dxfattribs={"layer": panel.mold_family_id or "UNGROUPED"})
-        label_pos = (offset[0], offset[1] - 20.0)
-        msp.add_text(panel.panel_id, dxfattribs={"height": 30.0}).set_placement(label_pos)
+        for panel in sheet.panels:
+            outline = [(x, y + cursor_y) for x, y in panel.outline_mm]
+            msp.add_lwpolyline(outline + [outline[0]], dxfattribs={"layer": panel.family_id or "UNGROUPED"})
+            label_x = sum(x for x, _ in outline) / len(outline)
+            label_y = sum(y for _, y in outline) / len(outline)
+            msp.add_text(panel.panel_id, dxfattribs={"height": 18.0}).set_placement((label_x, label_y))
+
+        cursor_y += sheet.height_mm + sheet_gap_mm
 
     doc.saveas(str(path))
     return True
+
+
+def export_nesting(sheets: list[NestingSheet], output_dir: str | Path) -> dict[str, str]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = {
+        "nesting_schedule_json": output_dir / "nesting_schedule.json",
+        "nesting_schedule_csv": output_dir / "nesting_schedule.csv",
+        "flat_patterns_dxf": output_dir / "flat_patterns.dxf",
+    }
+
+    export_nesting_schedule_json(sheets, paths["nesting_schedule_json"])
+    export_nesting_schedule_csv(sheets, paths["nesting_schedule_csv"])
+    wrote_dxf = export_nested_sheets_dxf(sheets, paths["flat_patterns_dxf"])
+    if not wrote_dxf:
+        del paths["flat_patterns_dxf"]
+
+    return {k: str(v) for k, v in paths.items()}
 
 
 def export_mold_schedule_json(molds: list[Mold], path: str | Path) -> None:
@@ -225,15 +273,11 @@ def export_all(mesh: trimesh.Trimesh, panels: list[Panel], output_dir: str | Pat
         "panel_schedule_json": output_dir / "panel_schedule.json",
         "panel_schedule_csv": output_dir / "panel_schedule.csv",
         "panel_families_csv": output_dir / "panel_families.csv",
-        "flat_panels_dxf": output_dir / "flat_panels.dxf",
     }
 
     export_shell_mesh(mesh, panels, paths["mesh_obj"])
     export_panel_schedule_json(panels, paths["panel_schedule_json"])
     export_panel_schedule_csv(panels, paths["panel_schedule_csv"])
     export_family_summary_csv(panels, paths["panel_families_csv"])
-    wrote_dxf = export_flat_panels_dxf(panels, paths["flat_panels_dxf"])
-    if not wrote_dxf:
-        del paths["flat_panels_dxf"]
 
     return {k: str(v) for k, v in paths.items()}

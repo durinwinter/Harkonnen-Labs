@@ -1,0 +1,50 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Cairn Trillium Dome — Panel Viewer</title>
+  <link rel="stylesheet" href="viewer.css">
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/build/three.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/three@0.128.0/examples/js/controls/OrbitControls.js"></script>
+</head>
+<body>
+  <header>
+    <h1>Cairn Trillium Dome — Panel Viewer</h1>
+    <div id="meta-stats">Run the generator to produce <code>viewer_data.js</code>, then reload this page.</div>
+  </header>
+
+  <nav id="view-tabs">
+    <button data-view="dome" class="active">3D Assembly</button>
+    <button data-view="flat">Flat Patterns</button>
+  </nav>
+
+  <main>
+    <section id="dome-view" class="view active">
+      <div id="dome-canvas"></div>
+    </section>
+
+    <section id="flat-view" class="view">
+      <div id="flat-controls">
+        <label for="sheet-select">Cut sheet</label>
+        <select id="sheet-select"></select>
+        <button id="export-svg">Export sheet as SVG</button>
+        <span id="flat-hint">Click a panel outline to inspect it.</span>
+      </div>
+      <div id="flat-canvas-wrap">
+        <canvas id="flat-canvas"></canvas>
+      </div>
+    </section>
+
+    <aside id="info-panel">
+      <h2>Selected panel</h2>
+      <div id="panel-details">Click a panel — in either view — to inspect it.</div>
+      <h2>Mold families</h2>
+      <div id="family-legend"></div>
+    </aside>
+  </main>
+
+  <script src="viewer_data.js"></script>
+  <script src="viewer.js"></script>
+</body>
+</html>

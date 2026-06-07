@@ -90,8 +90,12 @@ def test_mold_features_are_present(pipeline):
 
 
 def test_mold_disabled_via_config_yields_no_molds(pipeline):
+    import dataclasses
+    from cairn_panelizer.config import MoldConfig
+
     config, panels, _ = pipeline
-    disabled = DomeConfig.from_dict({**vars(config), "mold": {"enabled": False}})
+    disabled = dataclasses.replace(config, mold=dataclasses.replace(config.mold, enabled=False))
+    assert isinstance(disabled.mold, MoldConfig)
     assert build_molds(panels, disabled) == []
 
 

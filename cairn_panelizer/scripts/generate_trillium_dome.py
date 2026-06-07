@@ -16,12 +16,14 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cairn_panelizer.config import DomeConfig
-from cairn_panelizer.export import export_all, export_molds
+from cairn_panelizer.export import export_all, export_molds, export_nesting
 from cairn_panelizer.families import assign_families
 from cairn_panelizer.mesh import build_dome_mesh
 from cairn_panelizer.mold import build_molds
+from cairn_panelizer.nesting import nest_panels
 from cairn_panelizer.openings import apply_openings
 from cairn_panelizer.panel import build_panels
+from cairn_panelizer.viewer_data import write_viewer_data
 from cairn_panelizer.visualize import render_preview
 
 
@@ -68,6 +70,7 @@ def main(argv: list[str] | None = None) -> int:
     outputs_dir = Path(args.outputs)
     written = export_all(mesh, panels, outputs_dir)
 
+    molds = []
     if config.mold.enabled:
         molds = build_molds(panels, config)
         print(f"[cairn-panelizer] generated {len(molds)} mold designs "
@@ -76,9 +79,20 @@ def main(argv: list[str] | None = None) -> int:
     else:
         print("[cairn-panelizer] mold generation disabled (mold.enabled: false)")
 
+    sheets = nest_panels(panels, config)
+    avg_utilization = sum(s.utilization_pct for s in sheets) / len(sheets) if sheets else 0.0
+    print(f"[cairn-panelizer] nested flat patterns onto {len(sheets)} sheet(s) "
+          f"({config.nesting.sheet_width_mm:.0f}x{config.nesting.sheet_height_mm:.0f}mm, "
+          f"avg utilization {avg_utilization:.1f}%)")
+    written.update(export_nesting(sheets, outputs_dir))
+
     preview_path = outputs_dir / "preview.png"
     render_preview(panels, preview_path, label_panels=args.label_panels)
     written["preview_png"] = str(preview_path)
+
+    viewer_data_path = write_viewer_data(config, panels, molds, sheets, PACKAGE_ROOT / "viewer" / "viewer_data.js")
+    written["viewer_data"] = str(viewer_data_path)
+    print(f"[cairn-panelizer] wrote viewer data — open viewer/index.html in a browser to explore it")
 
     print("[cairn-panelizer] wrote outputs:")
     for name, path in written.items():

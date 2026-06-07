@@ -42,6 +42,20 @@ class MoldConfig:
 
 
 @dataclass
+class NestingConfig:
+    sheet_width_mm: float = 1500.0
+    sheet_height_mm: float = 3000.0
+    margin_mm: float = 20.0
+    spacing_mm: float = 10.0
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "NestingConfig":
+        known = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in (data or {}).items() if k in known}
+        return cls(**filtered)
+
+
+@dataclass
 class DomeConfig:
     overall_width_mm: float = 6000.0
     height_mm: float = 3200.0
@@ -64,6 +78,7 @@ class DomeConfig:
     panel_mode: str = "triangle"  # "triangle" or "quad"
 
     mold: MoldConfig = field(default_factory=MoldConfig)
+    nesting: NestingConfig = field(default_factory=NestingConfig)
 
     @property
     def base_radius_mm(self) -> float:
@@ -72,10 +87,11 @@ class DomeConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DomeConfig":
-        known = {f.name for f in fields(cls) if f.name != "mold"}
+        known = {f.name for f in fields(cls) if f.name not in ("mold", "nesting")}
         filtered = {k: v for k, v in data.items() if k in known}
         config = cls(**filtered)
         config.mold = MoldConfig.from_dict(data.get("mold"))
+        config.nesting = NestingConfig.from_dict(data.get("nesting"))
         return config
 
     @classmethod

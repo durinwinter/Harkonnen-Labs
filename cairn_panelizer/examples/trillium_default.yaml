@@ -32,3 +32,9 @@ mold:
   demold_slot_length_mm: 40
   insert_locator_diameter_mm: 6
   label_prefix: CAIRN
+
+nesting:
+  sheet_width_mm: 1500
+  sheet_height_mm: 3000
+  margin_mm: 20
+  spacing_mm: 10

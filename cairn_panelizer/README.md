@@ -33,11 +33,16 @@ Outputs are written to `outputs/`:
 | `panel_schedule.json` | Full per-panel record: vertices, edges, area, normal, centroid, neighbors, dihedral angles, family |
 | `panel_schedule.csv` | Same schedule, flattened for spreadsheets |
 | `panel_families.csv` | Repetition groups: `mold_family_id`, panel count, representative edge lengths |
-| `flat_panels.dxf` | Flattened (unrolled) triangle outlines laid out on a cut sheet, grouped by family layer |
+| `nesting_schedule.json` | Full per-sheet record: dimensions, utilization, and every nested panel's placement (position, rotation, flattened outline) |
+| `nesting_schedule.csv` | Same nesting schedule, flattened for spreadsheets |
+| `flat_patterns.dxf` | Every sheet's nested, flattened (unrolled) triangle outlines, drawn with sheet borders and grouped by family layer — ready to send to a cutter |
 | `mold_schedule.json` | Full per-mold record: cavity outline, thickness, dam/bevel/draft, registration holes, demold slots, insert locators, linked `panel_ids` |
 | `mold_schedule.csv` | Same mold schedule, flattened for spreadsheets |
 | `molds.dxf` | One cavity drawing per mold family — outline, registration holes, insert locators, demold slot, label — laid out on a grid for CNC/CAD review |
 | `preview.png` | 3D preview, panels colored by mold family |
+
+`viewer/viewer_data.js` is also (re)written on every run — see
+[Viewer](#viewer-3d-assembly--flat-pattern-cut-sheets) below.
 
 (`mold_schedule.*` / `molds.dxf` are only written when `mold.enabled: true`.)
 
@@ -75,6 +80,14 @@ All linear dimensions are millimeters; angles in the config are degrees.
 | `demold_slot_width_mm`, `demold_slot_length_mm` | Size of the pry/demold slot set into the panel's longest edge |
 | `insert_locator_diameter_mm` | Diameter of the rib/hub insert-locator points placed at each edge midpoint |
 | `label_prefix` | Prefix used when engraving each mold's `label_text` |
+
+### `nesting:` block
+
+| Parameter | Meaning |
+|---|---|
+| `sheet_width_mm`, `sheet_height_mm` | Usable cut-sheet dimensions for nesting flattened panel outlines |
+| `margin_mm` | Border kept clear around the inside edge of every sheet |
+| `spacing_mm` | Minimum gap kept between adjacent nested panels (kerf/handling allowance) |
 
 ## How the geometry is built
 
@@ -135,6 +148,55 @@ math as the panel DXF export) and lays out, relative to that cavity outline:
 - **label engraving text** — `{label_prefix}-{mold_id}-{family_id}`,
   baked into both the schedule and the `molds.dxf` drawing
 
+## Flat-pattern nesting
+
+`nesting.py` flattens every fabricated panel (the same exact 2D unrolling
+used for molds and the old per-panel DXF) and packs their bounding boxes
+onto fixed-size cut sheets with a greedy shelf-packing algorithm: panels are
+sorted largest-area-first and placed left to right, row by row, honoring
+`margin_mm` and `spacing_mm`, starting a new sheet whenever a row or sheet
+fills up. Each `NestingSheet` records its panel placements (position,
+rotation, flattened outline) and a `utilization_pct` (nested panel area ÷
+usable sheet area) so a fabrication run can estimate material yield per
+sheet before cutting. `export_nesting()` writes the schedule
+(`nesting_schedule.json`/`.csv`) and a single `flat_patterns.dxf` with every
+sheet's border and nested outlines, grouped by family layer.
+
+## Viewer (3D assembly + flat-pattern cut sheets)
+
+`viewer/` is a static, browser-based front end for exploring a generated
+dome without re-running the pipeline each time. Every run writes
+`viewer/viewer_data.js` (via `viewer_data.py`, gitignored as a generated
+artifact) — a `window.CAIRN_VIEWER_DATA = {...}` assignment bundling the
+config metadata, family list, full panel records, mold records, and nested
+sheets as plain JSON, loaded with a `<script>` tag instead of `fetch()` so
+it works straight off the filesystem with no server or CORS issues.
+
+To use it:
+
+```bash
+python scripts/generate_trillium_dome.py --config examples/trillium_default.yaml
+# then open viewer/index.html in a browser (requires internet access for the
+# Three.js / OrbitControls CDN scripts)
+```
+
+It has two synchronized views, switchable via the tabs at the top:
+
+- **3D Assembly** — a Three.js scene of the whole shell, each triangular
+  panel colored by its `mold_family_id` (same golden-ratio HSV palette as
+  `visualize.py`, so colors agree across the toolchain). Orbit/zoom with the
+  mouse; click a panel to highlight it and show its schedule details.
+- **Flat Patterns** — a Canvas 2D rendering of one nested cut sheet at a
+  time (pick from the sheet dropdown, which also reports panel count and
+  utilization). Click a panel outline to select it — selection is shared
+  with the 3D view, and picking a panel in either view jumps the other view
+  to match. **Export sheet as SVG** downloads the current sheet's outlines
+  and panel-ID labels as a standalone SVG file for cutting/CAM import.
+
+The info panel on the right shows the selected panel's ID, type, family,
+area, edge lengths, centroid, and neighbor IDs, plus a legend mapping every
+mold family to its color.
+
 ## Current limitations
 
 - Panels are flat triangles only; no doubly-curved or quad-folded panels yet.
@@ -147,7 +209,10 @@ math as the panel DXF export) and lays out, relative to that cavity outline:
 - DXF export only handles triangular panels (exact unrolling via the law of
   cosines); quad flattening needs a fold-line decomposition.
 - No STEP/solid export yet (CadQuery/FreeCAD).
-- No panel-nesting optimization for sheet goods or molds.
+- Flat-pattern nesting uses bounding-box shelf-packing, not true polygon
+  nesting (no rotation search, no nesting of mold cavities) — utilization is
+  in the 30-40% range for triangular panels and could be substantially
+  improved by a rotation-aware or polygon-fitting packer.
 - Molds are 2D schedules + flat DXF drawings, not 3D solids — dam height,
   bevel, and draft angle are recorded as parameters but not yet swept into
   CNC-ready cavity geometry (CadQuery/FreeCAD solid export is the natural
@@ -167,10 +232,13 @@ math as the panel DXF export) and lays out, relative to that cavity outline:
 - Add CadQuery/FreeCAD STEP export for solid molds (swept dam/bevel/draft,
   3D registration & locator features) and panel solids (bevels, ribs, hub
   connectors).
-- Nest flattened panels — and mold cavities — for material-efficient sheet layout.
+- Upgrade nesting from bounding-box shelf-packing to rotation-aware polygon
+  nesting (and extend it to mold cavities) for material-efficient layout.
 - Quad panel mode with fold-line-aware flattening.
 - Curved-panel, edge-rib, and test-coupon geometry, routed through
   `classify_mold_type()` to their dedicated mold types.
+- Viewer: per-family filtering/isolation, exploded assembly view, and
+  exporting the full multi-sheet nesting layout (not just the active sheet).
 
 ## Tests
 
@@ -188,3 +256,9 @@ family's edge lengths/area, every required mold feature present (registration
 holes, demold slot, insert locators, label, material, thickness, dam height),
 `mold.enabled: false` producing no molds, and the mold schedule files being
 written.
+
+Nesting checks cover: every fabricated panel placed on exactly one sheet (no
+duplicates, no omissions), every nested outline staying within its sheet's
+margin-bounded usable area, sheet IDs being unique and sequential, utilization
+percentages being sane (0-100%, positive whenever a sheet has panels), and the
+nesting schedule/DXF files being written.

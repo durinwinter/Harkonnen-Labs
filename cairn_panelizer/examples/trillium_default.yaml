@@ -1,0 +1,19 @@
+# Default Cairn Trillium Dome prototype parameters (millimeters / degrees).
+
+overall_width_mm: 6000
+height_mm: 3200
+lobe_amplitude: 0.18
+lobe_count: 3
+angular_segments: 72
+ring_segments: 12
+crown_radius_mm: 700
+wall_thickness_mm: 120
+
+door_width_mm: 900
+door_height_mm: 2050
+door_angle_deg: 180
+
+windows: []
+
+family_tolerance_mm: 2.0
+panel_mode: triangle

@@ -10,6 +10,8 @@ from pathlib import Path
 import numpy as np
 import trimesh
 
+from .flatten2d import flatten_triangle
+from .mold import Mold
 from .panel import Panel
 
 try:
@@ -93,18 +95,6 @@ def export_family_summary_csv(panels: list[Panel], path: str | Path) -> None:
             })
 
 
-def _flatten_triangle(edge_lengths: list[float]) -> list[tuple[float, float]]:
-    """Unroll a planar triangle into 2D, preserving its three edge lengths exactly."""
-    e0, e1, e2 = edge_lengths
-    p0 = (0.0, 0.0)
-    p1 = (e0, 0.0)
-    cos_angle = (e0 ** 2 + e2 ** 2 - e1 ** 2) / (2.0 * e0 * e2)
-    cos_angle = max(-1.0, min(1.0, cos_angle))
-    angle = math.acos(cos_angle)
-    p2 = (e2 * math.cos(angle), e2 * math.sin(angle))
-    return [p0, p1, p2]
-
-
 def export_flat_panels_dxf(panels: list[Panel], path: str | Path, spacing_mm: float = 100.0) -> bool:
     """Lay out flattened triangular panels on a grid in a single DXF for cutting/nesting.
 
@@ -123,7 +113,7 @@ def export_flat_panels_dxf(panels: list[Panel], path: str | Path, spacing_mm: fl
     cell = max((p.area_mm2 for p in fab_panels), default=1.0) ** 0.5 + spacing_mm
 
     for idx, panel in enumerate(fab_panels):
-        outline = _flatten_triangle(panel.edge_lengths)
+        outline = flatten_triangle(panel.edge_lengths)
         row, col = divmod(idx, cols)
         offset = (col * cell, row * cell)
         shifted = [(x + offset[0], y + offset[1]) for x, y in outline]
@@ -133,6 +123,97 @@ def export_flat_panels_dxf(panels: list[Panel], path: str | Path, spacing_mm: fl
 
     doc.saveas(str(path))
     return True
+
+
+def export_mold_schedule_json(molds: list[Mold], path: str | Path) -> None:
+    records = [m.to_record() for m in molds]
+    with open(path, "w", encoding="utf-8") as fh:
+        json.dump(records, fh, indent=2)
+
+
+def export_mold_schedule_csv(molds: list[Mold], path: str | Path) -> None:
+    fieldnames = [
+        "mold_id", "mold_type", "family_id", "panel_ids", "panel_count", "material",
+        "cavity_outline_mm", "cavity_area_mm2", "panel_thickness_mm", "edge_dam_height_mm",
+        "bevel_angle_deg", "draft_angle_deg", "registration_holes", "demold_slots",
+        "insert_locator_points", "label_text",
+    ]
+    nested_fields = {
+        "panel_ids", "cavity_outline_mm", "registration_holes", "demold_slots", "insert_locator_points",
+    }
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        writer = csv.DictWriter(fh, fieldnames=fieldnames)
+        writer.writeheader()
+        for mold in molds:
+            record = mold.to_record()
+            writer.writerow({
+                key: (json.dumps(record[key]) if key in nested_fields else record[key])
+                for key in fieldnames
+            })
+
+
+def export_molds_dxf(molds: list[Mold], path: str | Path, spacing_mm: float = 150.0) -> bool:
+    """Lay out each mold's cavity, registration holes, demold slot, and insert
+    locators on a grid, one drawing per family — labeled and ready for CNC review.
+    """
+    if ezdxf is None or not molds:
+        return False
+
+    doc = ezdxf.new()
+    msp = doc.modelspace()
+
+    cols = max(1, int(math.sqrt(len(molds))))
+    cell = max((m.cavity_area_mm2 for m in molds), default=1.0) ** 0.5 + spacing_mm
+
+    for idx, mold in enumerate(molds):
+        row, col = divmod(idx, cols)
+        offset = np.array([col * cell, row * cell])
+
+        outline = [tuple(np.array(p) + offset) for p in mold.cavity_outline_mm]
+        msp.add_lwpolyline(outline + [outline[0]], dxfattribs={"layer": "CAVITY"})
+
+        for hole in mold.registration_holes:
+            center = (hole["x"] + offset[0], hole["y"] + offset[1])
+            msp.add_circle(center, hole["diameter_mm"] / 2.0, dxfattribs={"layer": "REGISTRATION"})
+
+        for point in mold.insert_locator_points:
+            center = (point["x"] + offset[0], point["y"] + offset[1])
+            msp.add_circle(center, point["diameter_mm"] / 2.0, dxfattribs={"layer": "INSERT-LOCATOR"})
+
+        for slot in mold.demold_slots:
+            cx, cy = slot["x"] + offset[0], slot["y"] + offset[1]
+            half_len, half_wid = slot["length_mm"] / 2.0, slot["width_mm"] / 2.0
+            angle = math.radians(slot["angle_deg"])
+            cos_a, sin_a = math.cos(angle), math.sin(angle)
+            corners = []
+            for dx, dy in [(-half_len, -half_wid), (half_len, -half_wid), (half_len, half_wid), (-half_len, half_wid)]:
+                corners.append((cx + dx * cos_a - dy * sin_a, cy + dx * sin_a + dy * cos_a))
+            msp.add_lwpolyline(corners + [corners[0]], dxfattribs={"layer": "DEMOLD-SLOT"})
+
+        label_pos = (offset[0], offset[1] - 20.0)
+        msp.add_text(mold.label_text, dxfattribs={"height": 24.0}).set_placement(label_pos)
+
+    doc.saveas(str(path))
+    return True
+
+
+def export_molds(molds: list[Mold], output_dir: str | Path) -> dict[str, str]:
+    output_dir = Path(output_dir)
+    output_dir.mkdir(parents=True, exist_ok=True)
+
+    paths = {
+        "mold_schedule_json": output_dir / "mold_schedule.json",
+        "mold_schedule_csv": output_dir / "mold_schedule.csv",
+        "molds_dxf": output_dir / "molds.dxf",
+    }
+
+    export_mold_schedule_json(molds, paths["mold_schedule_json"])
+    export_mold_schedule_csv(molds, paths["mold_schedule_csv"])
+    wrote_dxf = export_molds_dxf(molds, paths["molds_dxf"])
+    if not wrote_dxf:
+        del paths["molds_dxf"]
+
+    return {k: str(v) for k, v in paths.items()}
 
 
 def export_all(mesh: trimesh.Trimesh, panels: list[Panel], output_dir: str | Path) -> dict[str, str]:

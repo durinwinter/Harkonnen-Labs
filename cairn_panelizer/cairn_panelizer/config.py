@@ -14,6 +14,34 @@ import yaml
 
 
 @dataclass
+class MoldConfig:
+    enabled: bool = True
+    default_type: str = "flat_faceted_mold"
+    material: str = "hdpe"
+
+    panel_thickness_mm: float = 12.0
+    edge_dam_height_mm: float = 25.0
+    bevel_angle_deg: float = 5.0
+    draft_angle_deg: float = 3.0
+
+    registration_hole_diameter_mm: float = 8.0
+    registration_hole_inset_mm: float = 30.0
+
+    demold_slot_width_mm: float = 12.0
+    demold_slot_length_mm: float = 40.0
+
+    insert_locator_diameter_mm: float = 6.0
+
+    label_prefix: str = "CAIRN"
+
+    @classmethod
+    def from_dict(cls, data: dict[str, Any] | None) -> "MoldConfig":
+        known = {f.name for f in fields(cls)}
+        filtered = {k: v for k, v in (data or {}).items() if k in known}
+        return cls(**filtered)
+
+
+@dataclass
 class DomeConfig:
     overall_width_mm: float = 6000.0
     height_mm: float = 3200.0
@@ -35,6 +63,8 @@ class DomeConfig:
 
     panel_mode: str = "triangle"  # "triangle" or "quad"
 
+    mold: MoldConfig = field(default_factory=MoldConfig)
+
     @property
     def base_radius_mm(self) -> float:
         """Radius of the undeformed footprint circle (lobes oscillate around this)."""
@@ -42,9 +72,11 @@ class DomeConfig:
 
     @classmethod
     def from_dict(cls, data: dict[str, Any]) -> "DomeConfig":
-        known = {f.name for f in fields(cls)}
+        known = {f.name for f in fields(cls) if f.name != "mold"}
         filtered = {k: v for k, v in data.items() if k in known}
-        return cls(**filtered)
+        config = cls(**filtered)
+        config.mold = MoldConfig.from_dict(data.get("mold"))
+        return config
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "DomeConfig":

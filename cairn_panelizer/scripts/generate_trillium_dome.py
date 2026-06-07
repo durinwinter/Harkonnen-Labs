@@ -16,9 +16,10 @@ if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
 from cairn_panelizer.config import DomeConfig
-from cairn_panelizer.export import export_all
+from cairn_panelizer.export import export_all, export_molds
 from cairn_panelizer.families import assign_families
 from cairn_panelizer.mesh import build_dome_mesh
+from cairn_panelizer.mold import build_molds
 from cairn_panelizer.openings import apply_openings
 from cairn_panelizer.panel import build_panels
 from cairn_panelizer.visualize import render_preview
@@ -66,6 +67,14 @@ def main(argv: list[str] | None = None) -> int:
 
     outputs_dir = Path(args.outputs)
     written = export_all(mesh, panels, outputs_dir)
+
+    if config.mold.enabled:
+        molds = build_molds(panels, config)
+        print(f"[cairn-panelizer] generated {len(molds)} mold designs "
+              f"(type={config.mold.default_type}, material={config.mold.material})")
+        written.update(export_molds(molds, outputs_dir))
+    else:
+        print("[cairn-panelizer] mold generation disabled (mold.enabled: false)")
 
     preview_path = outputs_dir / "preview.png"
     render_preview(panels, preview_path, label_panels=args.label_panels)

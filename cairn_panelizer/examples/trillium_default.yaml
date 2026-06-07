@@ -17,3 +17,18 @@ windows: []
 
 family_tolerance_mm: 2.0
 panel_mode: triangle
+
+mold:
+  enabled: true
+  default_type: flat_faceted_mold
+  material: hdpe
+  panel_thickness_mm: 12
+  edge_dam_height_mm: 25
+  bevel_angle_deg: 5
+  draft_angle_deg: 3
+  registration_hole_diameter_mm: 8
+  registration_hole_inset_mm: 30
+  demold_slot_width_mm: 12
+  demold_slot_length_mm: 40
+  insert_locator_diameter_mm: 6
+  label_prefix: CAIRN

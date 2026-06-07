@@ -15,14 +15,21 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
+from cairn_panelizer.assembly import generate_assembly_sequence
 from cairn_panelizer.config import DomeConfig
+from cairn_panelizer.connections import generate_connections
+from cairn_panelizer.cost import calculate_cost
+from cairn_panelizer.cure import predict_cure_schedule
 from cairn_panelizer.export import export_all, export_molds, export_nesting
+from cairn_panelizer.factory_package import generate_factory_package
 from cairn_panelizer.families import assign_families
+from cairn_panelizer.materials import assign_recipes
 from cairn_panelizer.mesh import build_dome_mesh
 from cairn_panelizer.mold import build_molds
 from cairn_panelizer.nesting import nest_panels
 from cairn_panelizer.openings import apply_openings
 from cairn_panelizer.panel import build_panels
+from cairn_panelizer.structure_check import run_structural_precheck
 from cairn_panelizer.viewer_data import write_viewer_data
 from cairn_panelizer.visualize import render_preview
 
@@ -94,8 +101,60 @@ def main(argv: list[str] | None = None) -> int:
     written["viewer_data"] = str(viewer_data_path)
     print(f"[cairn-panelizer] wrote viewer data — open viewer/index.html in a browser to explore it")
 
+    # --- Manufacturing intelligence: materials -> cost -> connections -> assembly -> cure -> structure ---
+    library = assign_recipes(panels, config)
+    if config.layers:
+        total_mass_kg = sum(p.estimated_mass_kg or 0.0 for p in panels if not p.is_opening)
+        print(f"[cairn-panelizer] assigned {len(config.layers)}-layer material stack "
+              f"({', '.join(layer.name for layer in config.layers)}) — est. {total_mass_kg:,.0f}kg total")
+    else:
+        print("[cairn-panelizer] no material layers configured — skipping mass/cost estimation detail")
+
+    cost_report = calculate_cost(panels, molds, config, library)
+    print(f"[cairn-panelizer] cost estimate: ${cost_report.total_medium_usd:,.0f} "
+          f"(${cost_report.total_low_usd:,.0f}-${cost_report.total_high_usd:,.0f}), "
+          f"${cost_report.cost_per_sqm_usd:,.0f}/sqm")
+
+    connections = generate_connections(panels, config, library)
+    print(f"[cairn-panelizer] generated {len(connections)} panel-to-panel connections")
+
+    assembly_steps = generate_assembly_sequence(panels, connections, config)
+    total_assembly_hr = sum(s.estimated_duration_min for s in assembly_steps) / 60.0
+    print(f"[cairn-panelizer] generated a {len(assembly_steps)}-step assembly sequence "
+          f"(~{total_assembly_hr:.0f} crew-hours estimated)")
+
+    cure_predictions = predict_cure_schedule(panels, library, config)
+    print(f"[cairn-panelizer] predicted cure timing for {len(cure_predictions)} panels "
+          f"(ambient {config.cure.ambient_temp_C:.0f}C / {config.cure.ambient_rh_pct:.0f}% RH)")
+
+    structural_report = run_structural_precheck(panels, connections, config)
+    fea_count = sum(1 for f in structural_report.flags if f.requires_fea)
+    print(f"[cairn-panelizer] structural pre-check (PRELIMINARY ONLY): "
+          f"{fea_count} panel(s) flagged requires_fea")
+
+    package_dir = outputs_dir / "factory_package"
+    package_paths = generate_factory_package(
+        config=config,
+        panels=panels,
+        molds=molds,
+        sheets=sheets,
+        connections=connections,
+        assembly_steps=assembly_steps,
+        cure_predictions=cure_predictions,
+        cost_report=cost_report,
+        structural_report=structural_report,
+        library=library,
+        output_dir=package_dir,
+        source_outputs_dir=outputs_dir,
+    )
+    written["factory_package_dir"] = str(package_dir)
+    print(f"[cairn-panelizer] wrote complete factory package to {package_dir}")
+
     print("[cairn-panelizer] wrote outputs:")
     for name, path in written.items():
+        print(f"    {name}: {path}")
+    print("[cairn-panelizer] factory package contents:")
+    for name, path in package_paths.items():
         print(f"    {name}: {path}")
 
     return 0

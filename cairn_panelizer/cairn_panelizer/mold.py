@@ -49,6 +49,8 @@ class Mold:
     demold_slots: list[dict] = field(default_factory=list)
     insert_locator_points: list[dict] = field(default_factory=list)
     label_text: str = ""
+    cnc_fit_status: str = "unknown"
+    warnings: list[str] = field(default_factory=list)
 
     def to_record(self) -> dict:
         return {
@@ -68,6 +70,8 @@ class Mold:
             "demold_slots": self.demold_slots,
             "insert_locator_points": self.insert_locator_points,
             "label_text": self.label_text,
+            "cnc_fit_status": self.cnc_fit_status,
+            "warnings": self.warnings,
         }
 
 
@@ -153,11 +157,32 @@ def _insert_locator_points(outline: list[tuple[float, float]], diameter_mm: floa
     return points
 
 
+def _cnc_fit(outline: list[tuple[float, float]], config: DomeConfig) -> tuple[str, list[str]]:
+    """Validate the mold's outer envelope (cavity + clearance + flange) against the CNC bed."""
+    mold_cfg, manufacturing = config.mold, config.manufacturing
+    xs = [p[0] for p in outline]
+    ys = [p[1] for p in outline]
+    border = max(mold_cfg.edge_clearance_mm + mold_cfg.flange_width_mm, mold_cfg.minimum_mold_border_mm / 2.0)
+    outer_w = (max(xs) - min(xs)) + 2 * border
+    outer_h = (max(ys) - min(ys)) + 2 * border
+
+    fits = outer_w <= manufacturing.cnc_bed_width_mm and outer_h <= manufacturing.cnc_bed_height_mm
+    fits_rotated = outer_h <= manufacturing.cnc_bed_width_mm and outer_w <= manufacturing.cnc_bed_height_mm
+    if fits or fits_rotated:
+        return "fits", []
+    return "exceeds_bed", [
+        f"mold outer envelope ~{outer_w:.0f}x{outer_h:.0f}mm exceeds the configured "
+        f"{manufacturing.cnc_bed_width_mm:.0f}x{manufacturing.cnc_bed_height_mm:.0f}mm CNC bed "
+        f"(even rotated) — split the mold or use a larger machine"
+    ]
+
+
 def _build_flat_faceted_mold(mold_id: str, family_id: str, family_panels: list[Panel],
                              config: DomeConfig, mold_type: str) -> Mold:
     mold_cfg = config.mold
     representative = family_panels[0]
     outline = flatten_triangle(representative.edge_lengths)
+    cnc_fit_status, cnc_warnings = _cnc_fit(outline, config)
 
     return Mold(
         mold_id=mold_id,
@@ -179,6 +204,8 @@ def _build_flat_faceted_mold(mold_id: str, family_id: str, family_panels: list[P
         ),
         insert_locator_points=_insert_locator_points(outline, mold_cfg.insert_locator_diameter_mm),
         label_text=f"{mold_cfg.label_prefix}-{mold_id}-{family_id}",
+        cnc_fit_status=cnc_fit_status,
+        warnings=cnc_warnings,
     )
 
 

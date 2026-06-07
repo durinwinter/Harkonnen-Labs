@@ -23,6 +23,14 @@ class Panel:
     is_opening: bool = False
     mold_family_id: str | None = None
 
+    # Populated by materials.assign_recipes(): one entry per layer in the
+    # Cairn material stack, each carrying its own volume/mass/cost estimate.
+    layer_stack: list[str] = field(default_factory=list)
+    recipe_assignments: list[dict] = field(default_factory=list)
+    estimated_mass_kg: float | None = None
+    estimated_cost_usd: float | None = None
+    warnings: list[str] = field(default_factory=list)
+
     def edge_signature(self, tolerance_mm: float) -> tuple[float, ...]:
         """Rounded, sorted edge lengths used to group repeatable panel families."""
         if tolerance_mm <= 0:
@@ -43,6 +51,11 @@ class Panel:
             "centroid": [round(v, 2) for v in self.centroid],
             "neighbor_ids": self.neighbor_ids,
             "dihedral_angles_deg": {k: round(v, 2) for k, v in self.dihedral_angles_deg.items()},
+            "layer_stack": self.layer_stack,
+            "recipe_assignments": self.recipe_assignments,
+            "estimated_mass_kg": round(self.estimated_mass_kg, 3) if self.estimated_mass_kg is not None else None,
+            "estimated_cost_usd": round(self.estimated_cost_usd, 2) if self.estimated_cost_usd is not None else None,
+            "warnings": self.warnings,
         }
 
 

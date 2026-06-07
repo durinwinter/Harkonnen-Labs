@@ -46,6 +46,10 @@ Outputs are written to `outputs/`:
 
 (`mold_schedule.*` / `molds.dxf` are only written when `mold.enabled: true`.)
 
+A consolidated **factory package** is also written to
+`outputs/factory_package/` — see
+[Manufacturing intelligence](#manufacturing-intelligence) below.
+
 ## Parameters (`examples/trillium_default.yaml`)
 
 All linear dimensions are millimeters; angles in the config are degrees.
@@ -88,6 +92,35 @@ All linear dimensions are millimeters; angles in the config are degrees.
 | `sheet_width_mm`, `sheet_height_mm` | Usable cut-sheet dimensions for nesting flattened panel outlines |
 | `margin_mm` | Border kept clear around the inside edge of every sheet |
 | `spacing_mm` | Minimum gap kept between adjacent nested panels (kerf/handling allowance) |
+
+### `layers:` and `material_recipes:`
+
+`layers:` lists the Cairn material stack assigned to every fabricated panel,
+outermost layer first — each entry is `{name, thickness_mm, recipe_id}`. Note
+that **Fuse is intentionally not a stack layer**: per the Cairn material
+mapping it's the structural grout/adhesive that manages joints and cold
+interfaces, not a panel skin, so it's only consumed by the connection
+schedule (see below), not by per-panel mass/cost.
+
+`recipe_id` keys into a small built-in recipe library
+(`materials.DEFAULT_RECIPES`) of placeholder MKPC (magnesium potassium
+phosphate ceramic) formulations for the four canonical Cairn layers — Flint S,
+Flint E, Marrow, Fuse. Every shipped recipe is `unvalidated`, and
+`assign_recipes()` always warns when an unvalidated or missing recipe is used,
+so a design never silently ships on unproven chemistry. Add a
+`material_recipes:` block (keyed by `recipe_id`, same fields as
+`MaterialRecipe`) to override or extend the library — see
+`examples/trillium_default.yaml` for the commented-out stub.
+
+### `manufacturing:`, `loads:`, and `cure:` blocks
+
+| Parameter | Meaning |
+|---|---|
+| `manufacturing.cnc_bed_width_mm`, `cnc_bed_height_mm` | CNC bed envelope used to validate mold cavities (`cnc_fit_status`) |
+| `manufacturing.labor_rate_usd_hr` | Blended crew labor rate fed into the cost engine |
+| `manufacturing.waste_factor_pct` | Material overage applied to BOM batch sizes and the cost engine's waste category |
+| `loads.snow_load_psf`, `wind_speed_mph`, `dead_load_psf`, `seismic_category`, `safety_factor_target` | **Preliminary** load assumptions for the structural pre-check — placeholders, not a code-compliance input (see [Structural pre-check](#structural-pre-check-preliminary-only)) |
+| `cure.ambient_temp_C`, `ambient_rh_pct`, `target_handling_strength_pct` | Ambient cure-room conditions fed into the cure prediction engine's Q10 timing heuristic |
 
 ## How the geometry is built
 
@@ -197,6 +230,122 @@ The info panel on the right shows the selected panel's ID, type, family,
 area, edge lengths, centroid, and neighbor IDs, plus a legend mapping every
 mold family to its color.
 
+## Manufacturing intelligence
+
+Once geometry, families, molds, and nesting are generated, a second pass of
+modules turns that shell into a traceable manufacturing plan — materials,
+cost, joints, build sequence, cure timing, and a preliminary structural
+sanity check — and rolls all of it into a single `outputs/factory_package/`
+export. Every module follows the same "never silently approximate" rule as
+the geometry pipeline: whenever it falls back to a default, hits an
+unvalidated recipe, or detects a risky condition, it appends a human-readable
+string to the relevant record's `warnings` list, and `factory_package.py`
+aggregates every one of those into `warnings.json`.
+
+### Material recipes and bill of materials (`materials.py`)
+
+`assign_recipes()` walks the configured `layers:` stack and, for every
+fabricated panel, computes each layer's volume (`area_mm2 × thickness_mm`),
+mass (`volume × density_target_kg_m3`), and cost (`mass × cost_per_kg_usd`)
+from the matching `MaterialRecipe`. It mutates each panel in place
+(`layer_stack`, `recipe_assignments`, `estimated_mass_kg`,
+`estimated_cost_usd`) and warns when a layer references an unknown
+`recipe_id`, uses an `unvalidated`/`experimental` recipe, or produces a panel
+heavier than the 40 kg two-person manual-handling guideline.
+`build_material_bom()` rolls those per-panel assignments up into a
+recipe-level BOM (`material_bom.csv`) with waste-adjusted batch masses.
+
+### Cost engine (`cost.py`)
+
+`calculate_cost()` estimates nine cost categories — material, waste, mold,
+machine time, labor, cure-rack occupancy, hardware, shipping, and assembly
+labor — from the panels/molds/recipes the upstream stages already produced.
+Because every rate constant here is a heuristic placeholder (not a quote),
+each category carries a `(low, medium, high)` sensitivity band
+(`cost.SENSITIVITY_BANDS`) rather than a single point estimate, and the
+report rolls costs up by layer, panel family, and mold family in addition to
+the headline `$/sqm` figure.
+
+### Connection designer / Fuse seam schedule (`connections.py`)
+
+One `Connection` is generated per unique pair of neighboring fabricated
+panels. Every seam is fundamentally a **Fuse seam** — Fuse is the Cairn
+structural grout/adhesive that manages joints and cold interfaces — and gets
+classified into a reinforcement sub-type by the dihedral angle between the
+two panels (the strongest signal v1 geometry gives us about how much
+mechanical interlock a seam needs):
+
+| Joint type | Triggered when | Notes |
+|---|---|---|
+| `spline_joint` | dihedral < 8° (near-coplanar) | thin, closely-fitted bond line carries shear cleanly |
+| `tongue_and_groove` | 8° ≤ dihedral < 25° (moderate fold) | thicker bond line for mechanical interlock |
+| `basalt_pin_joint` | dihedral ≥ 25° (sharp fold — crown/eaves/transitions) | pinned, with `insert_count = 2` |
+| `bolted_insert_joint` | either panel is `opening_adjacent` | hardware + inserts, primer always required |
+
+Each connection records seam length (shared-edge geometry), a seam thickness
+keyed to its joint type (`connections.FUSE_SEAM_THICKNESS_BY_JOINT_MM`), the
+resulting Fuse volume, hardware/insert counts, an assembly tolerance
+requirement, a structured `cross_family` flag (true when the two panels come
+from different `mold_family_id`s — i.e. likely different cure batches, a
+"cold joint" that needs pre-wetting/priming), and `primer_required`. Per-joint
+warnings flag a missing `Fuse`-layer recipe (so priming can't be validated)
+and bond lines specced thinner than `FUSE_SEAM_MIN_THICKNESS_MM` can reliably
+gap-fill — a guard against a future joint-type spec being too thin, not a
+restatement of the current one. Cross-family "cold joint" exposure is real
+information worth surfacing, but on a curved dome it's close to universal
+(hundreds of mold families across the shell), so rather than repeating the
+same string on nearly every connection, `factory_package._collect_warnings()`
+rolls it into a single design-level finding when more than half the seams are
+cross-family — the per-connection `cross_family`/`primer_required` fields
+remain in `connection_schedule.csv` for anyone planning the actual sequence.
+
+### Assembly simulator (`assembly.py`)
+
+`generate_assembly_sequence()` buckets fabricated panels into base-to-crown
+rings (the same `ring_segments` bands used for geometry) and emits one
+`AssemblyStep` per ring: which panels and joints close out in that step
+(linking back to `connection.assembly_step_id`), required tools and Fuse
+materials, crew actions, QA checkpoints, an estimated duration, and
+`temporary_bracing_required`/`crane_lift_required` flags driven by ring
+height and panel mass. `export_assembly_checklist_md()` renders the sequence
+as a printable Markdown checklist (`assembly_checklist.md`).
+
+### Cure prediction engine (`cure.py`)
+
+`predict_cure_schedule()` predicts open/demold/handling/full-cure timing for
+every fabricated panel from its **controlling layer** (the thickest layer in
+its stack — the one that drives demold timing) and a Q10 heuristic
+(`rate ≈ 2^((ambient_temp_C − 22) / 10)`, i.e. roughly doubling per +10°C)
+applied to the recipe's `expected_open_time_min`/`expected_demold_time_hr`.
+It also recommends chamber temperature/humidity settings and warns when a
+recipe is missing expected timing data or ambient conditions are outside the
+recommended cure envelope.
+
+### Structural pre-check (preliminary only) (`structure_check.py`)
+
+`run_structural_precheck()` is explicitly **not** an engineering analysis or
+a code-compliance determination — every report carries a `disclaimer` saying
+so, and every flagged panel must be reviewed by a structural engineer (real
+FEA via CalculiX/Code_Aster/OpenSees is the intended next step, not this
+heuristic). It estimates an approximate span and slenderness ratio
+(`span_mm / stack_thickness_mm`) per panel, classifies each into a zone
+(`field`, `opening_adjacent`, `crown_adjacent`, `high_curvature_transition`),
+and flags panels whose slenderness or zone crosses heuristic thresholds as
+`requires_fea`, alongside thickness/rib recommendations and joint-load
+warnings derived from the `loads:` config.
+
+### Factory package (`factory_package.py`)
+
+`generate_factory_package()` is a pure consolidation pass — it assumes every
+upstream stage already ran — that writes the complete
+`outputs/factory_package/` export tree: a `design_summary.json` overview,
+per-module schedules (panels, families, molds, material BOM, recipe
+assignments, cost, connections, assembly sequence, cure, structural
+pre-check), a single aggregated `warnings.json` manifest, and consolidated
+drawings copied into `preview/`, `molds/`, and `panels/` subdirectories. This
+is the closest thing in the repo today to "the thing that tells the factory
+floor what to make."
+
 ## Current limitations
 
 - Panels are flat triangles only; no doubly-curved or quad-folded panels yet.
@@ -204,8 +353,10 @@ mold family to its color.
   true arched or trimmed boundary geometry — edges of openings are jagged at
   the panel level, not cleanly trimmed.
 - `wall_thickness_mm` is recorded but not yet used to generate inner/outer
-  offset surfaces or the three-layer Cairn material stack (Flint S / Marrow /
-  Flint E / interior finish).
+  offset surfaces — the layered material stack (`layers:`) is now modeled for
+  mass/cost/cure purposes (see [Manufacturing intelligence](#manufacturing-intelligence)),
+  but panel geometry itself is still a single flat facet, not a true
+  multi-layer solid.
 - DXF export only handles triangular panels (exact unrolling via the law of
   cosines); quad flattening needs a fold-line decomposition.
 - No STEP/solid export yet (CadQuery/FreeCAD).
@@ -223,6 +374,22 @@ mold family to its color.
 - Registration-hole, demold-slot, and insert-locator placement use simple
   geometric heuristics (corners, longest edge, edge midpoints) rather than
   a manufacturability/clash analysis.
+- Every rate constant in the cost engine, every recipe in
+  `materials.DEFAULT_RECIPES`, and every threshold in the structural pre-check
+  and connection designer is a placeholder heuristic — useful for producing an
+  internally-consistent, traceable estimate end to end, but **none of it is
+  validated against a real lab protocol run, vendor quote, or engineering
+  analysis**. `assign_recipes()` and `run_structural_precheck()` both warn
+  loudly about this on every run; treat the numbers as a structured starting
+  point for those validations, not as ship-ready specs.
+- Thermal and moisture pre-check (R-value, heat loss, condensation risk,
+  vapor-trap warnings) is not yet implemented.
+- The factory package generates one consolidated `molds.dxf` /
+  `flat_patterns.dxf` per run rather than per-mold/per-panel individual export
+  files (`mold_<id>.dxf`/`.svg`/`.stl`/`_drawing.png`, etc.) — a deliberate
+  choice to avoid producing thousands of near-duplicate files for hundreds of
+  mold families; per-unit exports remain a stretch goal if a downstream tool
+  needs them.
 
 ## Next steps
 
@@ -239,6 +406,13 @@ mold family to its color.
   `classify_mold_type()` to their dedicated mold types.
 - Viewer: per-family filtering/isolation, exploded assembly view, and
   exporting the full multi-sheet nesting layout (not just the active sheet).
+- Thermal and moisture pre-check (R-value, heat loss, condensation risk,
+  vapor-trap warnings) alongside the existing structural pre-check.
+- Replace placeholder material recipes, cost rates, and structural thresholds
+  with validated values as real lab protocol runs and engineering analyses
+  come in — the `validation_status`/`linked_protocol_runs` fields on
+  `MaterialRecipe` and the disclaimers throughout this module exist
+  specifically so that transition is traceable rather than a silent swap.
 
 ## Tests
 
@@ -262,3 +436,17 @@ duplicates, no omissions), every nested outline staying within its sheet's
 margin-bounded usable area, sheet IDs being unique and sequential, utilization
 percentages being sane (0-100%, positive whenever a sheet has panels), and the
 nesting schedule/DXF files being written.
+
+Manufacturing-intelligence checks (`test_manufacturing.py`) cover the whole
+second-pass pipeline on a shared fixture: recipe-library merging, per-panel
+volume/mass/cost matching the layer stack and rolling up correctly into the
+material BOM, cost-report categories/bands/rollups summing to their totals,
+connection schedules being unique unordered neighbor pairs with joint-type-
+appropriate seam thicknesses and structured `cross_family`/`primer_required`
+flags, the assembly sequence covering every panel exactly once in base-to-
+crown order and linking back to real connections, cure predictions covering
+every panel with sane open→demold→handling→full-cure ordering, the structural
+pre-check flagging every panel while carrying its PRELIMINARY/not-code-
+compliance disclaimer, and the factory package writing every expected export
+(including the aggregated `warnings.json` manifest) with internally consistent
+counts.

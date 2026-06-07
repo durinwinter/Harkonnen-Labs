@@ -38,7 +38,8 @@ def export_panel_schedule_csv(panels: list[Panel], path: str | Path) -> None:
         "panel_id", "panel_type", "is_opening", "mold_family_id",
         "vertex_count", "vertices", "edge_lengths_mm", "area_mm2",
         "normal", "centroid", "neighbor_ids", "neighbor_count",
-        "dihedral_angles_deg",
+        "dihedral_angles_deg", "layer_stack", "estimated_mass_kg",
+        "estimated_cost_usd", "warnings",
     ]
     with open(path, "w", newline="", encoding="utf-8") as fh:
         writer = csv.DictWriter(fh, fieldnames=fieldnames)
@@ -59,6 +60,10 @@ def export_panel_schedule_csv(panels: list[Panel], path: str | Path) -> None:
                 "neighbor_ids": json.dumps(record["neighbor_ids"]),
                 "neighbor_count": len(record["neighbor_ids"]),
                 "dihedral_angles_deg": json.dumps(record["dihedral_angles_deg"]),
+                "layer_stack": json.dumps(record["layer_stack"]),
+                "estimated_mass_kg": record["estimated_mass_kg"],
+                "estimated_cost_usd": record["estimated_cost_usd"],
+                "warnings": json.dumps(record["warnings"]),
             })
 
 

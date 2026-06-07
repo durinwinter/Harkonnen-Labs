@@ -38,3 +38,38 @@ nesting:
   sheet_height_mm: 3000
   margin_mm: 20
   spacing_mm: 10
+
+# Cairn material stack, outermost layer first. recipe_id keys into either the
+# built-in defaults (materials.DEFAULT_RECIPES) or the material_recipes block
+# below — recipes not defined here fall back to the shipped placeholders and
+# are flagged `unvalidated` until a real lab protocol run backs them.
+layers:
+  - name: Flint_E
+    thickness_mm: 12
+    recipe_id: flint_e_default
+  - name: Marrow
+    thickness_mm: 80
+    recipe_id: marrow_default
+  - name: Flint_S
+    thickness_mm: 35
+    recipe_id: flint_s_default
+
+# material_recipes: {}   # uncomment to override/extend the built-in recipe library
+
+manufacturing:
+  cnc_bed_width_mm: 1200
+  cnc_bed_height_mm: 2400
+  labor_rate_usd_hr: 45
+  waste_factor_pct: 8
+
+loads:
+  snow_load_psf: 40
+  wind_speed_mph: 120
+  dead_load_psf: 15
+  seismic_category: placeholder
+  safety_factor_target: 2.5
+
+cure:
+  ambient_temp_C: 22
+  ambient_rh_pct: 50
+  target_handling_strength_pct: 40

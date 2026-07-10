@@ -16,24 +16,24 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from cairn_panelizer.assembly import generate_assembly_sequence
-from cairn_panelizer.config import DomeConfig, LayerSpec
-from cairn_panelizer.connections import (
+from sietch_panelizer.assembly import generate_assembly_sequence
+from sietch_panelizer.config import DomeConfig, LayerSpec
+from sietch_panelizer.connections import (
     BOLTED_INSERT_JOINT,
-    FUSE_SEAM_THICKNESS_BY_JOINT_MM,
+    TAU_SEAM_THICKNESS_BY_JOINT_MM,
     generate_connections,
 )
-from cairn_panelizer.cost import calculate_cost
-from cairn_panelizer.cure import predict_cure_schedule
-from cairn_panelizer.factory_package import generate_factory_package
-from cairn_panelizer.families import assign_families
-from cairn_panelizer.materials import DEFAULT_RECIPES, assign_recipes, build_material_bom
-from cairn_panelizer.mesh import build_dome_mesh
-from cairn_panelizer.mold import build_molds
-from cairn_panelizer.nesting import nest_panels
-from cairn_panelizer.openings import apply_openings
-from cairn_panelizer.panel import build_panels
-from cairn_panelizer.structure_check import run_structural_precheck
+from sietch_panelizer.cost import calculate_cost
+from sietch_panelizer.cure import predict_cure_schedule
+from sietch_panelizer.factory_package import generate_factory_package
+from sietch_panelizer.families import assign_families
+from sietch_panelizer.materials import DEFAULT_RECIPES, assign_recipes, build_material_bom
+from sietch_panelizer.mesh import build_dome_mesh
+from sietch_panelizer.mold import build_molds
+from sietch_panelizer.nesting import nest_panels
+from sietch_panelizer.openings import apply_openings
+from sietch_panelizer.panel import build_panels
+from sietch_panelizer.structure_check import run_structural_precheck
 
 
 @pytest.fixture(scope="module")
@@ -50,9 +50,9 @@ def pipeline():
         door_height_mm=2050,
         door_angle_deg=180,
         layers=[
-            LayerSpec(name="Flint_E", thickness_mm=12.0, recipe_id="flint_e_default"),
-            LayerSpec(name="Marrow", thickness_mm=80.0, recipe_id="marrow_default"),
-            LayerSpec(name="Flint_S", thickness_mm=35.0, recipe_id="flint_s_default"),
+            LayerSpec(name="Caliche", thickness_mm=12.0, recipe_id="caliche_default"),
+            LayerSpec(name="Erg", thickness_mm=80.0, recipe_id="erg_default"),
+            LayerSpec(name="Reg", thickness_mm=35.0, recipe_id="reg_default"),
         ],
     )
     mesh = build_dome_mesh(config)
@@ -90,7 +90,7 @@ def fabricated(pipeline):
 
 def test_recipe_library_includes_defaults_and_overrides(pipeline):
     library = pipeline["library"]
-    for recipe_id in ("flint_e_default", "marrow_default", "flint_s_default", "fuse_default"):
+    for recipe_id in ("caliche_default", "erg_default", "reg_default", "tau_default"):
         assert recipe_id in library
         assert library[recipe_id].layer == DEFAULT_RECIPES[recipe_id].layer
 
@@ -181,10 +181,10 @@ def test_connections_are_unique_unordered_pairs_of_neighbors(pipeline):
 
 def test_connection_seam_thickness_follows_joint_type(pipeline):
     for connection in pipeline["connections"]:
-        expected = FUSE_SEAM_THICKNESS_BY_JOINT_MM.get(connection.joint_type)
+        expected = TAU_SEAM_THICKNESS_BY_JOINT_MM.get(connection.joint_type)
         if expected is not None:
             assert connection.seam_thickness_mm == pytest.approx(expected)
-        assert connection.fuse_volume_mm3 > 0.0
+        assert connection.tau_volume_mm3 > 0.0
         assert connection.seam_length_mm > 0.0
 
 

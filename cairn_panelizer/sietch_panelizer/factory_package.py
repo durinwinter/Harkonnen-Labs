@@ -91,7 +91,7 @@ def _export_cost_report_csv(report: CostReport, path: Path) -> None:
 def _export_connection_schedule_csv(connections: list[Connection], path: Path) -> None:
     fieldnames = [
         "joint_id", "panel_a", "panel_b", "joint_type", "seam_length_mm", "seam_thickness_mm",
-        "fuse_volume_mm3", "cross_family", "primer_required", "insert_count", "hardware_count",
+        "tau_volume_mm3", "cross_family", "primer_required", "insert_count", "hardware_count",
         "tolerance_requirement_mm", "assembly_step_id", "warnings",
     ]
     with open(path, "w", newline="", encoding="utf-8") as fh:
@@ -192,7 +192,7 @@ def _design_summary(
     fabricated = [p for p in panels if not p.is_opening]
     family_ids = sorted({p.mold_family_id for p in fabricated if p.mold_family_id})
     return {
-        "design_id": f"cairn-trillium-{int(config.overall_width_mm)}x{int(config.height_mm)}",
+        "design_id": f"sietch-maker-{int(config.overall_width_mm)}x{int(config.height_mm)}",
         "geometry": {
             "overall_width_mm": config.overall_width_mm,
             "height_mm": config.height_mm,

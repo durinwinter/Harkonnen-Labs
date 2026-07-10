@@ -1,4 +1,4 @@
-"""Geometry sanity checks for the trillium dome pipeline."""
+"""Geometry sanity checks for the maker dome pipeline."""
 
 from __future__ import annotations
 
@@ -12,12 +12,12 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from cairn_panelizer.config import DomeConfig
-from cairn_panelizer.export import export_all
-from cairn_panelizer.families import assign_families
-from cairn_panelizer.mesh import build_dome_mesh
-from cairn_panelizer.openings import apply_openings
-from cairn_panelizer.panel import build_panels
+from sietch_panelizer.config import DomeConfig
+from sietch_panelizer.export import export_all
+from sietch_panelizer.families import assign_families
+from sietch_panelizer.mesh import build_dome_mesh
+from sietch_panelizer.openings import apply_openings
+from sietch_panelizer.panel import build_panels
 
 
 @pytest.fixture(scope="module")

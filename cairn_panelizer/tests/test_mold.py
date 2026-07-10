@@ -12,13 +12,13 @@ PACKAGE_ROOT = Path(__file__).resolve().parent.parent
 if str(PACKAGE_ROOT) not in sys.path:
     sys.path.insert(0, str(PACKAGE_ROOT))
 
-from cairn_panelizer.config import DomeConfig
-from cairn_panelizer.export import export_molds
-from cairn_panelizer.families import assign_families
-from cairn_panelizer.mesh import build_dome_mesh
-from cairn_panelizer.mold import FLAT_FACETED_MOLD, build_molds
-from cairn_panelizer.openings import apply_openings
-from cairn_panelizer.panel import build_panels
+from sietch_panelizer.config import DomeConfig
+from sietch_panelizer.export import export_molds
+from sietch_panelizer.families import assign_families
+from sietch_panelizer.mesh import build_dome_mesh
+from sietch_panelizer.mold import FLAT_FACETED_MOLD, build_molds
+from sietch_panelizer.openings import apply_openings
+from sietch_panelizer.panel import build_panels
 
 
 @pytest.fixture(scope="module")
@@ -91,7 +91,7 @@ def test_mold_features_are_present(pipeline):
 
 def test_mold_disabled_via_config_yields_no_molds(pipeline):
     import dataclasses
-    from cairn_panelizer.config import MoldConfig
+    from sietch_panelizer.config import MoldConfig
 
     config, panels, _ = pipeline
     disabled = dataclasses.replace(config, mold=dataclasses.replace(config.mold, enabled=False))

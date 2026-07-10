@@ -1,4 +1,4 @@
-# Default Cairn Trillium Dome prototype parameters (millimeters / degrees).
+# Default Sietch Maker Dome prototype parameters (millimeters / degrees).
 
 overall_width_mm: 6000
 height_mm: 3200
@@ -31,7 +31,7 @@ mold:
   demold_slot_width_mm: 12
   demold_slot_length_mm: 40
   insert_locator_diameter_mm: 6
-  label_prefix: CAIRN
+  label_prefix: SIETCH
 
 nesting:
   sheet_width_mm: 1500
@@ -39,20 +39,20 @@ nesting:
   margin_mm: 20
   spacing_mm: 10
 
-# Cairn material stack, outermost layer first. recipe_id keys into either the
+# Sietch material stack, outermost layer first. recipe_id keys into either the
 # built-in defaults (materials.DEFAULT_RECIPES) or the material_recipes block
 # below — recipes not defined here fall back to the shipped placeholders and
 # are flagged `unvalidated` until a real lab protocol run backs them.
 layers:
-  - name: Flint_E
+  - name: Caliche
     thickness_mm: 12
-    recipe_id: flint_e_default
-  - name: Marrow
+    recipe_id: caliche_default
+  - name: Erg
     thickness_mm: 80
-    recipe_id: marrow_default
-  - name: Flint_S
+    recipe_id: erg_default
+  - name: Reg
     thickness_mm: 35
-    recipe_id: flint_s_default
+    recipe_id: reg_default
 
 # material_recipes: {}   # uncomment to override/extend the built-in recipe library
 

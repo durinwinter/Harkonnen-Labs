@@ -274,7 +274,7 @@ def export_all(mesh: trimesh.Trimesh, panels: list[Panel], output_dir: str | Pat
     output_dir.mkdir(parents=True, exist_ok=True)
 
     paths = {
-        "mesh_obj": output_dir / "trillium_dome.obj",
+        "mesh_obj": output_dir / "maker_dome.obj",
         "panel_schedule_json": output_dir / "panel_schedule.json",
         "panel_schedule_csv": output_dir / "panel_schedule.csv",
         "panel_families_csv": output_dir / "panel_families.csv",

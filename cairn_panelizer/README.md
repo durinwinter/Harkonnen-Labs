@@ -1,6 +1,6 @@
-# Cairn Panelizer
+# Sietch Panelizer
 
-A parametric panel-design prototype for the **Cairn Trillium Dome**: a
+A parametric panel-design prototype for the **Sietch Maker Dome**: a
 three-lobed, faceted dome shell generated from a small set of geometric
 parameters, divided into buildable triangular panels, and exported as
 fabrication-ready schedules and drawings.
@@ -14,7 +14,7 @@ tooling constraints.
 ## Installation
 
 ```bash
-cd cairn_panelizer
+cd sietch_panelizer
 python3 -m venv .venv && source .venv/bin/activate
 pip install -r requirements.txt
 ```
@@ -22,14 +22,14 @@ pip install -r requirements.txt
 ## Running
 
 ```bash
-python scripts/generate_trillium_dome.py --config examples/trillium_default.yaml
+python scripts/generate_maker_dome.py --config examples/maker_default.yaml
 ```
 
 Outputs are written to `outputs/`:
 
 | File | Contents |
 |---|---|
-| `trillium_dome.obj` | Triangulated shell mesh (door opening cut out) |
+| `maker_dome.obj` | Triangulated shell mesh (door opening cut out) |
 | `panel_schedule.json` | Full per-panel record: vertices, edges, area, normal, centroid, neighbors, dihedral angles, family |
 | `panel_schedule.csv` | Same schedule, flattened for spreadsheets |
 | `panel_families.csv` | Repetition groups: `mold_family_id`, panel count, representative edge lengths |
@@ -50,7 +50,7 @@ A consolidated **factory package** is also written to
 `outputs/factory_package/` — see
 [Manufacturing intelligence](#manufacturing-intelligence) below.
 
-## Parameters (`examples/trillium_default.yaml`)
+## Parameters (`examples/maker_default.yaml`)
 
 All linear dimensions are millimeters; angles in the config are degrees.
 
@@ -58,8 +58,8 @@ All linear dimensions are millimeters; angles in the config are degrees.
 |---|---|
 | `overall_width_mm` | Footprint diameter at the base (drives `base_radius_mm = overall_width_mm / 2`) |
 | `height_mm` | Apex height of the dome |
-| `lobe_amplitude` | Strength of the trillium lobing in `r(θ) = base_radius · (1 + lobe_amplitude · cos(lobe_count · θ))` |
-| `lobe_count` | Number of lobes around the footprint (default 3, like the trillium flower) |
+| `lobe_amplitude` | Strength of the maker lobing in `r(θ) = base_radius · (1 + lobe_amplitude · cos(lobe_count · θ))` |
+| `lobe_count` | Number of lobes around the footprint (default 3, like the maker flower) |
 | `angular_segments` | Number of facets around the dome |
 | `ring_segments` | Number of horizontal rings from base to crown |
 | `crown_radius_mm` | Radius of the open circular skylight at the apex |
@@ -95,22 +95,22 @@ All linear dimensions are millimeters; angles in the config are degrees.
 
 ### `layers:` and `material_recipes:`
 
-`layers:` lists the Cairn material stack assigned to every fabricated panel,
+`layers:` lists the Sietch material stack assigned to every fabricated panel,
 outermost layer first — each entry is `{name, thickness_mm, recipe_id}`. Note
-that **Fuse is intentionally not a stack layer**: per the Cairn material
+that **Tau is intentionally not a stack layer**: per the Sietch material
 mapping it's the structural grout/adhesive that manages joints and cold
 interfaces, not a panel skin, so it's only consumed by the connection
 schedule (see below), not by per-panel mass/cost.
 
 `recipe_id` keys into a small built-in recipe library
 (`materials.DEFAULT_RECIPES`) of placeholder MKPC (magnesium potassium
-phosphate ceramic) formulations for the four canonical Cairn layers — Flint S,
-Flint E, Marrow, Fuse. Every shipped recipe is `unvalidated`, and
+phosphate ceramic) formulations for the four canonical Sietch layers — Reg,
+Caliche, Erg, Tau. Every shipped recipe is `unvalidated`, and
 `assign_recipes()` always warns when an unvalidated or missing recipe is used,
 so a design never silently ships on unproven chemistry. Add a
 `material_recipes:` block (keyed by `recipe_id`, same fields as
 `MaterialRecipe`) to override or extend the library — see
-`examples/trillium_default.yaml` for the commented-out stub.
+`examples/maker_default.yaml` for the commented-out stub.
 
 ### `manufacturing:`, `loads:`, and `cure:` blocks
 
@@ -125,7 +125,7 @@ so a design never silently ships on unproven chemistry. Add a
 ## How the geometry is built
 
 1. **Footprint** — a polar curve `r(θ) = base_radius · (1 + lobe_amplitude · cos(lobe_count · θ))`
-   produces the three-lobed trillium outline at the base.
+   produces the three-lobed maker outline at the base.
 2. **Profile** — each ring `i` (0 = base, `ring_segments` = crown) is scaled by a
    quarter-sine profile: the radius blends from the lobed footprint toward the
    circular `crown_radius_mm`, while height rises smoothly from 0 to `height_mm`.
@@ -200,7 +200,7 @@ sheet's border and nested outlines, grouped by family layer.
 `viewer/` is a static, browser-based front end for exploring a generated
 dome without re-running the pipeline each time. Every run writes
 `viewer/viewer_data.js` (via `viewer_data.py`, gitignored as a generated
-artifact) — a `window.CAIRN_VIEWER_DATA = {...}` assignment bundling the
+artifact) — a `window.SIETCH_VIEWER_DATA = {...}` assignment bundling the
 config metadata, family list, full panel records, mold records, and nested
 sheets as plain JSON, loaded with a `<script>` tag instead of `fetch()` so
 it works straight off the filesystem with no server or CORS issues.
@@ -208,7 +208,7 @@ it works straight off the filesystem with no server or CORS issues.
 To use it:
 
 ```bash
-python scripts/generate_trillium_dome.py --config examples/trillium_default.yaml
+python scripts/generate_maker_dome.py --config examples/maker_default.yaml
 # then open viewer/index.html in a browser (requires internet access for the
 # Three.js / OrbitControls CDN scripts)
 ```
@@ -266,10 +266,10 @@ each category carries a `(low, medium, high)` sensitivity band
 report rolls costs up by layer, panel family, and mold family in addition to
 the headline `$/sqm` figure.
 
-### Connection designer / Fuse seam schedule (`connections.py`)
+### Connection designer / Tau seam schedule (`connections.py`)
 
 One `Connection` is generated per unique pair of neighboring fabricated
-panels. Every seam is fundamentally a **Fuse seam** — Fuse is the Cairn
+panels. Every seam is fundamentally a **Tau seam** — Tau is the Sietch
 structural grout/adhesive that manages joints and cold interfaces — and gets
 classified into a reinforcement sub-type by the dihedral angle between the
 two panels (the strongest signal v1 geometry gives us about how much
@@ -283,13 +283,13 @@ mechanical interlock a seam needs):
 | `bolted_insert_joint` | either panel is `opening_adjacent` | hardware + inserts, primer always required |
 
 Each connection records seam length (shared-edge geometry), a seam thickness
-keyed to its joint type (`connections.FUSE_SEAM_THICKNESS_BY_JOINT_MM`), the
-resulting Fuse volume, hardware/insert counts, an assembly tolerance
+keyed to its joint type (`connections.TAU_SEAM_THICKNESS_BY_JOINT_MM`), the
+resulting Tau volume, hardware/insert counts, an assembly tolerance
 requirement, a structured `cross_family` flag (true when the two panels come
 from different `mold_family_id`s — i.e. likely different cure batches, a
 "cold joint" that needs pre-wetting/priming), and `primer_required`. Per-joint
-warnings flag a missing `Fuse`-layer recipe (so priming can't be validated)
-and bond lines specced thinner than `FUSE_SEAM_MIN_THICKNESS_MM` can reliably
+warnings flag a missing `Tau`-layer recipe (so priming can't be validated)
+and bond lines specced thinner than `TAU_SEAM_MIN_THICKNESS_MM` can reliably
 gap-fill — a guard against a future joint-type spec being too thin, not a
 restatement of the current one. Cross-family "cold joint" exposure is real
 information worth surfacing, but on a curved dome it's close to universal
@@ -304,7 +304,7 @@ remain in `connection_schedule.csv` for anyone planning the actual sequence.
 `generate_assembly_sequence()` buckets fabricated panels into base-to-crown
 rings (the same `ring_segments` bands used for geometry) and emits one
 `AssemblyStep` per ring: which panels and joints close out in that step
-(linking back to `connection.assembly_step_id`), required tools and Fuse
+(linking back to `connection.assembly_step_id`), required tools and Tau
 materials, crew actions, QA checkpoints, an estimated duration, and
 `temporary_bracing_required`/`crane_lift_required` flags driven by ring
 height and panel mass. `export_assembly_checklist_md()` renders the sequence

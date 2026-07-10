@@ -1,7 +1,7 @@
 """Bundle dome/panel/mold/nesting data into a JS file the static viewer loads.
 
 The viewer is a plain HTML/JS page opened directly via `file://`, so the
-data is written as a `<script>`-loadable `window.CAIRN_VIEWER_DATA = {...}`
+data is written as a `<script>`-loadable `window.SIETCH_VIEWER_DATA = {...}`
 assignment rather than fetched as JSON — `fetch()` of local files is blocked
 by browser CORS policy, but `<script src>` is not.
 """
@@ -61,7 +61,7 @@ def write_viewer_data(config: DomeConfig, panels: list[Panel], molds: list[Mold]
     path = Path(path)
     path.parent.mkdir(parents=True, exist_ok=True)
     with open(path, "w", encoding="utf-8") as fh:
-        fh.write("window.CAIRN_VIEWER_DATA = ")
+        fh.write("window.SIETCH_VIEWER_DATA = ")
         json.dump(bundle, fh)
         fh.write(";\n")
     return path

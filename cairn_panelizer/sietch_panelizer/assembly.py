@@ -33,10 +33,10 @@ CRANE_LIFT_MASS_KG = 35.0         # or whose panels are individually this heavy
 BRACING_RING_FRACTION = 0.5       # rings above this fraction of total rings need temporary bracing
 
 TOOL_BY_JOINT_TYPE = {
-    SPLINE_JOINT: "spline stock + Fuse applicator",
-    TONGUE_AND_GROOVE: "Fuse applicator + alignment clamps",
-    BASALT_PIN_JOINT: "basalt pin driver + Fuse applicator",
-    BOLTED_INSERT_JOINT: "torque wrench + insert driver + Fuse applicator",
+    SPLINE_JOINT: "spline stock + Tau applicator",
+    TONGUE_AND_GROOVE: "Tau applicator + alignment clamps",
+    BASALT_PIN_JOINT: "basalt pin driver + Tau applicator",
+    BOLTED_INSERT_JOINT: "torque wrench + insert driver + Tau applicator",
 }
 
 
@@ -135,26 +135,26 @@ def generate_assembly_sequence(
 
         tools = sorted({TOOL_BY_JOINT_TYPE[t] for t in joint_types_seen if t in TOOL_BY_JOINT_TYPE})
         if not tools:
-            tools = ["Fuse applicator"]
+            tools = ["Tau applicator"]
 
         crew_actions = [
             f"Stage and dry-fit panels {panel_ids[0]}–{panel_ids[-1]} ({len(panel_ids)} panels, "
             f"{len(families)} mold families) against the previous ring's registration marks.",
-            "Apply Fuse to mating seams per the connection schedule, priming cross-batch joints first.",
+            "Apply Tau to mating seams per the connection schedule, priming cross-batch joints first.",
             "Set and brace panels to the ring profile; confirm plumb/level before cure set.",
         ]
         if crane_lift:
             crew_actions.insert(0, "Stage crane/lift support — ring height or panel mass exceeds manual-handling limits.")
 
         fuse_steps = [
-            f"{joint_type.replace('_', ' ')} seams: prime cross-batch interfaces, lay Fuse bead, set panel, "
-            f"tool joint flush, hold per Fuse open-time before loading."
+            f"{joint_type.replace('_', ' ')} seams: prime cross-batch interfaces, lay Tau bead, set panel, "
+            f"tool joint flush, hold per Tau open-time before loading."
             for joint_type in sorted(joint_types_seen)
         ] or ["No new seams close out at this ring — proceed to bracing/QA only."]
 
         qa_checks = [
             "Verify each panel seated to its registration features and family ID matches the schedule.",
-            "Inspect Fuse seam coverage and bead profile along every closed-out joint.",
+            "Inspect Tau seam coverage and bead profile along every closed-out joint.",
             "Confirm ring profile (radius/height) within tolerance before releasing bracing from the prior ring.",
         ]
         if crane_lift:
@@ -195,7 +195,7 @@ def generate_assembly_sequence(
 
 def export_assembly_checklist_md(steps: list[AssemblyStep], path) -> None:
     """Render the assembly sequence as a human-readable Markdown checklist."""
-    lines = ["# Cairn Dome — Assembly Checklist", ""]
+    lines = ["# Sietch Maker Dome — Assembly Checklist", ""]
     for step in steps:
         lines.append(f"## Step {step.sequence_number}: {step.action} (`{step.step_id}`)")
         lines.append("")
@@ -212,7 +212,7 @@ def export_assembly_checklist_md(steps: list[AssemblyStep], path) -> None:
         for action in step.crew_actions:
             lines.append(f"- [ ] {action}")
         lines.append("")
-        lines.append("**Fuse application**")
+        lines.append("**Tau application**")
         for fuse_step in step.fuse_application_steps:
             lines.append(f"- [ ] {fuse_step}")
         lines.append("")

@@ -6,8 +6,8 @@ volume/mass/cost per panel per layer, and a bill-of-materials rollup for the
 factory package.
 
 Recipes shipped here (`DEFAULT_RECIPES`) are placeholder formulations for the
-four canonical Cairn layers — Flint S, Flint E, Marrow, Fuse — based on the
-MKPC (magnesium potassium phosphate ceramic) chemistry described in the Cairn
+four canonical Sietch layers — Reg, Caliche, Erg, Tau — based on the
+MKPC (magnesium potassium phosphate ceramic) chemistry described in the Sietch
 material mapping. They are marked `unvalidated` until a real lab protocol run
 backs their target properties; `assign_recipes` always warns when an
 unvalidated or missing recipe is used so a design never silently ships on
@@ -101,13 +101,13 @@ class MaterialRecipe:
         }
 
 
-# Placeholder formulations for the four canonical Cairn layers. Every one is
+# Placeholder formulations for the four canonical Sietch layers. Every one is
 # `unvalidated` — these exist so the pipeline produces a coherent, traceable
 # BOM out of the box, not so anyone pours a panel from these numbers.
 DEFAULT_RECIPES: dict[str, MaterialRecipe] = {
-    "flint_s_default": MaterialRecipe(
-        recipe_id="flint_s_default",
-        layer="Flint S",
+    "reg_default": MaterialRecipe(
+        recipe_id="reg_default",
+        layer="Reg",
         binder_type="MKPC",
         mgo_mass_g=1000.0,
         kh2po4_mass_g=1450.0,
@@ -127,9 +127,9 @@ DEFAULT_RECIPES: dict[str, MaterialRecipe] = {
         expected_demold_time_hr=2.0,
         validation_status=UNVALIDATED,
     ),
-    "flint_e_default": MaterialRecipe(
-        recipe_id="flint_e_default",
-        layer="Flint E",
+    "caliche_default": MaterialRecipe(
+        recipe_id="caliche_default",
+        layer="Caliche",
         binder_type="MKPC",
         mgo_mass_g=1000.0,
         kh2po4_mass_g=1450.0,
@@ -149,9 +149,9 @@ DEFAULT_RECIPES: dict[str, MaterialRecipe] = {
         expected_demold_time_hr=2.5,
         validation_status=UNVALIDATED,
     ),
-    "marrow_default": MaterialRecipe(
-        recipe_id="marrow_default",
-        layer="Marrow",
+    "erg_default": MaterialRecipe(
+        recipe_id="erg_default",
+        layer="Erg",
         binder_type="MKPC_foam",
         mgo_mass_g=600.0,
         kh2po4_mass_g=900.0,
@@ -171,9 +171,9 @@ DEFAULT_RECIPES: dict[str, MaterialRecipe] = {
         expected_demold_time_hr=4.0,
         validation_status=UNVALIDATED,
     ),
-    "fuse_default": MaterialRecipe(
-        recipe_id="fuse_default",
-        layer="Fuse",
+    "tau_default": MaterialRecipe(
+        recipe_id="tau_default",
+        layer="Tau",
         binder_type="MKPC_grout",
         mgo_mass_g=1000.0,
         kh2po4_mass_g=1500.0,

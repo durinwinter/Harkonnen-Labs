@@ -2,8 +2,8 @@
 
 One `Connection` is generated per unique pair of neighboring fabricated
 panels (deduplicated from the bidirectional `neighbor_ids` adjacency already
-computed in `panel.py`). Every seam is fundamentally a **Fuse seam** — Fuse is
-the Cairn structural grout/adhesive that manages joints and cold interfaces —
+computed in `panel.py`). Every seam is fundamentally a **Tau seam** — Tau is
+the Sietch structural grout/adhesive that manages joints and cold interfaces —
 classified into a reinforcement sub-type by the dihedral angle between the two
 panels, since that's the strongest signal v1 geometry gives us about how much
 mechanical interlock a seam needs.
@@ -19,7 +19,7 @@ from .config import DomeConfig
 from .materials import MaterialRecipe
 from .panel import Panel
 
-FUSE_SEAM = "fuse_seam"
+TAU_SEAM = "tau_seam"
 TONGUE_AND_GROOVE = "tongue_and_groove"
 SPLINE_JOINT = "spline_joint"
 BASALT_PIN_JOINT = "basalt_pin_joint"
@@ -35,13 +35,13 @@ HUB_STRUT_NODE = "hub_strut_node"              # placeholder, not yet routed to
 FLAT_ANGLE_DEG = 8.0
 FOLD_ANGLE_DEG = 25.0
 
-# Fuse seam thickness is the adhesive bond-line gap between two panel edges —
+# Tau seam thickness is the adhesive bond-line gap between two panel edges —
 # it does not need to scale with panel-stack thickness (a glue line's gap-fill
 # requirement is set by the *joint style's* registration tolerance, not by what
 # it's bonding). Interlocking joints (spline/T&G) rely on a thin, closely-fitted
 # line; pinned and bolted joints carry larger tolerance stack-up and hardware
 # clearances, so they need a thicker gap-fill bead.
-FUSE_SEAM_THICKNESS_BY_JOINT_MM: dict[str, float] = {
+TAU_SEAM_THICKNESS_BY_JOINT_MM: dict[str, float] = {
     SPLINE_JOINT: 4.0,
     TONGUE_AND_GROOVE: 6.0,
     BASALT_PIN_JOINT: 10.0,
@@ -49,13 +49,13 @@ FUSE_SEAM_THICKNESS_BY_JOINT_MM: dict[str, float] = {
 }
 DEFAULT_SEAM_THICKNESS_MM = 6.0
 
-# Absolute minimum bond-line thickness below which Fuse can't reliably gap-fill
+# Absolute minimum bond-line thickness below which Tau can't reliably gap-fill
 # panel-edge tolerance stack-up, regardless of how thick the panels themselves are.
-# Set below every value in FUSE_SEAM_THICKNESS_BY_JOINT_MM on purpose — under the
+# Set below every value in TAU_SEAM_THICKNESS_BY_JOINT_MM on purpose — under the
 # shipped joint specs this check should stay quiet; it exists to catch a future
 # joint-type addition (or a constant edit) that specs a bond line too thin to
 # gap-fill reliably, not to restate the current spec back at the schedule.
-FUSE_SEAM_MIN_THICKNESS_MM = 3.5
+TAU_SEAM_MIN_THICKNESS_MM = 3.5
 
 # Fraction of a dome's connections that may be cross-mold-family "cold joints"
 # before it's worth surfacing as a single design-level finding (see
@@ -77,7 +77,7 @@ class Connection:
     joint_type: str
     seam_length_mm: float
     seam_thickness_mm: float
-    fuse_volume_mm3: float
+    tau_volume_mm3: float
     cross_family: bool
     primer_required: bool
     insert_count: int
@@ -94,7 +94,7 @@ class Connection:
             "joint_type": self.joint_type,
             "seam_length_mm": round(self.seam_length_mm, 2),
             "seam_thickness_mm": round(self.seam_thickness_mm, 2),
-            "fuse_volume_mm3": round(self.fuse_volume_mm3, 1),
+            "tau_volume_mm3": round(self.tau_volume_mm3, 1),
             "cross_family": self.cross_family,
             "primer_required": self.primer_required,
             "insert_count": self.insert_count,
@@ -153,7 +153,7 @@ def generate_connections(
     """Generate one Connection per unique neighboring fabricated-panel pair."""
     by_id = {p.panel_id: p for p in panels}
     stack_thickness = _stack_thickness_mm(config)
-    fuse_recipe = next((r for r in (library or {}).values() if r.layer == "Fuse"), None)
+    tau_recipe = next((r for r in (library or {}).values() if r.layer == "Tau"), None)
 
     seen: set[tuple[str, str]] = set()
     connections: list[Connection] = []
@@ -174,8 +174,8 @@ def generate_connections(
             dihedral = panel.dihedral_angles_deg.get(neighbor_id, 0.0)
             joint_type = _classify_joint_type(panel, neighbor, dihedral, config)
             seam_length = _shared_edge_length(panel, neighbor)
-            seam_thickness = FUSE_SEAM_THICKNESS_BY_JOINT_MM.get(joint_type, DEFAULT_SEAM_THICKNESS_MM)
-            fuse_volume = seam_length * seam_thickness * stack_thickness
+            seam_thickness = TAU_SEAM_THICKNESS_BY_JOINT_MM.get(joint_type, DEFAULT_SEAM_THICKNESS_MM)
+            tau_volume = seam_length * seam_thickness * stack_thickness
 
             cross_family = panel.mold_family_id != neighbor.mold_family_id
             primer_required = cross_family or joint_type == BOLTED_INSERT_JOINT
@@ -197,12 +197,12 @@ def generate_connections(
                 tolerance = PIN_JOINT_TOLERANCE_MM
 
             warnings: list[str] = []
-            if primer_required and fuse_recipe is None:
-                warnings.append("missing Fuse recipe — no recipe in the library is assigned layer='Fuse' to validate priming requirement")
-            if seam_thickness < FUSE_SEAM_MIN_THICKNESS_MM:
+            if primer_required and tau_recipe is None:
+                warnings.append("missing Tau recipe — no recipe in the library is assigned layer='Tau' to validate priming requirement")
+            if seam_thickness < TAU_SEAM_MIN_THICKNESS_MM:
                 warnings.append(
                     f"insufficient seam thickness — {seam_thickness:.1f}mm is below the "
-                    f"{FUSE_SEAM_MIN_THICKNESS_MM:.1f}mm minimum Fuse bond-line thickness "
+                    f"{TAU_SEAM_MIN_THICKNESS_MM:.1f}mm minimum Tau bond-line thickness "
                     f"recommended for a {joint_type} joint's tolerance stack-up"
                 )
             if joint_type == BOLTED_INSERT_JOINT and _is_near_crown(panel, neighbor, config):
@@ -216,7 +216,7 @@ def generate_connections(
                 joint_type=joint_type,
                 seam_length_mm=seam_length,
                 seam_thickness_mm=seam_thickness,
-                fuse_volume_mm3=fuse_volume,
+                tau_volume_mm3=tau_volume,
                 cross_family=cross_family,
                 primer_required=primer_required,
                 insert_count=insert_count,

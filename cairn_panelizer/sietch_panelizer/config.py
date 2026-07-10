@@ -36,7 +36,7 @@ class MoldConfig:
     flange_width_mm: float = 75.0
     minimum_mold_border_mm: float = 100.0
 
-    label_prefix: str = "CAIRN"
+    label_prefix: str = "SIETCH"
 
     @classmethod
     def from_dict(cls, data: dict[str, Any] | None) -> "MoldConfig":
@@ -61,7 +61,7 @@ class NestingConfig:
 
 @dataclass
 class LayerSpec:
-    """One layer of the Cairn material stack assigned to every fabricated panel."""
+    """One layer of the Sietch material stack assigned to every fabricated panel."""
 
     name: str
     thickness_mm: float
@@ -145,7 +145,7 @@ class DomeConfig:
     mold: MoldConfig = field(default_factory=MoldConfig)
     nesting: NestingConfig = field(default_factory=NestingConfig)
 
-    # Material system: ordered Cairn layer stack (outermost first) and a
+    # Material system: ordered Sietch layer stack (outermost first) and a
     # recipe library keyed by recipe_id. Recipes not present here fall back
     # to the built-in defaults in `materials.DEFAULT_RECIPES` (and are
     # flagged `unvalidated` until a real lab protocol backs them).

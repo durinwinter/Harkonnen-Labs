@@ -1,6 +1,8 @@
 use anyhow::{Context, Result};
 use futures::StreamExt;
-use typedb_driver::{Credentials, DriverOptions, TransactionType, TypeDBDriver};
+use typedb_driver::{
+    Addresses, Credentials, DriverOptions, DriverTlsConfig, TransactionType, TypeDBDriver,
+};
 use uuid::Uuid;
 
 const SCHEMA_TQL: &str = include_str!("../../factory/calvin_archive/typedb/schema.tql");
@@ -197,8 +199,9 @@ pub(crate) struct ArchiveStore {
 impl ArchiveStore {
     pub(crate) async fn connect(url: &str, db_name: &str) -> Result<Self> {
         let credentials = Credentials::new("admin", "password");
-        let options = DriverOptions::new(false, None).context("building DriverOptions")?;
-        let driver = TypeDBDriver::new(url, credentials, options)
+        let options = DriverOptions::new(DriverTlsConfig::disabled());
+        let addresses = Addresses::try_from_address_str(url).context("parsing TypeDB address")?;
+        let driver = TypeDBDriver::new(addresses, credentials, options)
             .await
             .with_context(|| format!("connecting to TypeDB at {url}"))?;
 

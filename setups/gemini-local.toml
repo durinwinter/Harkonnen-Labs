@@ -5,13 +5,13 @@
 # (same as the root harkonnen.toml — kept here for explicit activation)
 
 [setup]
-name        = "home-linux"
+name        = "gemini-local"
 platform    = "linux"
 anythingllm = true
 openclaw    = true
 
 [providers]
-default = "claude"
+default = "gemini"
 
 [providers.claude]
 type         = "anthropic"
@@ -49,16 +49,59 @@ enabled      = true
 usage_rights = "standard"
 surface      = "claude-code"
 
-# Gemini remains configured for later reuse, but default routing is temporarily moved off it while the local quota window is exhausted.
-# Gemini quota is constrained on this machine until the reset window passes.
+# Gemini is the active default. gemini-flash-lite-latest was too weak to hold the
+# Mason edit schema (2026-08-02); moved to gemini-3.6-flash 2026-08-04.
+# When the daily free-tier quota is exhausted, switch to the local gemma 4 e4b.
 
 [providers.gemini]
 type         = "google"
-model        = "gemini-2.0-flash"
+# Free-tier quota is 20 requests/day PER MODEL, so a burned model is unblocked by
+# moving to a sibling rather than waiting. gemini-3.6-flash exhausted 2026-08-04;
+# gemini-3-flash-preview and gemma-4-31b-it were still open as of that switch.
+model        = "gemma-4-31b-it"
 api_key_env  = "GEMINI_API_KEY"
 enabled      = true
 usage_rights = "standard"
 surface      = "antigravity"
+
+# NOT ROUTED — gemini-3.1-pro reports `limit: 0` on the free tier, so every call
+# 429s and the agent silently falls back to templated output. Kept only as a
+# ready-made target if this key ever gets paid quota. Do not route an agent here
+# without re-checking the quota first.
+[providers.gemini-pro]
+type         = "google"
+model        = "gemini-3.1-pro-preview"
+api_key_env  = "GEMINI_API_KEY"
+enabled      = true
+usage_rights = "standard"
+surface      = "antigravity"
+
+# Local fallback for when the Gemini free tier is spent for the day. Served by
+# LM Studio on 127.0.0.1:1234 over its OpenAI-compatible API, so it needs no key.
+# Load it with a wide context first — the default 8192 cannot hold Mason's
+# context files:
+#   lms load google/gemma-4-e4b --context-length 32768 --identifier gemma4
+# 32768 is the practical ceiling on 8 GB of VRAM, which is why the spec's
+# code_under_test surface has to name individual files rather than all of js/.
+# Quota is per model, so splitting agents across two models doubles the daily
+# budget available to a single run. Mason gets the larger model because its
+# edit lane is the call that actually has to produce code.
+[providers.gemini-bulk]
+type         = "google"
+model        = "gemini-3.1-flash-lite"
+api_key_env  = "GEMINI_API_KEY"
+enabled      = true
+usage_rights = "standard"
+surface      = "antigravity"
+
+[providers.local-gemma]
+type         = "lmstudio"
+model        = "google/gemma-4-e4b"
+base_url     = "http://127.0.0.1:1234"
+api_key_env  = "LMSTUDIO_API_KEY"
+enabled      = true
+usage_rights = "standard"
+surface      = "lmstudio"
 
 [providers.codex]
 type         = "openai"
@@ -78,15 +121,15 @@ schema_path = "factory/coobie_semantic/typedb/schema.tql"
 reasoning_mode = "function_backed"
 
 [routing.agents]
-scout   = "claude-opus"
-sable   = "claude-opus"
-coobie  = "claude-sonnet"
-mason   = "claude-sonnet"
-bramble = "claude-sonnet"
-keeper  = "claude-sonnet"
-piper   = "claude-haiku"
-ash     = "claude-haiku"
-flint   = "claude-haiku"
+scout   = "gemini-bulk"
+sable   = "gemini-bulk"
+coobie  = "gemini-bulk"
+mason   = "gemini"
+bramble = "gemini-bulk"
+keeper  = "gemini-bulk"
+piper   = "gemini-bulk"
+ash     = "gemini"
+flint   = "gemini-bulk"
 
 [[mcp.servers]]
 name         = "filesystem"

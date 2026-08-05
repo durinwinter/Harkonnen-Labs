@@ -933,8 +933,46 @@ struct MasonEditApplicationArtifact {
     summary: String,
     proposal_generated: bool,
     changed_files: Vec<String>,
+    #[serde(default)]
+    deltas: Vec<EditDelta>,
+    #[serde(default)]
+    shrank_sharply: Vec<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     git_branch: Option<String>,
+}
+
+/// Records the size of an edit's before/after so a whole-file rewrite that
+/// silently dropped code is visible in the artifact instead of looking
+/// identical to a correct append.
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct EditDelta {
+    lines_before: usize,
+    lines_after: usize,
+    bytes_before: usize,
+    bytes_after: usize,
+    created: bool,
+}
+
+impl EditDelta {
+    /// A whole-file rewrite that keeps under a third of the original lines is
+    /// far more likely to be a model losing context than a deliberate deletion.
+    /// Worth surfacing to the operator; not worth blocking on, since a genuine
+    /// rewrite is legitimate.
+    fn shrank_sharply(&self) -> bool {
+        !self.created && self.lines_before >= 20 && self.lines_after * 3 < self.lines_before
+    }
+}
+
+fn summarize_edit_delta(before: Option<&str>, after: &str) -> EditDelta {
+    let lines_before = before.map(|text| text.lines().count()).unwrap_or(0);
+    let bytes_before = before.map(str::len).unwrap_or(0);
+    EditDelta {
+        lines_before,
+        lines_after: after.lines().count(),
+        bytes_before,
+        bytes_after: after.len(),
+        created: before.is_none(),
+    }
 }
 
 /// Result of a `piper_execute_build` call.
@@ -1143,9 +1181,10 @@ impl AppContext {
             paths.setup.sub_agents.clone(),
             paths.setup.clone(),
         );
-        let causal_graph = Arc::new(crate::causal_graph::NoopCausalGraphStore::new(
+        let causal_graph = crate::causal_graph::build_store(
             crate::causal_graph::CausalGraphConfig::from(&paths.setup.typedb),
-        ));
+        )
+        .await;
         Ok(Self {
             paths,
             pool,
@@ -2944,8 +2983,18 @@ impl AppContext {
                     .await;
                 }
                 if !critique.passed {
-                    implementation_approval_blockers
-                        .extend(critique.blocking_concerns.iter().cloned());
+                    if critique_is_advisory() {
+                        tracing::warn!(
+                            blocking = critique.blocking_concerns.len(),
+                            dead_ends = critique.dead_end_matches.len(),
+                            "Coobie plan critique raised blocking concerns but \
+                             HARKONNEN_CRITIQUE_ADVISORY is set — recording them as advisory \
+                             and allowing the implementation boundary to proceed"
+                        );
+                    } else {
+                        implementation_approval_blockers
+                            .extend(critique.blocking_concerns.iter().cloned());
+                    }
                     push_unique(&mut blackboard.open_blockers, "coobie_plan_critique_failed");
                     tracing::warn!(
                         blocking = critique.blocking_concerns.len(),
@@ -3030,6 +3079,16 @@ next_actions={}",
                 &mut agent_executions,
             )
             .await?;
+
+            // `tool_loop` only has meaning inside the `llm_edits` lane. Set on
+            // its own it does exactly nothing, which from the outside is
+            // indistinguishable from the loop running and finding no work.
+            if worker_harness.tool_loop && !worker_harness.llm_edits {
+                tracing::warn!(
+                    "spec sets worker_harness.tool_loop but not llm_edits — the Mason edit lane \
+                     is off entirely, so the tool loop will not run. Set llm_edits: true as well."
+                );
+            }
 
             if worker_harness.llm_edits {
                 // Snapshot workspace before Mason edits so Coobie can diff state later.
@@ -5049,11 +5108,16 @@ annotations:
         self.write_json_file(&harkonnen_dir.join("project-manifest.json"), &manifest)
             .await?;
 
+        // Rewritten every run, like project-manifest.json above and the resume
+        // packet below. This file is derived entirely from the filesystem, so
+        // there is no operator content to preserve and a stale copy is simply
+        // wrong: it survives new directories, a newly added dependency
+        // manifest, and any improvement to the detector itself. The write-once
+        // treatment is reserved for the files an operator edits by hand
+        // (instructions.md, strategy-register.md, project-context.md).
         let project_scan_path = harkonnen_dir.join("project-scan.md");
-        if !project_scan_path.exists() {
-            let scan = render_project_scan_markdown(&manifest);
-            tokio::fs::write(&project_scan_path, scan).await?;
-        }
+        let scan = render_project_scan_markdown(&manifest);
+        tokio::fs::write(&project_scan_path, scan).await?;
 
         let instructions_md = harkonnen_dir.join("instructions.md");
         if !instructions_md.exists() {
@@ -7778,14 +7842,13 @@ Produce the intent package JSON and incorporate Coobie guardrails, required chec
             let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
             let system_instruction = prompt_support
                 .as_ref()
-                .map(|support| format!(
-                    "{}
-
-Task contract:
-You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec and operating constraints. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks. Be specific and avoid filler.",
-                    support.system_instruction
-                ))
-                .unwrap_or_else(|| "You are Mason, an implementation planning specialist for a software factory. You receive a YAML spec and operating constraints. Produce a clear, actionable implementation plan in Markdown with sections: ## Target, ## Scope, ## Acceptance Criteria, ## Recommended Steps, ## Risks. Be specific and avoid filler.".to_string());
+                .map(|support| {
+                    format!(
+                        "{}\n\nTask contract:\n{MASON_PLAN_TASK_CONTRACT}",
+                        support.system_instruction
+                    )
+                })
+                .unwrap_or_else(|| MASON_PLAN_TASK_CONTRACT.to_string());
             let repo_context_block = prompt_support
                 .as_ref()
                 .map(|support| support.repo_context_block.as_str())
@@ -7912,6 +7975,8 @@ Produce the implementation plan markdown. Treat guardrails and required checks a
                 summary: "Mason edit lane skipped because the spec did not resolve any code-under-test paths inside the staged workspace.".to_string(),
                 proposal_generated: false,
                 changed_files: Vec::new(),
+                deltas: Vec::new(),
+                shrank_sharply: Vec::new(),
                 git_branch: None,
             };
             self.write_mason_edit_application(run_dir, &application)
@@ -7930,6 +7995,8 @@ Produce the implementation plan markdown. Treat guardrails and required checks a
                 summary: "Mason edit lane skipped because no bounded text file context could be loaded for the editable paths.".to_string(),
                 proposal_generated: false,
                 changed_files: Vec::new(),
+                deltas: Vec::new(),
+                shrank_sharply: Vec::new(),
                 git_branch: None,
             };
             self.write_mason_edit_application(run_dir, &application)
@@ -7947,6 +8014,8 @@ Produce the implementation plan markdown. Treat guardrails and required checks a
                 summary: "Mason edit lane skipped because no live LLM provider is configured for Mason in the active setup.".to_string(),
                 proposal_generated: false,
                 changed_files: Vec::new(),
+                deltas: Vec::new(),
+                shrank_sharply: Vec::new(),
                 git_branch: None,
             };
             self.write_mason_edit_application(run_dir, &application)
@@ -7974,17 +8043,50 @@ Produce the implementation plan markdown. Treat guardrails and required checks a
             .collect::<Vec<_>>()
             .join("\n\n");
 
+        // Opt-in, and off for every spec that does not say otherwise: the tool
+        // loop is a different conversation shape, not a better one, and the
+        // single-shot transports stay the default until it has proven itself
+        // against a real target.
+        let tool_loop_enabled = spec_obj
+            .worker_harness
+            .as_ref()
+            .map(|harness| harness.tool_loop)
+            .unwrap_or(false);
+
+        // One instruction set per lane. Sending the fenced/patch instructions
+        // into a tool loop is how a model ends up emitting `### FILE:` blocks
+        // the loop cannot read.
+        let format_instruction = if tool_loop_enabled {
+            crate::mason_tools::TOOL_LOOP_INSTRUCTION.to_string()
+        } else {
+            format!(
+                "{}\n\n{}",
+                crate::mason_transport::FENCED_FORMAT_INSTRUCTION,
+                crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+            )
+        };
+
         let prompt_support = self.agent_prompt_support("mason", spec_obj, target_source);
         let system_instruction = prompt_support
             .as_ref()
-            .map(|support| format!(
-                "{}
+            .map(|support| {
+                format!(
+                    "{}
 
 Task contract:
-You are Mason, an implementation specialist for a software factory. Produce valid JSON only. Return an object with keys summary (string), rationale (array of strings), and edits (array). Each edit must contain path (relative path inside the staged workspace), action (must be 'write'), summary (string), and content (the full file contents after your edit). Only edit files within the provided editable paths. Do not emit markdown. Do not explain outside the JSON object.",
-                support.system_instruction
-            ))
-            .unwrap_or_else(|| "You are Mason, an implementation specialist for a software factory. You must respond with a single raw JSON object and nothing else — no prose before it, no explanation after it, no markdown fences. The object must have exactly these keys: \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). Each edit must have: \"path\" (relative path in staged workspace), \"action\" (must be the string \"write\"), \"summary\" (string), \"content\" (full file contents after edit). Only edit files listed in EDITABLE PATHS. If no edit is needed, return edits as an empty array.".to_string());
+You are Mason, an implementation specialist for a software factory. Only edit files within the provided editable paths.
+
+{format_instruction}",
+                    support.system_instruction
+                )
+            })
+            .unwrap_or_else(|| {
+                format!(
+                    "You are Mason, an implementation specialist for a software factory. Only edit files listed in EDITABLE PATHS.
+
+{format_instruction}"
+                )
+            });
         let repo_context_block = prompt_support
             .as_ref()
             .map(|support| support.repo_context_block.as_str())
@@ -8018,76 +8120,158 @@ CONSTRAINTS:
 CURRENT FILE CONTEXT:
 {}
 
-Respond with a single JSON object only — no prose, no markdown, no explanation outside the object. If no edit is needed, return edits as an empty array. Do not write any text outside this JSON object.",
+{closing_instruction}",
                     target_source.label,
                     staged_product.display(),
                     render_list(&editable_paths, "No editable paths were resolved."),
                     context_block,
                     repo_context_block = repo_context_block,
+                    closing_instruction = if tool_loop_enabled {
+                        "The file context above is a starting point, not the whole workspace. Use \
+                         read_file and list_dir when you need more, then write every change with \
+                         write_file tool calls."
+                    } else {
+                        "Respond using the FILE block format described above. Nothing outside the \
+                         blocks."
+                    },
                 )),
             ],
-            max_tokens: 8000,
+            max_tokens: mason_edit_max_tokens(),
             temperature: 0.1,
         };
 
-        let response = match provider.complete(req).await {
-            Ok(response) => response,
-            Err(error) => {
-                let application = MasonEditApplicationArtifact {
-                    run_id: run_id.to_string(),
-                    spec_id: spec_obj.id.clone(),
-                    product: target_source.label.clone(),
-                    generated_at: Utc::now().to_rfc3339(),
-                    status: "llm_error".to_string(),
-                    summary: format!("Mason edit lane failed before applying edits: {}", error),
-                    proposal_generated: false,
-                    changed_files: Vec::new(),
-                    git_branch: None,
+        // Wraps `provider` so the usage of every attempt actually made can still be
+        // reported for tracing and cost accounting, even though
+        // `complete_edit_proposal_with_retry` itself only returns the raw body (it
+        // may make more than one call under the hood, and a retry means two real,
+        // separately billed calls).
+        let usage_tracker = UsageTrackingProvider {
+            inner: provider.as_ref(),
+            usage_total: std::sync::Mutex::new(None),
+        };
+        let (parsed, raw_body) = if tool_loop_enabled {
+            // The loop returns `(path, content)` pairs and applies nothing. They
+            // become `MasonEdit`s here and then follow exactly the same route
+            // every other transport takes — scope check, `validate_mason_edits`,
+            // the single apply loop below — so there is still one place where a
+            // Mason write reaches disk.
+            let transcript = TranscriptProvider {
+                inner: &usage_tracker,
+                transcript: std::sync::Mutex::new(String::new()),
+                last_response: std::sync::Mutex::new(String::new()),
+            };
+            let recorder = MasonToolLoopRecorder {
+                app: self,
+                run_id: run_id.to_string(),
+                cwd: staged_product.to_path_buf(),
+            };
+            let outcome = crate::mason_tools::run_mason_tool_loop_with_recorder(
+                &transcript,
+                req,
+                staged_product,
+                mason_tool_loop_max_turns(),
+                Some(&recorder),
+            )
+            .await;
+            let raw_body = transcript.transcript.lock().expect("lock").clone();
+            let last_response = transcript.last_response.lock().expect("lock").clone();
+            let parsed = outcome.and_then(|writes| {
+                let edits = writes
+                    .into_iter()
+                    .map(|(path, content)| MasonEdit {
+                        path: normalize_project_path(&path),
+                        action: "write".to_string(),
+                        summary: String::new(),
+                        content,
+                    })
+                    .collect::<Vec<_>>();
+                validate_mason_edits(&edits)?;
+                let (summary, rationale) =
+                    crate::mason_transport::parse_summary_and_rationale(&last_response);
+                let summary = if summary.trim().is_empty() {
+                    format!(
+                        "Mason finished its tool loop with {} file write(s).",
+                        edits.len()
+                    )
+                } else {
+                    summary
                 };
-                self.write_mason_edit_application(run_dir, &application)
-                    .await?;
-                return Ok(application);
-            }
+                // Carried into `mason_edit_proposal.json`. The apply path
+                // rebuilds `summary` from scratch, so the same caveat is
+                // appended again there (see `MASON_TOOL_LOOP_TERMINATION_CAVEAT`
+                // at the applied-path summary below) — otherwise the note that
+                // tells the operator to "review mason_edit_application.json" is
+                // absent from that very file in the one case it was written
+                // for: a run reporting success.
+                let summary = format!("{summary} {MASON_TOOL_LOOP_TERMINATION_CAVEAT}");
+                Ok(MasonEditProposal {
+                    summary,
+                    rationale,
+                    edits,
+                })
+            });
+            (parsed, raw_body)
+        } else {
+            complete_edit_proposal_with_retry(&usage_tracker, req, 2, staged_product).await
         };
 
         // Write raw response to disk before parsing so failures are diagnosable.
         let raw_response_path = run_dir.join("mason_raw_response.txt");
-        let _ = tokio::fs::write(&raw_response_path, &response.content).await;
+        let _ = tokio::fs::write(&raw_response_path, &raw_body).await;
 
-        let (reasoning, edit_body) = extract_reasoning(&response.content);
-        let edit_actions = vec![format!("generate file edits for spec '{}'", spec_obj.id)];
-        self.record_agent_trace(
-            run_id,
-            "mason",
-            "edits",
-            &trace_input_summary(&spec_obj.title),
-            &reasoning,
-            &edit_actions,
-            "success",
-            response.usage.as_ref(),
-        )
-        .await;
-        if let Some(usage) = &response.usage {
-            self.record_llm_cost_event(run_id, "mason", "edits", "gemini", "", usage)
-                .await;
+        let total_usage = usage_tracker.usage_total.lock().expect("lock").clone();
+        if !raw_body.is_empty() {
+            let (reasoning, _edit_body) = extract_reasoning(&raw_body);
+            let edit_actions = vec![format!("generate file edits for spec '{}'", spec_obj.id)];
+            self.record_agent_trace(
+                run_id,
+                "mason",
+                "edits",
+                &trace_input_summary(&spec_obj.title),
+                &reasoning,
+                &edit_actions,
+                "success",
+                total_usage.as_ref(),
+            )
+            .await;
+            if let Some(usage) = &total_usage {
+                let provider_label = self
+                    .paths
+                    .setup
+                    .resolve_agent_provider_name("mason", "default");
+                self.record_llm_cost_event(run_id, "mason", "edits", &provider_label, "", usage)
+                    .await;
+            }
         }
 
-        let proposal = match parse_mason_edit_proposal(edit_body) {
+        let proposal = match parsed {
             Ok(proposal) => proposal,
             Err(error) => {
-                let preview: String = response.content.chars().take(500).collect();
+                let summary = if raw_body.is_empty() {
+                    format!(
+                        "Mason edit lane failed before any response was received: {}",
+                        error
+                    )
+                } else {
+                    let preview: String = raw_body.chars().take(500).collect();
+                    let lane = if tool_loop_enabled {
+                        "Mason tool loop did not produce a usable set of writes"
+                    } else {
+                        "Mason edit lane produced an invalid edit proposal"
+                    };
+                    format!("{lane}: {error}\nRaw response preview: {preview}")
+                };
                 let application = MasonEditApplicationArtifact {
                     run_id: run_id.to_string(),
                     spec_id: spec_obj.id.clone(),
                     product: target_source.label.clone(),
                     generated_at: Utc::now().to_rfc3339(),
                     status: "invalid_llm_edit_response".to_string(),
-                    summary: format!(
-                        "Mason edit lane produced an invalid JSON edit proposal: {}\nRaw response preview: {}",
-                        error, preview
-                    ),
+                    summary,
                     proposal_generated: false,
                     changed_files: Vec::new(),
+                    deltas: Vec::new(),
+                    shrank_sharply: Vec::new(),
                     git_branch: None,
                 };
                 self.write_mason_edit_application(run_dir, &application)
@@ -8109,6 +8293,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                         .to_string(),
                     proposal_generated: false,
                     changed_files: Vec::new(),
+                    deltas: Vec::new(),
+                    shrank_sharply: Vec::new(),
                     git_branch: None,
                 };
                 self.write_mason_edit_application(run_dir, &application)
@@ -8128,6 +8314,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                     ),
                     proposal_generated: false,
                     changed_files: Vec::new(),
+                    deltas: Vec::new(),
+                    shrank_sharply: Vec::new(),
                     git_branch: None,
                 };
                 self.write_mason_edit_application(run_dir, &application)
@@ -8147,6 +8335,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                     ),
                     proposal_generated: false,
                     changed_files: Vec::new(),
+                    deltas: Vec::new(),
+                    shrank_sharply: Vec::new(),
                     git_branch: None,
                 };
                 self.write_mason_edit_application(run_dir, &application)
@@ -8185,6 +8375,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                 },
                 proposal_generated: true,
                 changed_files: Vec::new(),
+                deltas: Vec::new(),
+                shrank_sharply: Vec::new(),
                 git_branch: None,
             };
             self.write_mason_edit_application(run_dir, &application)
@@ -8216,6 +8408,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                 summary: lease_msg,
                 proposal_generated: true,
                 changed_files: Vec::new(),
+                deltas: Vec::new(),
+                shrank_sharply: Vec::new(),
                 git_branch: None,
             };
             self.write_mason_edit_application(run_dir, &application)
@@ -8224,6 +8418,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
         }
 
         let mut changed_files = Vec::new();
+        let mut deltas = Vec::new();
+        let mut shrank_sharply = Vec::new();
         for edit in &proposal.edits {
             let normalized = normalize_project_path(&edit.path);
             let destination = join_workspace_relative_path(staged_product, &normalized)?;
@@ -8231,6 +8427,11 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                 tokio::fs::create_dir_all(parent).await?;
             }
             let existing = tokio::fs::read_to_string(&destination).await.ok();
+            let delta = summarize_edit_delta(existing.as_deref(), &edit.content);
+            if delta.shrank_sharply() {
+                shrank_sharply.push(normalized.clone());
+            }
+            deltas.push(delta);
             if existing.as_deref() != Some(edit.content.as_str()) {
                 tokio::fs::write(&destination, &edit.content).await?;
                 push_unique(&mut changed_files, &normalized);
@@ -8242,12 +8443,34 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
                 "Mason generated an edit proposal for '{}' but every file already matched the requested content.",
                 target_source.label
             )
-        } else {
+        } else if shrank_sharply.is_empty() {
             format!(
                 "Mason applied {} LLM-authored file edit(s) inside the staged workspace for '{}'.",
                 changed_files.len(),
                 target_source.label
             )
+        } else {
+            format!(
+                "Mason applied {} LLM-authored file edit(s) inside the staged workspace for '{}'. \
+                 WARNING: {} file(s) lost more than two thirds of their lines — review before \
+                 trusting this run: {}",
+                changed_files.len(),
+                target_source.label,
+                shrank_sharply.len(),
+                shrank_sharply.join(", ")
+            )
+        };
+
+        // The caveat appended to the proposal summary above does not survive to
+        // here — this branch rebuilds `summary` from scratch — so it has to be
+        // re-appended, or `mason_edit_application.json` (the artifact its own
+        // text tells the operator to review) carries it in every case except
+        // the one that matters: a run that reports success. Gated on the tool
+        // loop, which is the only lane whose termination is heuristic.
+        let summary = if tool_loop_enabled {
+            format!("{summary} {MASON_TOOL_LOOP_TERMINATION_CAVEAT}")
+        } else {
+            summary
         };
 
         // If git_branch is requested and there are real changes, commit them to a
@@ -8294,6 +8517,8 @@ Respond with a single JSON object only — no prose, no markdown, no explanation
             summary,
             proposal_generated: true,
             changed_files,
+            deltas,
+            shrank_sharply,
             git_branch,
         };
         self.write_mason_edit_application(run_dir, &application)
@@ -8554,21 +8779,20 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
         let constraints = mason_slim_briefing(briefing);
 
         let req = LlmRequest::simple(
-            "You are Mason, an implementation specialist for a software factory. A build command failed. Produce valid JSON only — a single raw object with keys: \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). Each edit: \"path\" (relative path in staged workspace), \"action\" (must be \"write\"), \"summary\" (string), \"content\" (full file contents after edit). Only edit files in EDITABLE PATHS. If you cannot fix the problem, return edits as an empty array.",
+            &format!(
+                "You are Mason, an implementation specialist for a software factory. A build command failed. Only edit files in EDITABLE PATHS.\n\n{}\n\n{}",
+                crate::mason_transport::FENCED_FORMAT_INSTRUCTION,
+                crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+            ),
             format!(
-                "SPEC:\n```yaml\n{spec_yaml}\n```\n\nCONSTRAINTS:\n{constraints}\n\nEDITABLE PATHS: {editable_list}\n\nFILE CONTEXT:\n{context_block}\n\nBUILD FAILURE OUTPUT (iteration {iteration}):\n```\n{build_output}\n```\n\nFix the errors and return the corrected file contents as a JSON edit proposal.",
+                "SPEC:\n```yaml\n{spec_yaml}\n```\n\nCONSTRAINTS:\n{constraints}\n\nEDITABLE PATHS: {editable_list}\n\nFILE CONTEXT:\n{context_block}\n\nBUILD FAILURE OUTPUT (iteration {iteration}):\n```\n{build_output}\n```\n\nFix the errors and return the corrected file contents using the FILE block format described above.",
             ),
         );
 
-        let response = match provider.complete(req).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("Mason fix LLM call failed ({})", e);
-                return Ok(None);
-            }
-        };
+        let (parsed, _raw_body) =
+            complete_edit_proposal_with_retry(provider.as_ref(), req, 2, staged_product).await;
 
-        match parse_mason_edit_proposal(&response.content) {
+        match parsed {
             Ok(proposal) => {
                 self.record_event(
                     run_id,
@@ -8586,7 +8810,7 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
                 Ok(Some(proposal))
             }
             Err(e) => {
-                tracing::warn!("Mason fix proposal parse failed ({})", e);
+                tracing::warn!("Mason fix attempt failed ({})", e);
                 Ok(None)
             }
         }
@@ -8652,41 +8876,35 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
             serde_yaml::to_string(spec_obj).unwrap_or_else(|_| format!("{:?}", spec_obj));
         let constraints = mason_slim_briefing(briefing);
 
-        let (system_prompt, user_suffix) = if failure_kind
-            == crate::models::FailureKind::WrongAnswer
-        {
-            (
+        let (system_prompt_prefix, user_suffix) =
+            if failure_kind == crate::models::FailureKind::WrongAnswer {
+                (
                 "You are Mason, an implementation specialist for a software factory. \
                  Tests ran successfully but produced wrong output — the program ran but \
                  returned incorrect results. \
-                 Produce valid JSON only — a single raw object with keys: \
-                 \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). \
-                 Each edit: \"path\" (relative path in staged workspace), \
-                 \"action\" (must be \"write\"), \"summary\" (string), \
-                 \"content\" (full file contents after edit). \
                  Only edit files in EDITABLE PATHS. \
                  Study the expected vs actual diff carefully and fix the logic error. \
-                 Do not modify test files. If you cannot fix the problem, return edits as an empty array.",
+                 Do not modify test files.",
                 "The test ran but returned wrong output. Study the expected vs actual diff above \
-                 and fix the implementation logic. Return corrected file contents as a JSON edit proposal.",
+                 and fix the implementation logic. Return the corrected file contents using the \
+                 FILE block format described above.",
             )
-        } else {
-            (
-                "You are Mason, an implementation specialist for a software factory. \
+            } else {
+                (
+                    "You are Mason, an implementation specialist for a software factory. \
                  Visible tests have run and produced failures. \
-                 Produce valid JSON only — a single raw object with keys: \
-                 \"summary\" (string), \"rationale\" (array of strings), \"edits\" (array). \
-                 Each edit: \"path\" (relative path in staged workspace), \
-                 \"action\" (must be \"write\"), \"summary\" (string), \
-                 \"content\" (full file contents after edit). \
                  Only edit files in EDITABLE PATHS. \
                  Fix the implementation so the tests pass — do not modify test files \
-                 unless they contain a clear error unrelated to the implementation. \
-                 If you cannot fix the problem, return edits as an empty array.",
-                "Fix the implementation so these tests pass and return the corrected \
-                 file contents as a JSON edit proposal.",
-            )
-        };
+                 unless they contain a clear error unrelated to the implementation.",
+                    "Fix the implementation so these tests pass and return the corrected \
+                 file contents using the FILE block format described above.",
+                )
+            };
+        let system_prompt = format!(
+            "{system_prompt_prefix}\n\n{}\n\n{}",
+            crate::mason_transport::FENCED_FORMAT_INSTRUCTION,
+            crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+        );
         let req = LlmRequest::simple(
             system_prompt,
             format!(
@@ -8702,15 +8920,10 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
             ),
         );
 
-        let response = match provider.complete(req).await {
-            Ok(r) => r,
-            Err(e) => {
-                tracing::warn!("Mason validation fix LLM call failed ({})", e);
-                return Ok(None);
-            }
-        };
+        let (parsed, _raw_body) =
+            complete_edit_proposal_with_retry(provider.as_ref(), req, 2, staged_product).await;
 
-        match parse_mason_edit_proposal(&response.content) {
+        match parsed {
             Ok(proposal) => {
                 self.record_event(
                     run_id,
@@ -8728,7 +8941,7 @@ Produce the tool plan analysis and explicitly call out tools or MCP gaps that bl
                 Ok(Some(proposal))
             }
             Err(e) => {
-                tracing::warn!("Mason validation fix proposal parse failed ({})", e);
+                tracing::warn!("Mason validation fix attempt failed ({})", e);
                 Ok(None)
             }
         }
@@ -10920,7 +11133,7 @@ Produce the validation analysis and note any checks Coobie asked for that are st
                      Identify any blind spots and return your critique as JSON.",
                     spec_id = spec_obj.id,
                     spec_title = spec_obj.title,
-                    plan = implementation_plan.chars().take(3000).collect::<String>(),
+                    plan = critique_plan_excerpt(&implementation_plan),
                 ),
             );
 
@@ -23963,7 +24176,10 @@ fn project_memory_provenance(
     }
 }
 
-fn normalize_project_path(path: &str) -> String {
+/// `pub(crate)` so the tool loop confines the same string the apply path
+/// confines. Feeding one confinement implementation two different spellings of
+/// a path is how the two ends of a write disagree about whether it is legal.
+pub(crate) fn normalize_project_path(path: &str) -> String {
     path.trim()
         .replace('\\', "/")
         .trim_start_matches("./")
@@ -24179,6 +24395,64 @@ fn resolve_path_for_staged_workspace(
         }
     }
 
+    resolve_not_yet_created_path(trimmed, source_root, repo_root)
+}
+
+/// Resolve a declared path that does not exist on disk *yet*.
+///
+/// `canonicalize` fails on a missing path, so the loop above skips it and the
+/// whole entry is dropped. That silently made it impossible for a spec to
+/// declare a file it wants **created**: `js/bonus.js` was listed as
+/// `code_under_test`, resolved to nothing, and Mason's own proposal to create
+/// it was then rejected as "outside the editable scope" (run a9bf44cf) — after
+/// a 30 KB response had already been generated and parsed.
+///
+/// Containment is still enforced, just against the nearest ancestor that does
+/// exist: the parent directory is canonicalized and must sit inside the source
+/// root, so `../../etc/passwd` resolves outside and is still refused. Only the
+/// final, missing components are taken on trust.
+fn resolve_not_yet_created_path(
+    trimmed: &str,
+    source_root: &Path,
+    repo_root: &Path,
+) -> Option<String> {
+    let candidate = PathBuf::from(trimmed);
+    let candidates = if candidate.is_absolute() {
+        vec![candidate]
+    } else {
+        vec![source_root.join(trimmed), repo_root.join(trimmed)]
+    };
+
+    for candidate in candidates {
+        // Walk up to the nearest existing ancestor, remembering what we skipped.
+        let mut missing = Vec::new();
+        let mut cursor = candidate.as_path();
+        loop {
+            let Some(parent) = cursor.parent() else { break };
+            let Some(name) = cursor.file_name() else {
+                break;
+            };
+            missing.push(name.to_owned());
+            if let Ok(anchor) = parent.canonicalize() {
+                if !anchor.starts_with(source_root) && anchor != source_root {
+                    break; // outside the workspace — not ours to write
+                }
+                let mut resolved = anchor;
+                for part in missing.iter().rev() {
+                    resolved.push(part);
+                }
+                let relative = resolved.strip_prefix(source_root).ok()?;
+                let normalized = normalize_project_path(&relative.display().to_string());
+                return if normalized.is_empty() {
+                    None
+                } else {
+                    Some(normalized)
+                };
+            }
+            cursor = parent;
+        }
+    }
+
     None
 }
 
@@ -24238,7 +24512,12 @@ fn build_project_scan_manifest(
     let detected_files = detect_project_files(&source_path);
     let detected_directories = detect_project_directories(&source_path);
     let likely_commands = detect_project_commands(&source_path);
-    let runtime_hints = detect_runtime_hints(&source_path, &detected_files, &detected_directories);
+    let runtime_hints = detect_runtime_hints(
+        &source_path,
+        &detected_files,
+        &detected_directories,
+        &likely_commands,
+    );
 
     ProjectScanManifest {
         generated_at: Utc::now().to_rfc3339(),
@@ -24254,40 +24533,101 @@ fn build_project_scan_manifest(
     }
 }
 
+/// Top-level file names that identify a project's shape. These now only
+/// *rank* a scan result — presence promotes an entry to the top of the list.
+/// They no longer decide what is visible: a repo whose files are all absent
+/// from this list (a vanilla-JS game, a static site) used to scan as empty.
+///
+/// `docs` deliberately does not appear here. It is a directory, and listing
+/// it in both this array and `SIGNIFICANT_DIRECTORIES` is what made a `docs/`
+/// directory show up under "Detected Files".
+const SIGNIFICANT_FILES: [&str; 9] = [
+    "Cargo.toml",
+    "package.json",
+    "pnpm-lock.yaml",
+    "package-lock.json",
+    "pyproject.toml",
+    "requirements.txt",
+    "docker-compose.yml",
+    "docker-compose.yaml",
+    "README.md",
+];
+
+/// Top-level directory names that identify a project's shape. Same ranking
+/// role as `SIGNIFICANT_FILES`.
+const SIGNIFICANT_DIRECTORIES: [&str; 12] = [
+    "src", "crates", "ui", "frontend", "backend", "apps", "services", "examples", "tests",
+    "scripts", "docs", "data",
+];
+
+/// Build output and vendored dependencies. Listing these is noise, and
+/// `node_modules` in particular says nothing about the project's own shape.
+const SCAN_SKIP_DIRECTORIES: [&str; 6] = [
+    "node_modules",
+    "target",
+    "dist",
+    "build",
+    "vendor",
+    "coverage",
+];
+
+/// Upper bound on entries reported per category, so a flat repo with hundreds
+/// of top-level files cannot swamp the briefing.
+const SCAN_ENTRY_LIMIT: usize = 24;
+
+/// Read the top level of the project once, splitting entries into files and
+/// directories. Hidden entries are skipped — `.harkonnen` gets its own
+/// dedicated hint, and `.git` is covered by the git metadata capture.
+fn read_top_level_entries(source_path: &Path) -> (Vec<String>, Vec<String>) {
+    let Ok(entries) = std::fs::read_dir(source_path) else {
+        return (Vec::new(), Vec::new());
+    };
+
+    let mut files = Vec::new();
+    let mut directories = Vec::new();
+    for entry in entries.flatten() {
+        let name = entry.file_name().to_string_lossy().to_string();
+        if name.starts_with('.') {
+            continue;
+        }
+        match entry.file_type() {
+            Ok(file_type) if file_type.is_dir() => {
+                if SCAN_SKIP_DIRECTORIES.contains(&name.as_str()) {
+                    continue;
+                }
+                directories.push(name);
+            }
+            Ok(file_type) if file_type.is_file() => files.push(name),
+            _ => {}
+        }
+    }
+
+    (files, directories)
+}
+
+/// Sort alphabetically, then stably promote recognized names to the front, so
+/// the ordering is deterministic and the high-signal entries lead.
+fn rank_scan_entries(mut entries: Vec<String>, significant: &[&str]) -> Vec<String> {
+    entries.sort();
+    entries.dedup();
+    entries.sort_by_key(|name| {
+        significant
+            .iter()
+            .position(|candidate| *candidate == name.as_str())
+            .unwrap_or(usize::MAX)
+    });
+    entries.truncate(SCAN_ENTRY_LIMIT);
+    entries
+}
+
 fn detect_project_files(source_path: &Path) -> Vec<String> {
-    let candidates = [
-        "Cargo.toml",
-        "package.json",
-        "pnpm-lock.yaml",
-        "package-lock.json",
-        "pyproject.toml",
-        "requirements.txt",
-        "docker-compose.yml",
-        "docker-compose.yaml",
-        "README.md",
-        "docs",
-    ];
-    candidates
-        .iter()
-        .filter_map(|candidate| {
-            let path = source_path.join(candidate);
-            path.exists().then(|| candidate.to_string())
-        })
-        .collect()
+    let (files, _) = read_top_level_entries(source_path);
+    rank_scan_entries(files, &SIGNIFICANT_FILES)
 }
 
 fn detect_project_directories(source_path: &Path) -> Vec<String> {
-    let candidates = [
-        "src", "crates", "ui", "frontend", "backend", "apps", "services", "examples", "tests",
-        "scripts", "docs", "data",
-    ];
-    candidates
-        .iter()
-        .filter_map(|candidate| {
-            let path = source_path.join(candidate);
-            path.is_dir().then(|| candidate.to_string())
-        })
-        .collect()
+    let (_, directories) = read_top_level_entries(source_path);
+    rank_scan_entries(directories, &SIGNIFICANT_DIRECTORIES)
 }
 
 fn detect_project_commands(source_path: &Path) -> Vec<String> {
@@ -24720,6 +25060,7 @@ fn detect_runtime_hints(
     source_path: &Path,
     detected_files: &[String],
     detected_directories: &[String],
+    likely_commands: &[String],
 ) -> Vec<String> {
     let mut hints = Vec::new();
     if detected_files.iter().any(|value| value == "Cargo.toml")
@@ -24740,6 +25081,37 @@ fn detect_runtime_hints(
     if source_path.join(".harkonnen").exists() {
         hints.push("Repo already contains Harkonnen-local continuity files.".to_string());
     }
+
+    // Say so when the layout was not recognized. Without this the scan reports
+    // whatever it found with no indication that nothing was *identified*, and
+    // planning proceeds on an unlabelled picture as if it were an understood
+    // one. An unrecognized project is a question for the operator, not a
+    // silent gap.
+    let recognized_marker = detected_files
+        .iter()
+        .any(|value| SIGNIFICANT_FILES.contains(&value.as_str()))
+        || detected_directories
+            .iter()
+            .any(|value| SIGNIFICANT_DIRECTORIES.contains(&value.as_str()));
+    if !recognized_marker {
+        hints.push(format!(
+            "No recognized project marker (dependency manifest, src/, tests/) at the top level. \
+             The scan lists {} file(s) and {} directory(ies) as found, but the project's shape \
+             has NOT been identified - treat the layout as unknown and confirm it with the operator.",
+            detected_files.len(),
+            detected_directories.len()
+        ));
+    }
+
+    if likely_commands.is_empty() {
+        hints.push(
+            "No build or test command could be inferred from the top-level layout. Do not assume \
+             the project is unbuildable or untestable - confirm with the operator how it is built, \
+             run and verified before planning around commands."
+                .to_string(),
+        );
+    }
+
     hints
 }
 
@@ -28081,24 +28453,72 @@ fn workspace_snapshots_equivalent(
     expected_files == actual_files
 }
 
+/// Appended to both the proposal summary and the *applied* summary when the
+/// tool loop is the lane in use, so the operator reads it in
+/// `mason_edit_application.json` — which is the artifact the note itself points
+/// at — and not only in `mason_edit_proposal.json`.
+///
+/// One constant, two sites, because the applied branch rebuilds its summary
+/// from scratch and the two texts drifting apart is how the note went missing
+/// from the success case in the first place.
+const MASON_TOOL_LOOP_TERMINATION_CAVEAT: &str =
+    "NOTE: tool-loop termination is heuristic — the loop stops on a message carrying no \
+     recognized tool call or write. Check these edits against the spec rather than assuming \
+     every requested file is here.";
+
+/// Path prefixes Mason is never shown, in any lane: build output, VCS
+/// internals, and factory state. Applied through
+/// [`mason_blocked_path_component`] by `is_mason_context_candidate` (which picks
+/// the single-shot context files), `mason_tools::read_refusal` (which filters
+/// the tool loop's reads), and `path_allowed_for_edit` (which decides what any
+/// lane may write), so no two of them can drift into disagreeing about what is
+/// off limits.
+pub(crate) const MASON_BLOCKED_PATH_PREFIXES: [&str; 7] = [
+    ".git/",
+    ".harkonnen/",
+    "target/",
+    "dist/",
+    "build/",
+    "node_modules/",
+    "factory/",
+];
+
+/// `Some(prefix)` when any component of `normalized` names one of
+/// [`MASON_BLOCKED_PATH_PREFIXES`].
+///
+/// Components, not a leading-prefix test, and the same rule for reads and for
+/// writes. A leading-prefix test only sees `.git/config`; it lets
+/// `sub/.git/config` and `a/target/x` straight through, and a nested `.git` is
+/// every bit as much a real git directory as the root one.
+///
+/// Used by `mason_tools::read_refusal` (which filters what the tool loop may
+/// read) and by `path_allowed_for_edit` (which decides what any lane may
+/// write), so the filter and the boundary cannot disagree about what is off
+/// limits. Lower-cased on both sides, since a case-insensitive filesystem will
+/// happily resolve `.GIT` to the same directory.
+pub(crate) fn mason_blocked_path_component(normalized: &str) -> Option<&'static str> {
+    let lowered: Vec<String> = Path::new(normalized)
+        .components()
+        .filter_map(|component| match component {
+            std::path::Component::Normal(part) => Some(part.to_string_lossy().to_ascii_lowercase()),
+            _ => None,
+        })
+        .collect();
+
+    MASON_BLOCKED_PATH_PREFIXES.iter().copied().find(|prefix| {
+        let name = prefix.trim_end_matches('/');
+        lowered.iter().any(|component| component == name)
+    })
+}
+
 fn is_mason_context_candidate(path: &str) -> bool {
     let normalized = normalize_project_path(path);
     if normalized.is_empty() {
         return false;
     }
-    let blocked_prefixes = [
-        ".git/",
-        ".harkonnen/",
-        "target/",
-        "dist/",
-        "build/",
-        "node_modules/",
-        "factory/",
-    ];
-    if blocked_prefixes
-        .iter()
-        .any(|prefix| normalized.starts_with(prefix))
-    {
+    // Same component test as the read filter and the write boundary — three
+    // callers, one rule, so there is nothing left to drift.
+    if mason_blocked_path_component(&normalized).is_some() {
         return false;
     }
     let Some(ext) = Path::new(&normalized)
@@ -28225,7 +28645,12 @@ fn build_mason_context_files(
     Ok(context)
 }
 
-fn join_workspace_relative_path(base: &Path, relative: &str) -> Result<PathBuf> {
+/// The one place a model-supplied relative path becomes a real path inside the
+/// staged workspace. `pub(crate)` so `mason_tools`'s tool loop confines its own
+/// paths with exactly this function rather than a second, subtly different
+/// check — two confinement implementations would eventually disagree, and only
+/// one of them would be the one that matters.
+pub(crate) fn join_workspace_relative_path(base: &Path, relative: &str) -> Result<PathBuf> {
     let base = base.canonicalize()?;
     let relative = Path::new(relative);
     if relative.is_absolute() {
@@ -28291,8 +28716,28 @@ fn mason_slim_briefing(briefing: &CoobieBriefing) -> String {
     }
 }
 
+/// Whether Mason may write `path`.
+///
+/// The blocked prefixes are denied *unconditionally*, before `editable_paths`
+/// is consulted at all, so no spec can grant `.git/`, `target/` or `factory/`
+/// by naming them — or, far more easily, by naming the product root. An
+/// ordinary whole-repo spec makes `resolve_path_for_staged_workspace` return
+/// `"."`, the `root == "."` arm below then said yes to everything including
+/// `.git/config`, and with `worker_harness.git_branch: true` the staged file
+/// was copied into the *real* repository by `mason_commit_branch`. The
+/// subsequent `git add -- .git/config` fails and that function bails — but the
+/// copy has already landed and persists. Overwriting `.git/config` destroys
+/// remotes and branch configuration, and `core.fsmonitor` / `core.pager` are
+/// executed by git as shell commands with no executable bit required, so it is
+/// also a code-execution path. The tool loop already refused these; only the
+/// default lanes could do it.
+///
+/// Denying here is loud: the caller reports `edit_outside_scope` and stops.
 fn path_allowed_for_edit(path: &str, editable_paths: &[String]) -> bool {
     let path = normalize_project_path(path);
+    if mason_blocked_path_component(&path).is_some() {
+        return false;
+    }
     editable_paths.iter().any(|root| {
         let root = normalize_project_path(root);
         root == "." || path == root || path.starts_with(&format!("{root}/"))
@@ -28419,11 +28864,854 @@ fn strip_json_fences(raw: &str) -> &str {
         .trim()
 }
 
+/// `rationale` is specified as a list of strings, but models routinely emit a
+/// list of objects instead — typically edit-shaped records carrying an
+/// `action` such as `"read"`, i.e. a plan to inspect files rather than the
+/// edits themselves. Accept both shapes so a recoverable formatting
+/// difference does not surface as an opaque hard parse failure.
+#[derive(Debug, Clone, Deserialize)]
+#[serde(untagged)]
+enum MasonRationaleEntry {
+    Text(String),
+    Structured(serde_json::Value),
+}
+
+impl MasonRationaleEntry {
+    fn into_text(self) -> String {
+        match self {
+            Self::Text(value) => value,
+            Self::Structured(value) => {
+                let field = |key: &str| {
+                    value
+                        .get(key)
+                        .and_then(serde_json::Value::as_str)
+                        .map(str::to_string)
+                };
+                match (field("path"), field("action"), field("summary")) {
+                    (Some(path), Some(action), Some(summary)) => {
+                        format!("{action} {path}: {summary}")
+                    }
+                    (Some(path), None, Some(summary)) => format!("{path}: {summary}"),
+                    (Some(path), Some(action), None) => format!("{action} {path}"),
+                    _ => value.to_string(),
+                }
+            }
+        }
+    }
+
+    fn is_read_action(&self) -> bool {
+        match self {
+            Self::Text(_) => false,
+            Self::Structured(value) => value
+                .get("action")
+                .and_then(serde_json::Value::as_str)
+                .is_some_and(|action| action.eq_ignore_ascii_case("read")),
+        }
+    }
+}
+
+/// Permissive mirror of `MasonEditProposal` used only for parsing. Every field
+/// defaults so that a missing one produces a specific diagnostic below rather
+/// than a serde error naming a field the operator never wrote.
+#[derive(Debug, Deserialize)]
+struct RawMasonEditProposal {
+    #[serde(default)]
+    summary: String,
+    #[serde(default)]
+    rationale: Vec<MasonRationaleEntry>,
+    #[serde(default)]
+    edits: Vec<MasonEdit>,
+}
+
+/// Output budget for Mason's edit lane. This is not an ordinary completion:
+/// the response must carry the *entire* `content` of every file written, so it
+/// scales with the size of the change, not with how much the model has to say.
+/// The former 8000 truncated a single new ~300-line module plus two small edits
+/// — and a truncated response is indistinguishable from a malformed one
+/// downstream, so the budget failed silently.
+///
+/// Providers clamp this to their own output ceiling, so a value larger than a
+/// given model supports is harmless.
+const MASON_EDIT_MAX_TOKENS: u32 = 32_000;
+
+fn mason_edit_max_tokens() -> u32 {
+    std::env::var("MASON_EDIT_MAX_TOKENS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(MASON_EDIT_MAX_TOKENS)
+}
+
+/// Turn budget for the opt-in tool loop. Each turn is a real, separately billed
+/// call, so this is a cost ceiling as much as a termination guarantee: enough
+/// room to list a directory, read two or three files and write a handful, and
+/// no room to wander.
+const MASON_TOOL_LOOP_MAX_TURNS: u32 = 12;
+
+fn mason_tool_loop_max_turns() -> u32 {
+    std::env::var("MASON_TOOL_LOOP_MAX_TURNS")
+        .ok()
+        .and_then(|value| value.trim().parse::<u32>().ok())
+        .filter(|value| *value > 0)
+        .unwrap_or(MASON_TOOL_LOOP_MAX_TURNS)
+}
+
+/// Outcome of scanning a model's JSON-ish response for the two malformations
+/// that show up constantly in edit proposals, plus the one condition that is
+/// not a malformation at all.
+struct ModelJsonRepair {
+    repaired: String,
+    /// The response ran out mid-value: unbalanced brackets, or ended inside a
+    /// string. Repairing this is not possible — the content is simply absent —
+    /// so it must be reported as a token-budget problem, not a format one.
+    truncated: bool,
+    quoted_keys: usize,
+    escaped_controls: usize,
+    escaped_quotes: usize,
+}
+
+/// Repair the JavaScript-object-literal habits models fall into when asked for
+/// JSON: unquoted object keys (`path: "x"`) and raw newlines inside string
+/// values instead of `\n`. Both leave a response that is complete and correct
+/// in substance but rejected by a strict parser.
+///
+/// Single pass, tracking string/escape state, so identifiers *inside* strings
+/// are never touched — the file contents Mason emits are full of `foo:` that
+/// must survive untouched.
+fn repair_model_json(raw: &str) -> ModelJsonRepair {
+    let chars: Vec<char> = raw.chars().collect();
+    let mut out = String::with_capacity(raw.len() + 64);
+    let mut in_string = false;
+    let mut escaped = false;
+    let mut depth: i32 = 0;
+    let mut quoted_keys = 0usize;
+    let mut escaped_controls = 0usize;
+    let mut escaped_quotes = 0usize;
+    let mut i = 0usize;
+
+    while i < chars.len() {
+        let ch = chars[i];
+
+        if in_string {
+            if escaped {
+                out.push(ch);
+                escaped = false;
+            } else {
+                match ch {
+                    '\\' => {
+                        out.push(ch);
+                        escaped = true;
+                    }
+                    '"' => {
+                        // A quote inside a string value is only a terminator if
+                        // the document continues structurally after it. Models
+                        // routinely leave literal quotes unescaped inside file
+                        // content ("Dad's Workshop"), which closes the string
+                        // early and corrupts everything after it.
+                        //
+                        // Heuristic, and it can be fooled: prose ending a quoted
+                        // phrase immediately before a comma reads as a
+                        // terminator. That misfire is rarer than the failure it
+                        // fixes, and it degrades to the same parse error we
+                        // would have had anyway.
+                        let mut lookahead = i + 1;
+                        while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+                            lookahead += 1;
+                        }
+                        let terminates = if lookahead >= chars.len() {
+                            true
+                        } else {
+                            match chars[lookahead] {
+                                '}' | ']' | ':' => true,
+                                // A comma alone is NOT enough. Mason's `content`
+                                // is source code, and `",` appears constantly
+                                // inside it (`lookat: "text",`). Treating those
+                                // as terminators ends the string mid-file and
+                                // then parses the code itself as JSON — which
+                                // can "succeed" and write corrupted files.
+                                // Require a real JSON key or object to follow.
+                                ',' => {
+                                    let mut after = lookahead + 1;
+                                    while after < chars.len() && chars[after].is_whitespace() {
+                                        after += 1;
+                                    }
+                                    match chars.get(after) {
+                                        Some('"') | Some('{') | None => true,
+                                        // A bare key may follow, since bare keys
+                                        // are exactly what this pass repairs.
+                                        // Indistinguishable from JS code inside a
+                                        // content string, so the guarantee that
+                                        // garbage is not applied comes from
+                                        // validate_mason_edits below, not here.
+                                        Some(c) if c.is_alphabetic() || *c == '_' => {
+                                            let mut end = after;
+                                            while end < chars.len()
+                                                && (chars[end].is_alphanumeric()
+                                                    || chars[end] == '_'
+                                                    || chars[end] == '-')
+                                            {
+                                                end += 1;
+                                            }
+                                            while end < chars.len() && chars[end].is_whitespace() {
+                                                end += 1;
+                                            }
+                                            chars.get(end) == Some(&':')
+                                        }
+                                        _ => false,
+                                    }
+                                }
+                                _ => false,
+                            }
+                        };
+                        if terminates {
+                            out.push(ch);
+                            in_string = false;
+                        } else {
+                            out.push_str("\\\"");
+                            escaped_quotes += 1;
+                        }
+                    }
+                    '\n' => {
+                        out.push_str("\\n");
+                        escaped_controls += 1;
+                    }
+                    '\r' => {
+                        out.push_str("\\r");
+                        escaped_controls += 1;
+                    }
+                    '\t' => {
+                        out.push_str("\\t");
+                        escaped_controls += 1;
+                    }
+                    control if (control as u32) < 0x20 => {
+                        out.push_str(&format!("\\u{:04x}", control as u32));
+                        escaped_controls += 1;
+                    }
+                    other => out.push(other),
+                }
+            }
+            i += 1;
+            continue;
+        }
+
+        match ch {
+            '"' => {
+                out.push(ch);
+                in_string = true;
+                i += 1;
+            }
+            '{' | '[' => {
+                depth += 1;
+                out.push(ch);
+                i += 1;
+            }
+            '}' | ']' => {
+                depth -= 1;
+                out.push(ch);
+                i += 1;
+            }
+            first if first.is_alphabetic() || first == '_' => {
+                let start = i;
+                let mut end = i;
+                while end < chars.len()
+                    && (chars[end].is_alphanumeric() || chars[end] == '_' || chars[end] == '-')
+                {
+                    end += 1;
+                }
+                let ident: String = chars[start..end].iter().collect();
+
+                let mut lookahead = end;
+                while lookahead < chars.len() && chars[lookahead].is_whitespace() {
+                    lookahead += 1;
+                }
+                let is_key = lookahead < chars.len()
+                    && chars[lookahead] == ':'
+                    && !matches!(ident.as_str(), "true" | "false" | "null");
+
+                if is_key {
+                    out.push('"');
+                    out.push_str(&ident);
+                    out.push('"');
+                    quoted_keys += 1;
+                } else {
+                    out.push_str(&ident);
+                }
+                i = end;
+            }
+            other => {
+                out.push(other);
+                i += 1;
+            }
+        }
+    }
+
+    ModelJsonRepair {
+        repaired: out,
+        truncated: in_string || depth > 0,
+        quoted_keys,
+        escaped_controls,
+        escaped_quotes,
+    }
+}
+
+/// Canonical key for duplicate-path detection: the sequence of real path
+/// segments (`Component::Normal` parts only — `.` and repeated/trailing
+/// separators contribute nothing, matching how the OS itself would resolve
+/// them). Two spellings of the same file — `js/hints.js`, `js//hints.js`,
+/// `js/hints.js/`, `js/./hints.js` — must collapse to the same key even
+/// though they are different strings, because they land on the same file at
+/// write time. A `..` component is deliberately *not* special-cased into an
+/// error here: `join_workspace_relative_path` already rejects any path
+/// containing one, loudly, before it is ever joined onto the staged
+/// workspace, so this key does not need to model `..`'s real filesystem
+/// semantics for a path that will never actually be written.
+fn path_dedup_key(path: &str) -> String {
+    Path::new(&normalize_project_path(path))
+        .components()
+        .filter_map(|component| match component {
+            Component::Normal(part) => Some(part.to_string_lossy().into_owned()),
+            _ => None,
+        })
+        .collect::<Vec<_>>()
+        .join("/")
+}
+
+/// Last line of defence before Mason writes to the operator's files.
+///
+/// The repair pass above cannot always tell a string terminator from a quote
+/// inside source code, so a mis-repair can yield something that parses but is
+/// really fragments of the model's own file content reinterpreted as
+/// structure. Those fragments do not survive these checks: paths come out
+/// multi-line, empty, or absurdly long. Failing here costs a re-run; not
+/// failing here costs a corrupted working tree.
+fn validate_mason_edits(edits: &[MasonEdit]) -> Result<()> {
+    for (index, edit) in edits.iter().enumerate() {
+        let path = edit.path.trim();
+        if path.is_empty() {
+            bail!("Mason edit #{index} has an empty path — the proposal did not parse coherently.");
+        }
+        if path.contains('\n') || path.contains('{') || path.contains('"') {
+            bail!(
+                "Mason edit #{index} has a path that is not a path ({path:?}). The response was \
+                 most likely mis-recovered, with file content read as structure — refusing to \
+                 apply it."
+            );
+        }
+        if path.len() > 200 {
+            bail!(
+                "Mason edit #{index} has an implausible {} character path — refusing to apply.",
+                path.len()
+            );
+        }
+    }
+
+    // Two edits targeting the same path is last-write-wins with no signal: the
+    // second silently clobbers the first, and — because each patch/file resolves
+    // against the pristine on-disk original independently — the earlier edit's
+    // intent simply vanishes. It also corrupts delta reporting, since the second
+    // edit's delta would be computed against the first edit's already-written
+    // content rather than the true original. Refusing costs a retry; guessing
+    // which edit the operator meant costs the file. This applies uniformly to
+    // every transport — two `### PATCH:` blocks on one path, two `### FILE:`
+    // blocks on one path, a patch and a file on one path, or duplicate JSON
+    // entries — because every one of them routes through this function.
+    //
+    // Every transport already normalizes `edit.path` at construction (via
+    // `normalize_project_path`), so a patch for `./js/hints.js` and a
+    // `### FILE:` block for `js/hints.js` collapse to the same *string*
+    // before they ever reach here. But `normalize_project_path` does not
+    // collapse repeated separators, a trailing separator, or an interior `.`
+    // component, so `js//hints.js`, `js/hints.js/`, and `js/./hints.js` all
+    // still read as distinct strings from `js/hints.js` even though they are
+    // the same real file — comparing strings alone misses exactly that class
+    // of collapse. `path_dedup_key` below compares the *component sequence*
+    // instead, using the same interpretation `join_workspace_relative_path`
+    // (the function that actually joins these paths onto the staged
+    // workspace at apply time) already enforces, so the duplicate check and
+    // the write can no longer disagree about whether two paths name the same
+    // file. A path containing `..` needs no special handling here: it
+    // produces a `Component::ParentDir`, which `join_workspace_relative_path`
+    // rejects outright — loudly, before anything is written — regardless of
+    // what this key computes for it.
+    let mut counts: HashMap<String, usize> = HashMap::new();
+    for edit in edits {
+        *counts.entry(path_dedup_key(&edit.path)).or_insert(0) += 1;
+    }
+    for edit in edits {
+        let key = path_dedup_key(&edit.path);
+        if let Some(&count) = counts.get(&key) {
+            if count > 1 {
+                bail!(
+                    "Mason proposed {count} edits all targeting {key:?} — refusing to apply, \
+                     since the later edit would silently overwrite the earlier one with no \
+                     signal. Combine them into a single edit."
+                );
+            }
+        }
+    }
+    Ok(())
+}
+
 fn parse_mason_edit_proposal(raw: &str) -> Result<MasonEditProposal> {
     let stripped = strip_json_fences(raw);
-    let proposal = serde_json::from_str::<MasonEditProposal>(stripped)
-        .with_context(|| "parsing Mason edit proposal JSON")?;
-    Ok(proposal)
+
+    let raw_proposal = match serde_json::from_str::<RawMasonEditProposal>(stripped) {
+        Ok(proposal) => proposal,
+        Err(strict_error) => {
+            let repair = repair_model_json(stripped);
+
+            // Truncation first: a cut-off response and a malformed one look
+            // identical to a parser, but only one of them is the operator's
+            // problem to fix, and the fix is a bigger token budget rather than
+            // a better prompt.
+            if repair.truncated {
+                bail!(
+                    "Mason's edit proposal was cut off mid-response after {} bytes — the JSON \
+                     never closes. This is a token-budget failure, not a formatting one: the \
+                     edit lane must return every file's full `content` in a single response. \
+                     Raise MASON_EDIT_MAX_TOKENS or narrow the spec's editable surface.",
+                    stripped.len()
+                );
+            }
+
+            serde_json::from_str::<RawMasonEditProposal>(&repair.repaired).map_err(
+                |repair_error| {
+                    // Report where the *repaired* document failed, not where the
+                    // original did. The original error points at damage the
+                    // repair already fixed, which sends the reader to the wrong
+                    // place entirely.
+                    anyhow::anyhow!(
+                        "parsing Mason edit proposal JSON. Strict parse: {strict_error}. \
+                         After repairing {} bare key(s), {} control character(s) and {} \
+                         unescaped quote(s): {repair_error}",
+                        repair.quoted_keys,
+                        repair.escaped_controls,
+                        repair.escaped_quotes
+                    )
+                },
+            )?
+        }
+    };
+
+    let planned_reads = raw_proposal
+        .rationale
+        .iter()
+        .filter(|entry| entry.is_read_action())
+        .count();
+    let rationale = raw_proposal
+        .rationale
+        .into_iter()
+        .map(MasonRationaleEntry::into_text)
+        .collect::<Vec<_>>();
+
+    // Normalize every path at construction, before validation ever sees it.
+    // The duplicate-path check in `validate_mason_edits` compares raw strings
+    // — if this transport left a path as `./js/hints.js` while another
+    // transport's edit for the same file read `js/hints.js`, the two would
+    // look distinct, pass validation, and silently collide on disk once both
+    // got normalized at apply time.
+    let mut edits = raw_proposal.edits;
+    for edit in edits.iter_mut() {
+        edit.path = normalize_project_path(&edit.path);
+    }
+
+    validate_mason_edits(&edits)?;
+
+    // An empty `edits` list parses cleanly but is not a proposal — it is the
+    // model declining to edit. Say which of the two it was, because "the model
+    // planned instead of editing" and "the model returned nothing" call for
+    // different responses from the operator.
+    if edits.is_empty() {
+        if planned_reads > 0 {
+            bail!(
+                "Mason returned a plan to inspect {planned_reads} file(s) rather than any edits. \
+                 The edit lane is single-shot: one response must carry every file write, each with \
+                 its full `content`. A model that expects to read files across multiple turns \
+                 cannot drive this lane."
+            );
+        }
+        bail!(
+            "Mason edit proposal contained no edits. Expected an `edits` array of \
+             {{path, action, summary, content}} objects."
+        );
+    }
+
+    Ok(MasonEditProposal {
+        summary: raw_proposal.summary,
+        rationale,
+        edits,
+    })
+}
+
+/// Try the fenced envelope first, then the legacy JSON object. Keeping both
+/// means a model that ignores the new instruction — or a cached prompt from a
+/// previous run — still produces a usable proposal.
+fn parse_mason_edit_response(raw: &str) -> Result<MasonEditProposal> {
+    match crate::mason_transport::parse_fenced_edits(raw) {
+        Ok(envelope) => {
+            let (summary, rationale, files) = envelope.into_edits();
+            let edits = files
+                .into_iter()
+                .map(|(path, content)| MasonEdit {
+                    path: normalize_project_path(&path),
+                    action: "write".to_string(),
+                    summary: String::new(),
+                    content,
+                })
+                .collect::<Vec<_>>();
+            validate_mason_edits(&edits)?;
+            Ok(MasonEditProposal {
+                summary,
+                rationale,
+                edits,
+            })
+        }
+        Err(fenced_error) => parse_mason_edit_proposal(raw).map_err(|json_error| {
+            anyhow::anyhow!(
+                "the response matched neither transport. Fenced: {fenced_error:#}. JSON: {json_error:#}"
+            )
+        }),
+    }
+}
+
+/// Patches are resolved to whole-file contents here, at the boundary, so that
+/// everything downstream — validation, the apply loop, delta reporting — keeps
+/// working on exactly one representation.
+fn parse_mason_edit_response_with_staged(
+    raw: &str,
+    staged_product: &Path,
+) -> Result<MasonEditProposal> {
+    // Route JSON to the JSON parser *first*, before either text transport gets
+    // a look.
+    //
+    // `parse_mason_edit_response` tries fenced, then falls back to JSON only on
+    // `Err`. A JSON edit proposal whose `content` carries literal newlines and
+    // documents the fenced format contains a line reading `### FILE: <path>`,
+    // and to `collect_fenced_edits` that is a real header at top level: the
+    // fenced parse *succeeds*, yielding one file literally named `<path>`.
+    // `validate_mason_edits` has no objection to that name, so the phantom file
+    // is written and every real edit in the proposal is discarded, with `Ok`
+    // returned. Reproduced.
+    //
+    // The alternative fix — requiring the fenced parse to account for the whole
+    // response — was rejected. It is a rejecting heuristic on the live path with
+    // a large false-positive surface (models routinely wrap correct blocks in
+    // prose), and a false rejection there is deterministic and costs the entire
+    // run. This is a *routing* decision instead: it changes only which parser is
+    // tried first, keeps the other as a fallback, and so cannot make any
+    // response that parses today stop parsing. A response written to
+    // `FENCED_FORMAT_INSTRUCTION` begins with `SUMMARY:`, never with `{`.
+    let json_first = strip_json_fences(raw).starts_with('{');
+    let json_error = if json_first {
+        match parse_mason_edit_proposal(raw) {
+            Ok(proposal) => return Ok(proposal),
+            Err(error) => Some(error),
+        }
+    } else {
+        None
+    };
+
+    // A near-miss marker spelling is not a parse error in either text
+    // transport — it is top-level prose, and so is every line of the block
+    // behind it. One correct block alongside one misspelled block therefore
+    // returned `Ok` with the misspelled file simply gone. Reject the whole
+    // response instead; a retry costs one attempt, a dropped file costs the
+    // operator a file they were told was written.
+    //
+    // Deliberately after the JSON route above: a JSON body's `content` string
+    // is opaque to the block tracker, so a proposal documenting `#### FILE:`
+    // would be rejected here even though the JSON parser handles it correctly.
+    // This scan guards the text lanes only.
+    if let Some(problem) = crate::mason_transport::unreadable_edit_marker(raw) {
+        match json_error {
+            Some(json_error) => bail!(
+                "the response matched neither transport. JSON: {json_error:#}. Fenced/patch: \
+                 {problem}"
+            ),
+            None => bail!("Mason's response carries an unreadable edit marker. {problem}"),
+        }
+    }
+
+    parse_mason_text_edits(raw, staged_product).map_err(|text_error| match json_error {
+        // The body opened with `{`, so JSON was tried first and failed. Report
+        // both failures: a JSON body that reaches the text transports produces
+        // a "no ### FILE: blocks were found" error that names the wrong
+        // problem entirely.
+        Some(json_error) => anyhow::anyhow!(
+            "the response matched neither transport. JSON: {json_error:#}. Fenced/patch: \
+             {text_error:#}"
+        ),
+        None => text_error,
+    })
+}
+
+/// The two text transports — `### FILE:` blocks and `### PATCH:` blocks —
+/// after [`parse_mason_edit_response_with_staged`] has ruled out a JSON body
+/// and rejected unreadable markers.
+fn parse_mason_text_edits(raw: &str, staged_product: &Path) -> Result<MasonEditProposal> {
+    // A syntactic pre-check, not a swallowed error: only treat this as a pure
+    // whole-file response when the raw text contains no *top-level* patch
+    // marker. Once one is present, `parse_patch_blocks` runs as a single
+    // state machine over the whole response — a grammar violation anywhere
+    // fails the entire parse, and that failure must propagate. Silently
+    // falling back to `parse_mason_edit_response` here previously let a
+    // malformed patch hide behind an accompanying, valid `### FILE:` block:
+    // the fenced parse would succeed, and the model's intended patch vanished
+    // with no error anywhere.
+    //
+    // A plain `raw.contains("### PATCH:")` is not enough: `PATCH_FORMAT_INSTRUCTION`
+    // is itself a complete example patch block and appears in every Mason
+    // system prompt, so a whole-file response that merely documents or quotes
+    // the format (plausible in a repo whose own source contains that string)
+    // would trip a naive substring check and be wrongly rejected, forever, on
+    // every retry. `has_top_level_patch_header` only matches a `### PATCH:`
+    // line that is not itself inside a `### FILE:` block's content.
+    if !crate::mason_transport::has_top_level_patch_header(raw) {
+        return parse_mason_edit_response(raw);
+    }
+
+    let patches = crate::mason_transport::parse_patch_blocks(raw)?;
+
+    let mut edits = Vec::new();
+    for patch in &patches {
+        let normalized = normalize_project_path(&patch.path);
+        let full = staged_product.join(&normalized);
+        let original = std::fs::read_to_string(&full).with_context(|| {
+            format!(
+                "patch targets {} but that file does not exist in the staged workspace",
+                patch.path
+            )
+        })?;
+        let patched = crate::mason_transport::apply_patch_block(&original, patch)?;
+        edits.push(MasonEdit {
+            path: normalized,
+            action: "write".to_string(),
+            summary: format!("patch {}", patch.path),
+            content: patched,
+        });
+    }
+
+    // SUMMARY/RATIONALE are extracted independent of whether any `### FILE:`
+    // block is present, so a patch-only response — the common case — still
+    // carries the model's summary and rationale into the run report and
+    // decision log instead of always coming back empty.
+    let (summary, rationale) = crate::mason_transport::parse_summary_and_rationale(raw);
+
+    // Whole-file blocks may accompany patches — new files cannot be patched.
+    // Normalized at construction, same as the patch-derived edits above, so a
+    // `### FILE:` block and a `### PATCH:` block naming the same real file
+    // under different spellings (`./js/hints.js` vs `js/hints.js`) still
+    // collide in `validate_mason_edits` instead of slipping past it as two
+    // distinct paths.
+    //
+    // `_optional`, and propagated with `?`, on purpose. A patch-only response
+    // legitimately has no `### FILE:` blocks, so their absence cannot be an
+    // error — but running this best-effort and ignoring the `Err` (as this
+    // once did) meant a file block the model *did* write vanished whenever it
+    // failed to parse for any other reason, while the patches beside it
+    // applied and the run reported success. `Ok(None)` is absence; every
+    // structural problem is an `Err` and rejects the response.
+    if let Some(envelope) = crate::mason_transport::parse_fenced_edits_optional(raw)? {
+        let (_envelope_summary, _envelope_rationale, files) = envelope.into_edits();
+        for (path, content) in files {
+            edits.push(MasonEdit {
+                path: normalize_project_path(&path),
+                action: "write".to_string(),
+                summary: String::new(),
+                content,
+            });
+        }
+    }
+
+    // Two edits targeting the same path (a duplicate patch, or a patch and a
+    // `### FILE:` block on the same path) are caught generically by
+    // `validate_mason_edits` below — every transport routes through it.
+    validate_mason_edits(&edits)?;
+    Ok(MasonEditProposal {
+        summary,
+        rationale,
+        edits,
+    })
+}
+
+/// Ask once, and if the response does not parse, show the model exactly how it
+/// failed and ask again. Models correct malformed output reliably when told
+/// what was wrong; before this, a single bad response ended the run.
+///
+/// Returns the last raw body alongside the result so the caller can still write
+/// `mason_raw_response.txt` for the attempt that actually failed.
+async fn complete_edit_proposal_with_retry(
+    provider: &dyn crate::llm::LlmProvider,
+    req: crate::llm::LlmRequest,
+    attempts: u32,
+    staged_product: &Path,
+) -> (Result<MasonEditProposal>, String) {
+    let mut messages = req.messages.clone();
+    let mut last_raw = String::new();
+    let mut last_error: Option<anyhow::Error> = None;
+
+    for attempt in 0..attempts.max(1) {
+        let this_req = crate::llm::LlmRequest {
+            messages: messages.clone(),
+            max_tokens: req.max_tokens,
+            temperature: req.temperature,
+        };
+        let response = match provider.complete(this_req).await {
+            Ok(response) => response,
+            Err(error) => return (Err(error), last_raw),
+        };
+        last_raw = response.content.clone();
+
+        let (_reasoning, body) = extract_reasoning(&response.content);
+        match parse_mason_edit_response_with_staged(body, staged_product) {
+            Ok(proposal) => return (Ok(proposal), last_raw),
+            Err(error) => {
+                if attempt + 1 < attempts.max(1) {
+                    messages.push(crate::llm::Message::assistant(response.content.clone()));
+                    messages.push(crate::llm::Message::user(format!(
+                        "Your previous response could not be used: {error:#}\n\n{}\n\n{}",
+                        crate::mason_transport::FENCED_FORMAT_INSTRUCTION,
+                        crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+                    )));
+                }
+                last_error = Some(error);
+            }
+        }
+    }
+
+    (
+        Err(last_error.unwrap_or_else(|| anyhow::anyhow!("no attempts were made"))),
+        last_raw,
+    )
+}
+
+/// Wraps an `LlmProvider` so every attempt's usage is accumulated rather than
+/// only the last one kept. `complete_edit_proposal_with_retry` may issue more
+/// than one real, separately billed call on a retry — summing here is what
+/// makes the eventual cost event reflect the true number of tokens spent, not
+/// just the tokens of whichever attempt happened to parse.
+struct UsageTrackingProvider<'a> {
+    inner: &'a dyn crate::llm::LlmProvider,
+    usage_total: std::sync::Mutex<Option<crate::llm::LlmUsage>>,
+}
+
+#[async_trait::async_trait]
+impl<'a> crate::llm::LlmProvider for UsageTrackingProvider<'a> {
+    async fn complete(&self, req: crate::llm::LlmRequest) -> Result<crate::llm::LlmResponse> {
+        let response = self.inner.complete(req).await?;
+        if let Some(usage) = response.usage.clone() {
+            let mut total = self.usage_total.lock().expect("lock");
+            *total = Some(match total.take() {
+                Some(existing) => crate::llm::LlmUsage {
+                    input_tokens: existing.input_tokens + usage.input_tokens,
+                    output_tokens: existing.output_tokens + usage.output_tokens,
+                    latency_ms: existing.latency_ms + usage.latency_ms,
+                },
+                None => usage,
+            });
+        }
+        Ok(response)
+    }
+}
+
+/// Keeps every assistant turn of a tool loop so `mason_raw_response.txt` is
+/// still written when the lane is multi-turn.
+///
+/// A wrapper rather than a field on `UsageTrackingProvider` because the two
+/// concerns are independent — the single-shot lane already has `last_raw` and
+/// needs no transcript — and because the loop must compose them
+/// (`transcript(usage(provider))`) without either knowing about the other.
+struct TranscriptProvider<'a> {
+    inner: &'a dyn crate::llm::LlmProvider,
+    transcript: std::sync::Mutex<String>,
+    last_response: std::sync::Mutex<String>,
+}
+
+#[async_trait::async_trait]
+impl<'a> crate::llm::LlmProvider for TranscriptProvider<'a> {
+    async fn complete(&self, req: crate::llm::LlmRequest) -> Result<crate::llm::LlmResponse> {
+        let response = self.inner.complete(req).await?;
+        {
+            let mut transcript = self.transcript.lock().expect("lock");
+            if !transcript.is_empty() {
+                transcript.push_str("\n\n--- next turn ---\n\n");
+            }
+            transcript.push_str(&response.content);
+        }
+        *self.last_response.lock().expect("lock") = response.content.clone();
+        Ok(response)
+    }
+}
+
+/// Routes each tool-loop write through the same invocation gateway host
+/// commands already go through, so a write Mason performed with a tool is
+/// visible in `tool_invocations.json` beside `pytest` and `git` — one log of
+/// everything an agent did, not one log per mechanism.
+struct MasonToolLoopRecorder<'a> {
+    app: &'a AppContext,
+    run_id: String,
+    cwd: PathBuf,
+}
+
+#[async_trait::async_trait]
+impl<'a> crate::mason_tools::MasonToolRecorder for MasonToolLoopRecorder<'a> {
+    async fn record_write(&self, path: &str, byte_len: usize) -> Result<bool> {
+        let assessment = ToolInvocationAssessment {
+            surface_type: "mason_tool".to_string(),
+            tool_name: "mason_tool_write".to_string(),
+            command: path.to_string(),
+            cwd: self.cwd.to_string_lossy().to_string(),
+            risk: "medium".to_string(),
+            // Not independently approval-gated: the write does not happen here.
+            // The loop only *records* it, and the batch is applied later behind
+            // the implementation transaction boundary and the workspace lease,
+            // both of which have already been cleared by the time this runs.
+            // Gating each write again would deadlock every tool-loop run at the
+            // first file for no additional protection.
+            approval_required: false,
+            reasons: vec![
+                format!("Mason tool loop proposed a {byte_len} byte write to {path}"),
+                "staged-workspace write inside the approved implementation transaction boundary"
+                    .to_string(),
+            ],
+        };
+        let mut record = self
+            .app
+            .ensure_tool_invocation_assessment_allowed(
+                &self.run_id,
+                "implementation",
+                "mason",
+                &self.cwd,
+                assessment,
+            )
+            .await?;
+        if !record.allowed {
+            return Ok(false);
+        }
+        // Close the record immediately, through the same helper host commands
+        // use. An invocation left open reads as one still running, and this one
+        // never will be: the gateway step is complete the moment the write is
+        // recorded. Whether the write then lands on disk is the business of
+        // `mason_edit_application.json`, and the note below says so rather than
+        // letting a `success: true` here be read as proof the file was written.
+        self.app
+            .finalize_tool_invocation_record(
+                &self.run_id,
+                &mut record,
+                &CommandOutcome {
+                    success: true,
+                    code: Some(0),
+                    stdout: format!(
+                        "Recorded a {byte_len} byte tool write to {path}. Applied later with the \
+                         rest of the Mason edit batch — see mason_edit_application.json for \
+                         whether it reached disk."
+                    ),
+                    stderr: String::new(),
+                },
+            )
+            .await?;
+        Ok(true)
+    }
 }
 
 fn copy_tree_contents(source_root: &Path, current: &Path, destination_root: &Path) -> Result<()> {
@@ -28843,6 +30131,97 @@ fn summarize_episode_state_diff(
         bytes_before: before.total_bytes,
         bytes_after: after.total_bytes,
     })
+}
+
+/// The section contract Mason's plan must satisfy.
+///
+/// This has to stay in step with what Coobie's critique enforces, because the
+/// critique gates the implementation boundary: a blocking concern pauses the
+/// run before Mason writes anything. The earlier contract asked for five
+/// sections while the critique judged the plan against the guardrails and
+/// required checks it was handed — so a plan could satisfy every word of its
+/// own instructions and still be blocked for omitting a planning-choices log
+/// nobody ever asked it to write. Runs 6488912b, 5dec7801 and 9b5e37c0 all
+/// died that way. The last four sections exist to answer the critique's
+/// standing demands directly.
+const MASON_PLAN_TASK_CONTRACT: &str = "You are Mason, an implementation planning specialist for a software factory. \
+You receive a YAML spec and operating constraints. Produce a clear, actionable implementation plan in Markdown. \
+Be specific and avoid filler.
+
+Required sections, all of them:
+## Target
+## Scope
+## Acceptance Criteria
+## Recommended Steps
+## Risks
+## Major Planning Choices Log — for each significant decision, record *Chosen*, *Rejected* (the alternatives you did not take) and *Justification*. Where the constraints name a learned intervention or an optimization program, reopen that alternative here and say plainly whether you are keeping or overturning the prior justification.
+## Stale Memory Revalidation — list every challenged or stale lesson named in the constraints by its exact identifier, and for each one state whether current file evidence confirms it, supersedes it, or leaves it unresolved.
+## Evidence Changes — if the constraints cite prior forge or run evidence, explain what has changed since that evidence before you claim any command path will now pass.
+## Twin Narrative & Missing Production Conditions — name which external systems are simulated, stubbed, or absent, and which production conditions the environment does not reproduce.
+
+Treat every guardrail and required check in the constraints as a hard requirement that the plan must visibly address, not merely respect.";
+
+/// Operator override that demotes Coobie's plan critique from blocking to
+/// advisory. **Off by default** — set `HARKONNEN_CRITIQUE_ADVISORY=1`.
+///
+/// The critique gates the implementation boundary: any blocking concern pauses
+/// the run before Mason writes, and there is no resume-into-implementation path
+/// once that happens, so a blocked run must be started over. The critic is an
+/// LLM judging a plan against a large auto-generated guardrail set, and it does
+/// not converge: across runs 7db36804, 108d08b7 and c3f7fe58 — same spec, each
+/// plan addressing the previous round's objections — it returned a different
+/// set of blockers every time. That makes "satisfy the critic" an unbounded
+/// loop rather than a fixable defect.
+///
+/// This does not discard the critique. The concerns are still written to
+/// `coobie_critique.json`, still logged, and still mark the blackboard blocker,
+/// so the reviewer sees exactly what was raised. It only stops them from
+/// halting the run, which is safe to opt into because Mason's edits land in a
+/// staged workspace and commit to a `mason/*` branch rather than to the
+/// operator's working tree.
+///
+/// Closing this properly is roadmap item v1-A (Guardrail Enforcement), which
+/// needs a real resume-into-implementation path; this is the interim control.
+fn critique_is_advisory() -> bool {
+    std::env::var("HARKONNEN_CRITIQUE_ADVISORY")
+        .map(|value| {
+            let value = value.trim().to_ascii_lowercase();
+            !value.is_empty() && value != "0" && value != "false"
+        })
+        .unwrap_or(false)
+}
+
+/// Upper bound on how much of the plan is handed to the critique. Generous on
+/// purpose: a Mason plan runs about 4–7 KB, so this holds a whole one with room
+/// to spare and only engages against a runaway generation.
+const CRITIQUE_PLAN_MAX_CHARS: usize = 24_000;
+
+/// Render the implementation plan for Coobie's critique **without silently
+/// dropping the back half of it**.
+///
+/// This used to be `plan.chars().take(3000)`. Coobie gates the implementation
+/// boundary — any blocking concern it raises pauses the run before Mason writes
+/// a line — and it was being asked to judge completeness from the first 3000
+/// characters of a ~7000 character document. Every plan longer than the cut
+/// therefore looked truncated *because it was*, and Coobie correctly reported
+/// the missing tail as missing sections. Measured on run 3b74a3e9: the window
+/// ended mid-sentence at "3. **Choice**: ", and the plan's Twin Narrative
+/// (char 3378) and Risks (char 6431) sections were never shown. All three
+/// blockers it returned were accurate descriptions of the truncated text.
+///
+/// If a plan ever does exceed the cap, the excerpt says so in-band, so the
+/// critic can tell a real omission from a display limit.
+fn critique_plan_excerpt(plan: &str) -> String {
+    if plan.chars().count() <= CRITIQUE_PLAN_MAX_CHARS {
+        return plan.to_string();
+    }
+
+    let head: String = plan.chars().take(CRITIQUE_PLAN_MAX_CHARS).collect();
+    format!(
+        "{head}\n\n[EXCERPT TRUNCATED at {CRITIQUE_PLAN_MAX_CHARS} characters for review. \
+         The plan continues past this point — do NOT report the sections below this line as \
+         missing.]"
+    )
 }
 
 fn build_implementation_transaction_boundary(
@@ -31350,6 +32729,1069 @@ mod tests {
     use serde_json::{json, Value};
     use std::sync::Mutex;
 
+    /// Regression for run a9bf44cf: a spec must be able to declare a file it
+    /// wants created. Before this, `js/bonus.js` resolved to nothing because it
+    /// did not exist, and Mason's proposal to create it was rejected as
+    /// "outside the editable scope".
+    #[test]
+    fn a_declared_path_resolves_before_the_file_exists() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().canonicalize().expect("canonicalize");
+        std::fs::create_dir_all(root.join("js")).expect("mkdir js");
+        std::fs::write(root.join("js/data.js"), "// existing\n").expect("write");
+
+        assert_eq!(
+            resolve_path_for_staged_workspace("js/data.js", &root, &root),
+            Some("js/data.js".to_string()),
+            "an existing file must still resolve"
+        );
+        assert_eq!(
+            resolve_path_for_staged_workspace("js/bonus.js", &root, &root),
+            Some("js/bonus.js".to_string()),
+            "a file that does not exist yet must resolve so it can be created"
+        );
+    }
+
+    /// Containment still holds for a missing path — the nearest existing
+    /// ancestor is what gets checked, so escaping the workspace is refused.
+    #[test]
+    fn a_missing_path_outside_the_workspace_is_still_refused() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path().canonicalize().expect("canonicalize");
+        std::fs::create_dir_all(root.join("inner")).expect("mkdir");
+        let inner = root.join("inner");
+
+        assert_eq!(
+            resolve_path_for_staged_workspace("../escape.js", &inner, &inner),
+            None,
+            "a missing path resolving outside the source root must not be editable"
+        );
+    }
+
+    /// The override must be opt-in, and must not trip on the spellings a person
+    /// would plausibly use to turn it *off*.
+    #[test]
+    fn critique_advisory_override_is_off_unless_explicitly_enabled() {
+        let restore = std::env::var("HARKONNEN_CRITIQUE_ADVISORY").ok();
+
+        std::env::remove_var("HARKONNEN_CRITIQUE_ADVISORY");
+        assert!(!critique_is_advisory(), "unset must block");
+
+        for off in ["0", "false", "", "  "] {
+            std::env::set_var("HARKONNEN_CRITIQUE_ADVISORY", off);
+            assert!(!critique_is_advisory(), "{off:?} must block");
+        }
+        for on in ["1", "true", "yes"] {
+            std::env::set_var("HARKONNEN_CRITIQUE_ADVISORY", on);
+            assert!(critique_is_advisory(), "{on:?} must be advisory");
+        }
+
+        match restore {
+            Some(value) => std::env::set_var("HARKONNEN_CRITIQUE_ADVISORY", value),
+            None => std::env::remove_var("HARKONNEN_CRITIQUE_ADVISORY"),
+        }
+    }
+
+    /// Regression for run 3b74a3e9. A realistic ~7 KB plan must reach the critic
+    /// whole; the old 3000-char cut sliced off the Twin Narrative and Risks
+    /// sections and the run was blocked for "missing" content that was present.
+    #[test]
+    fn critique_sees_the_whole_plan_not_just_the_first_3000_chars() {
+        let mut plan = String::from("## Target\nthe product\n\n### Major Planning Choices Log\n");
+        while plan.chars().count() < 3200 {
+            plan.push_str("1. **Choice**: a decision with rationale and alternatives.\n");
+        }
+        plan.push_str("\n## Twin Narrative & Missing Production Conditions\noffline only\n");
+        plan.push_str("\n## Risks\n| Pack Phase Breakdown | Medium | atomic edits |\n");
+
+        let excerpt = critique_plan_excerpt(&plan);
+
+        assert!(
+            excerpt.contains("Twin Narrative"),
+            "the section that used to fall past the cut must be visible"
+        );
+        assert!(
+            excerpt.contains("Pack Phase Breakdown"),
+            "the Risks table must be visible"
+        );
+        assert_eq!(excerpt, plan, "a normal plan must pass through untouched");
+    }
+
+    /// A runaway plan is still capped, but the cut is announced so the critic
+    /// does not report the truncation itself as a missing section.
+    #[test]
+    fn critique_excerpt_labels_truncation_when_the_plan_is_enormous() {
+        let plan = "x".repeat(CRITIQUE_PLAN_MAX_CHARS + 500);
+
+        let excerpt = critique_plan_excerpt(&plan);
+
+        assert!(excerpt.contains("EXCERPT TRUNCATED"));
+        assert!(excerpt.contains("do NOT report the sections below this line as missing"));
+        assert!(excerpt.chars().count() < plan.chars().count() + 400);
+    }
+
+    #[tokio::test]
+    async fn edit_proposal_retry_feeds_the_parse_error_back_and_succeeds() {
+        struct FlakyProvider {
+            calls: std::sync::Mutex<Vec<String>>,
+        }
+        #[async_trait::async_trait]
+        impl crate::llm::LlmProvider for FlakyProvider {
+            async fn complete(
+                &self,
+                req: crate::llm::LlmRequest,
+            ) -> Result<crate::llm::LlmResponse> {
+                let mut calls = self.calls.lock().expect("lock");
+                let last_user = req
+                    .messages
+                    .last()
+                    .map(|m| m.content.clone())
+                    .unwrap_or_default();
+                calls.push(last_user);
+                let content = if calls.len() == 1 {
+                    "{\"summary\":\"x\",\"edits\":[".to_string()
+                } else {
+                    r#"{"summary":"ok","rationale":[],"edits":[{"path":"js/a.js","action":"write","summary":"s","content":"x"}]}"#.to_string()
+                };
+                Ok(crate::llm::LlmResponse {
+                    content,
+                    usage: None,
+                })
+            }
+        }
+
+        let provider = FlakyProvider {
+            calls: std::sync::Mutex::new(Vec::new()),
+        };
+        let req = crate::llm::LlmRequest {
+            messages: vec![crate::llm::Message::user("edit please".to_string())],
+            max_tokens: 4000,
+            temperature: 0.1,
+        };
+
+        let staged_dir = tempfile::tempdir().expect("tempdir");
+        let (result, _raw) =
+            complete_edit_proposal_with_retry(&provider, req, 2, staged_dir.path()).await;
+        let proposal = result.expect("second attempt must succeed");
+
+        assert_eq!(proposal.edits.len(), 1);
+        let calls = provider.calls.lock().expect("lock");
+        assert_eq!(calls.len(), 2, "must retry exactly once");
+        assert!(
+            calls[1].contains("cut off mid-response") || calls[1].contains("did not parse"),
+            "the retry must carry the parse failure back to the model, got: {}",
+            calls[1]
+        );
+    }
+
+    #[test]
+    fn edit_response_prefers_the_fenced_envelope_and_falls_back_to_json() {
+        let fenced = "SUMMARY: add room\nRATIONALE:\n- because\n\n### FILE: js/bonus.js\nG.rooms.bonus = { a: \"b\", };\n### END FILE\n";
+        let from_fenced = parse_mason_edit_response(fenced).expect("fenced must parse");
+        assert_eq!(from_fenced.edits.len(), 1);
+        assert_eq!(from_fenced.edits[0].path, "js/bonus.js");
+        assert_eq!(from_fenced.edits[0].action, "write");
+        assert!(from_fenced.edits[0].content.contains(r#"a: "b""#));
+
+        let json = r#"{"summary":"s","rationale":[],"edits":[{"path":"js/a.js","action":"write","summary":"s","content":"x"}]}"#;
+        let from_json = parse_mason_edit_response(json).expect("json must still parse");
+        assert_eq!(from_json.edits[0].path, "js/a.js");
+    }
+
+    #[test]
+    fn edit_response_routes_fenced_output_through_edit_validation() {
+        // A path that is really source code must be refused on the fenced path too.
+        let bad = "SUMMARY: x\n\n### FILE: G.rooms = {\n### END FILE\n";
+        assert!(parse_mason_edit_response(bad).is_err());
+    }
+
+    #[test]
+    fn patches_resolve_against_staged_files_into_whole_file_edits() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::create_dir_all(staged.join("js")).expect("mkdir");
+        std::fs::write(staged.join("js/hints.js"), "const HINTS = [\n  'a',\n];\n").expect("write");
+
+        let raw = "SUMMARY: add a hint\n\n### PATCH: js/hints.js\n<<<<<<< SEARCH\n  'a',\n=======\n  'a',\n  'b',\n>>>>>>> REPLACE\n";
+
+        let proposal = parse_mason_edit_response_with_staged(raw, staged).expect("must resolve");
+
+        assert_eq!(proposal.edits.len(), 1);
+        assert_eq!(proposal.edits[0].path, "js/hints.js");
+        assert!(proposal.edits[0].content.contains("'b',"));
+        assert!(
+            proposal.edits[0].content.contains("const HINTS"),
+            "unpatched regions must be preserved"
+        );
+    }
+
+    #[test]
+    fn a_patch_against_a_missing_file_is_refused_clearly() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let raw =
+            "SUMMARY: x\n\n### PATCH: js/nope.js\n<<<<<<< SEARCH\na\n=======\nb\n>>>>>>> REPLACE\n";
+        let error = parse_mason_edit_response_with_staged(raw, dir.path()).expect_err("must fail");
+        assert!(format!("{error:#}").contains("js/nope.js"));
+    }
+
+    #[test]
+    fn a_malformed_patch_with_a_valid_file_block_errors_instead_of_silently_dropping() {
+        // Regression for a silent Critical: a broken ### PATCH: block used to
+        // vanish without a trace whenever the response also carried a valid
+        // ### FILE: block, because the patch parse error was swallowed and
+        // the fenced parse succeeded on the FILE block alone.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let raw = "SUMMARY: x\n\n### FILE: js/other.js\nnew content\n### END FILE\n\n### PATCH: js/hints.js\n<<<<<<< SEARCH\na\n=======\nb\n";
+        let error = parse_mason_edit_response_with_staged(raw, dir.path()).expect_err(
+            "a malformed patch must not be silently dropped just because a valid FILE block is present",
+        );
+        assert!(
+            format!("{error:#}").contains("never closed"),
+            "expected the patch grammar error to propagate, got: {error:#}"
+        );
+    }
+
+    #[test]
+    fn two_patches_on_the_same_path_are_rejected_not_last_write_wins() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("hints.js"), "line a\nline b\nline c\n").expect("write");
+
+        let raw = "SUMMARY: x\n\n### PATCH: hints.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### PATCH: hints.js\n<<<<<<< SEARCH\nline c\n=======\nLINE C\n>>>>>>> REPLACE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged)
+            .expect_err("two patches on one path must be refused, not last-write-wins");
+        let msg = format!("{error:#}");
+        assert!(
+            msg.contains("hints.js"),
+            "error must name the duplicated path, got: {msg}"
+        );
+        assert!(
+            msg.contains('2'),
+            "error should note how many edits targeted it, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_patch_and_a_file_block_on_the_same_path_are_rejected() {
+        // Deliberately uses different spellings of the same real file
+        // (`./hints.js` vs `hints.js`) — a test that used byte-identical
+        // spellings on both sides would pass even with the path-normalization
+        // gap present, since exact-string duplicate detection alone already
+        // caught that case. This is the case that actually exercises
+        // normalize-before-compare.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("hints.js"), "line a\n").expect("write");
+
+        let raw = "SUMMARY: x\n\n### PATCH: ./hints.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: hints.js\nwhole new content\n### END FILE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged).expect_err(
+            "a patch and a whole-file block on the same real file, spelled differently, must be refused",
+        );
+        let msg = format!("{error:#}");
+        assert!(
+            msg.contains("hints.js"),
+            "error must name the duplicated path (normalized), got: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_whole_file_response_quoting_the_patch_format_is_not_rejected() {
+        // PATCH_FORMAT_INSTRUCTION is a complete example patch block and now
+        // appears in every Mason system prompt, so a whole-file response that
+        // documents or quotes it back (plausible in a repo whose own source
+        // contains this string) must not be mistaken for a real patch by a
+        // naive substring check on "### PATCH:".
+        let dir = tempfile::tempdir().expect("tempdir");
+        let raw = format!(
+            "SUMMARY: document the patch format\n\n### FILE: docs/PATCHES.md\n{}\n### END FILE\n",
+            crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+        );
+
+        let proposal = parse_mason_edit_response_with_staged(&raw, dir.path())
+            .expect("a whole-file response merely quoting the patch format must not be rejected");
+        assert_eq!(proposal.edits.len(), 1);
+        assert_eq!(proposal.edits[0].path, "docs/PATCHES.md");
+        assert!(proposal.edits[0]
+            .content
+            .contains("### PATCH: <relative/path>"));
+    }
+
+    #[test]
+    fn a_real_patch_with_a_file_block_quoting_the_format_resolves_both_edits() {
+        // The deeper break behind the naive substring pre-check:
+        // parse_patch_blocks itself is a flat state machine with no
+        // ### FILE: awareness, so before this fix it would also scan the doc
+        // file's content, find the quoted PATCH_FORMAT_INSTRUCTION example
+        // (syntactically valid patch grammar), and parse it as a bogus second
+        // patch targeting the literal path "<relative/path>" — which fails to
+        // resolve and rejects the whole response, including the real patch.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("real.js"), "line a\n").expect("write");
+
+        let raw = format!(
+            "SUMMARY: fix and document\n\n### PATCH: real.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: docs/PATCHES.md\n{}\n### END FILE\n",
+            crate::mason_transport::PATCH_FORMAT_INSTRUCTION
+        );
+
+        let proposal = parse_mason_edit_response_with_staged(&raw, staged).expect(
+            "a real top-level patch plus a FILE block quoting the patch format must resolve, \
+             not be rejected because of the quoted example",
+        );
+
+        assert_eq!(
+            proposal.edits.len(),
+            2,
+            "both the patch and the file must survive"
+        );
+        let real = proposal
+            .edits
+            .iter()
+            .find(|edit| edit.path == "real.js")
+            .expect("the real patch's edit must be present");
+        assert!(real.content.contains("LINE A"));
+        let docs = proposal
+            .edits
+            .iter()
+            .find(|edit| edit.path == "docs/PATCHES.md")
+            .expect("the quoting file's edit must be present");
+        assert!(docs.content.contains("### PATCH: <relative/path>"));
+    }
+
+    #[test]
+    fn double_slash_and_single_slash_spellings_of_one_path_are_rejected_as_duplicates() {
+        // Path::components() silently collapses repeated separators, so
+        // "js//hints.js" and "js/hints.js" are different strings but the same
+        // real file. normalize_project_path does not collapse this, so a
+        // string-based duplicate check misses it entirely.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::create_dir_all(staged.join("js")).expect("mkdir");
+        std::fs::write(staged.join("js/hints.js"), "line a\n").expect("write");
+
+        let raw = "SUMMARY: x\n\n### PATCH: js/hints.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: js//hints.js\nwhole new content\n### END FILE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged).expect_err(
+            "js//hints.js and js/hints.js name the same real file and must be rejected as duplicates",
+        );
+        let msg = format!("{error:#}");
+        assert!(
+            msg.contains("hints.js"),
+            "error must name the duplicated path, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_trailing_slash_spelling_of_a_path_is_rejected_as_a_duplicate() {
+        // Same collapse as the double-slash case, from the other end:
+        // "js/hints.js/" and "js/hints.js" are the same real file.
+        // The weird spelling is deliberately carried by a ### FILE: block
+        // (rather than a second ### PATCH:) so this test exercises duplicate
+        // detection specifically, rather than incidentally failing earlier
+        // because a trailing-slash path can't be opened for read on POSIX
+        // when the target is a regular file (ENOTDIR).
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::create_dir_all(staged.join("js")).expect("mkdir");
+        std::fs::write(staged.join("js/hints.js"), "line a\n").expect("write");
+
+        let raw = "SUMMARY: x\n\n### PATCH: js/hints.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: js/hints.js/\nwhole new content\n### END FILE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged).expect_err(
+            "js/hints.js/ and js/hints.js name the same real file and must be rejected as duplicates",
+        );
+        let msg = format!("{error:#}");
+        assert!(
+            msg.contains("hints.js"),
+            "error must name the duplicated path, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn a_parent_dir_component_is_rejected_loudly_by_the_containment_guard() {
+        // Pinning the coordinator's correction: ".." is not a silent clobber.
+        // join_workspace_relative_path -- the same function both the
+        // validation loop and the write loop in mason_generate_and_apply_edits
+        // use to resolve an edit's path onto the staged workspace -- bails on
+        // any non-Normal path component, so a ".." escape attempt fails
+        // loudly, before anything is written, rather than being silently
+        // resolved or silently colliding with another edit.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let error = join_workspace_relative_path(dir.path(), "js/sub/../hints.js")
+            .expect_err("a path containing .. must be rejected, not silently resolved");
+        assert!(
+            format!("{error:#}").contains("escapes"),
+            "expected the containment guard's error, got: {error:#}"
+        );
+    }
+
+    #[test]
+    fn a_patch_after_an_unclosed_file_block_is_not_silently_dropped() {
+        // Reproduction of a silent Critical: patch, then a ### FILE: block
+        // that never closes, then a second genuine, complete patch. The
+        // FILE-block tracker inside parse_patch_blocks opened on the unclosed
+        // block and consumed every remaining line, so the second patch never
+        // reached the patch state machine at all — and because that machine
+        // was left at section 0, its own end-of-input guard stayed quiet.
+        // The result was Ok with one edit: b.js was never written, and the run
+        // report said success without ever mentioning it.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("a.js"), "line a\n").expect("write");
+        std::fs::write(staged.join("b.js"), "line b\n").expect("write");
+
+        let raw = "SUMMARY: two edits\n\n### PATCH: a.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: broken.js\nthis block is never terminated\n\n### PATCH: b.js\n<<<<<<< SEARCH\nline b\n=======\nLINE B\n>>>>>>> REPLACE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged).expect_err(
+            "an unclosed ### FILE: block hides every later edit, so the response must be refused \
+             rather than silently applied minus the edits it hid",
+        );
+        let msg = format!("{error:#}");
+        assert!(
+            msg.contains("never closed"),
+            "expected a truncation error, got: {msg}"
+        );
+        assert!(
+            msg.contains("broken.js"),
+            "the error must name the block that swallowed the rest, got: {msg}"
+        );
+    }
+
+    #[test]
+    fn patches_interleaved_with_a_file_block_all_survive() {
+        // The well-formed twin of a_patch_after_an_unclosed_file_block_...:
+        // the same patch / ### FILE: / patch ordering, with the file block
+        // properly closed. Rejecting an unclosed block must not come at the
+        // cost of this shape, which is the one Mason actually emits when it
+        // edits two files and creates a third.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("a.js"), "line a\n").expect("write");
+        std::fs::write(staged.join("b.js"), "line b\n").expect("write");
+
+        let raw = "SUMMARY: three edits\n\n### PATCH: a.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: c.js\nbrand new\n### END FILE\n\n### PATCH: b.js\n<<<<<<< SEARCH\nline b\n=======\nLINE B\n>>>>>>> REPLACE\n";
+
+        let proposal =
+            parse_mason_edit_response_with_staged(raw, staged).expect("all three must resolve");
+
+        let mut paths: Vec<&str> = proposal.edits.iter().map(|e| e.path.as_str()).collect();
+        paths.sort_unstable();
+        assert_eq!(paths, vec!["a.js", "b.js", "c.js"]);
+        let by_path = |want: &str| {
+            proposal
+                .edits
+                .iter()
+                .find(|e| e.path == want)
+                .unwrap_or_else(|| panic!("{want} must be present"))
+        };
+        assert_eq!(by_path("a.js").content, "LINE A\n");
+        assert_eq!(by_path("b.js").content, "LINE B\n");
+        // The `### FILE:` transport gives every file exactly one trailing
+        // newline, matching what the patch lane produces from the on-disk
+        // original beside it.
+        assert_eq!(by_path("c.js").content, "brand new\n");
+        assert_eq!(proposal.summary, "three edits");
+    }
+
+    #[test]
+    fn a_near_miss_marker_is_rejected_rather_than_dropping_the_block_behind_it() {
+        // C1. Before this, each of these returned Ok with only `a.js` present:
+        // a near-miss header is top-level prose to `collect_fenced_edits`, and
+        // so is every line of the block behind it. One correct block made the
+        // whole run "succeed" while the operator lost a file.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("b.js"), "old b\n").expect("write");
+
+        let cases = [
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n\n#### FILE: b.js\nbbb\n#### END FILE\n",
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n\n### File: b.js\nbbb\n### End File\n",
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n\n###FILE: b.js\nbbb\n###END FILE\n",
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n\n## FILE: b.js\nbbb\n## END FILE\n",
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n\n#### PATCH: b.js\n<<<<<<< SEARCH\nold b\n=======\nnew b\n>>>>>>> REPLACE\n",
+            "SUMMARY: x\n\n### PATCH: b.js\n<<<<<<< SEARCH\nold b\n=======\nnew b\n>>>>>>> REPLACE\n\n#### FILE: a.js\naaa\n#### END FILE\n",
+        ];
+        for raw in cases {
+            let error = parse_mason_edit_response_with_staged(raw, staged)
+                .expect_err("a misspelled block must reject the response, not vanish from it");
+            let message = format!("{error:#}");
+            assert!(
+                message.contains("looks like") && message.contains("marker"),
+                "the error must name the near-miss marker, got: {message}"
+            );
+        }
+    }
+
+    #[test]
+    fn a_well_formed_response_survives_the_near_miss_scan() {
+        // The expensive direction. A false rejection here is deterministic:
+        // the model re-emits the same text, the scan refuses it identically,
+        // both attempts drain and the whole run is lost.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("b.js"), "old b\n").expect("write");
+
+        let allowed = [
+            "SUMMARY: x\n\n### FILE: a.js\naaa\n### END FILE\n",
+            "SUMMARY: x\n\n## Files changed\n## Patch notes\n\n### FILE: a.js\naaa\n### END FILE\n\nDone.\n",
+            // A file that documents the near-miss spellings — this repo has
+            // several. Those lines are that file's content.
+            "SUMMARY: x\n\n### FILE: docs/format.md\n#### FILE: example\n#### END FILE\n### END FILE\n",
+            "SUMMARY: x\n\n### PATCH: b.js\n<<<<<<< SEARCH\nold b\n=======\nnew b\n>>>>>>> REPLACE\n",
+        ];
+        for raw in allowed {
+            parse_mason_edit_response_with_staged(raw, staged)
+                .unwrap_or_else(|error| panic!("must still parse {raw:?}: {error:#}"));
+        }
+    }
+
+    #[test]
+    fn a_json_proposal_documenting_the_fenced_format_is_not_read_as_a_fenced_response() {
+        // C2. `parse_mason_edit_response` tried fenced first and fell back to
+        // JSON only on Err — and the fenced parse *succeeds* on this body,
+        // yielding one file literally named `<path>`. `validate_mason_edits`
+        // has no objection to that name, so the phantom file was written and
+        // every real edit was discarded, with Ok returned.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+
+        let raw = "{\n  \"summary\": \"document the transport\",\n  \"rationale\": [\"docs\"],\n  \
+                   \"edits\": [\n    {\n      \"path\": \"docs/transport.md\",\n      \
+                   \"action\": \"write\",\n      \"summary\": \"describe it\",\n      \
+                   \"content\": \"Mason writes files like this:\n### FILE: <path>\nthe contents\n\
+                   ### END FILE\nand that is the whole format.\"\n    }\n  ]\n}";
+
+        // The defect, still reachable through the fenced parser directly.
+        let fenced = crate::mason_transport::parse_fenced_edits(raw)
+            .expect("the fenced parser is happy with this — that is the defect");
+        assert_eq!(fenced.files[0].path, "<path>");
+
+        // The routed path recovers the real proposal.
+        let proposal = parse_mason_edit_response_with_staged(raw, staged)
+            .expect("a JSON body must be routed to the JSON parser");
+        let paths: Vec<&str> = proposal.edits.iter().map(|e| e.path.as_str()).collect();
+        assert_eq!(paths, vec!["docs/transport.md"]);
+        assert!(
+            proposal.edits[0].content.contains("### FILE: <path>"),
+            "the documented format is this file's content and must survive verbatim"
+        );
+    }
+
+    #[test]
+    fn blocked_prefixes_are_denied_however_wide_the_editable_scope_is() {
+        // I6. `resolve_path_for_staged_workspace` returns "." for any spec
+        // whose `code_under_test` names the product root, and the `root == "."`
+        // arm then said yes to everything. With `git_branch: true` the staged
+        // file is copied into the real repository before `git add` refuses it,
+        // and `.git/config` carries `core.fsmonitor` / `core.pager`, which git
+        // executes as shell commands.
+        let whole_repo = vec![".".to_string()];
+        for denied in [
+            ".git/config",
+            ".git/hooks/pre-commit",
+            "sub/.git/config",
+            "target/release/x",
+            "a/target/x",
+            "factory/state.db",
+            "node_modules/x/index.js",
+            ".harkonnen/state",
+        ] {
+            assert!(
+                !path_allowed_for_edit(denied, &whole_repo),
+                "{denied} must be denied even when the whole repo is editable"
+            );
+        }
+
+        // Naming them explicitly does not grant them either.
+        assert!(!path_allowed_for_edit(".git/config", &[".git".to_string()]));
+
+        // And ordinary product source is untouched.
+        for allowed in ["js/hints.js", "src/main.rs", "docs/README.md"] {
+            assert!(
+                path_allowed_for_edit(allowed, &whole_repo),
+                "{allowed} must still be editable"
+            );
+        }
+
+        // The over-blocking direction, which is the one that costs a run: the
+        // test is on whole path *components*, so no near-neighbour of a blocked
+        // directory name is caught by it.
+        for allowed in [
+            ".gitignore",
+            ".gitattributes",
+            ".github/workflows/ci.yml",
+            "src/building.rs",
+            "docs/targeting.md",
+            "src/factory_floor.rs",
+        ] {
+            assert!(
+                path_allowed_for_edit(allowed, &whole_repo),
+                "{allowed} is not a blocked directory and must stay editable"
+            );
+        }
+    }
+
+    #[test]
+    fn a_patch_body_containing_file_markers_does_not_invent_a_phantom_file() {
+        // A patch that edits a file documenting the edit format carries
+        // `### FILE:` / `### END FILE` lines inside its SEARCH and REPLACE
+        // bodies. Those belong to the patch. Reading them as a whole-file
+        // block writes a file the model never asked for — silently, since
+        // nothing downstream can tell an invented edit from a requested one.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::create_dir_all(staged.join("docs")).expect("mkdir");
+        std::fs::write(
+            staged.join("docs/format.md"),
+            "intro\n### FILE: phantom\nbody\n### END FILE\noutro\n",
+        )
+        .expect("write");
+
+        let raw = "SUMMARY: rewrite the example\n\n### PATCH: docs/format.md\n<<<<<<< SEARCH\n### FILE: phantom\nbody\n### END FILE\n=======\nrewritten\n>>>>>>> REPLACE\n";
+
+        let proposal =
+            parse_mason_edit_response_with_staged(raw, staged).expect("the patch must resolve");
+        assert_eq!(
+            proposal.edits.len(),
+            1,
+            "only the patched file may be written, got: {:?}",
+            proposal.edits.iter().map(|e| &e.path).collect::<Vec<_>>()
+        );
+        assert_eq!(proposal.edits[0].path, "docs/format.md");
+        assert_eq!(proposal.edits[0].content, "intro\nrewritten\noutro\n");
+    }
+
+    #[test]
+    fn a_malformed_file_block_beside_a_valid_patch_is_not_silently_dropped() {
+        // The mirror of a_malformed_patch_with_a_valid_file_block_...: the
+        // fenced parse used to run best-effort here, so a file block the
+        // model meant to write could fail to parse and vanish while the
+        // accompanying patch applied and the run reported success.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("a.js"), "line a\n").expect("write");
+
+        let raw = "SUMMARY: x\n\n### PATCH: a.js\n<<<<<<< SEARCH\nline a\n=======\nLINE A\n>>>>>>> REPLACE\n\n### FILE: outer.txt\nfirst\n### FILE: inner.txt\nsecond\n### END FILE\n";
+
+        let error = parse_mason_edit_response_with_staged(raw, staged).expect_err(
+            "a file block that does not parse must be reported, not dropped because the patch \
+             beside it happened to succeed",
+        );
+        assert!(
+            format!("{error:#}").contains("still open"),
+            "expected the nested-marker error to propagate, got: {error:#}"
+        );
+    }
+
+    #[test]
+    fn summary_and_rationale_survive_a_patch_only_response() {
+        // Regression for a silent Important: summary/rationale used to come
+        // back empty for every patch-only response, since recovery was gated
+        // on parse_fenced_edits succeeding, which bails when no FILE blocks
+        // exist — true for the common case of a pure patch response.
+        let dir = tempfile::tempdir().expect("tempdir");
+        let staged = dir.path();
+        std::fs::write(staged.join("hints.js"), "line a\n").expect("write");
+
+        let raw = "SUMMARY: add a hint\nRATIONALE:\n- keeps the pattern consistent\n\n### PATCH: hints.js\n<<<<<<< SEARCH\nline a\n=======\nline A\n>>>>>>> REPLACE\n";
+
+        let proposal = parse_mason_edit_response_with_staged(raw, staged).expect("must resolve");
+        assert_eq!(proposal.summary, "add a hint");
+        assert_eq!(
+            proposal.rationale,
+            vec!["keeps the pattern consistent".to_string()]
+        );
+    }
+
+    #[tokio::test]
+    async fn usage_tracking_provider_accumulates_usage_across_retries() {
+        struct TwoAttemptProvider {
+            calls: std::sync::Mutex<u32>,
+        }
+        #[async_trait::async_trait]
+        impl crate::llm::LlmProvider for TwoAttemptProvider {
+            async fn complete(
+                &self,
+                _req: crate::llm::LlmRequest,
+            ) -> Result<crate::llm::LlmResponse> {
+                let mut calls = self.calls.lock().expect("lock");
+                *calls += 1;
+                let content = if *calls == 1 {
+                    "{\"summary\":\"x\",\"edits\":[".to_string()
+                } else {
+                    r#"{"summary":"ok","rationale":[],"edits":[{"path":"js/a.js","action":"write","summary":"s","content":"x"}]}"#.to_string()
+                };
+                Ok(crate::llm::LlmResponse {
+                    content,
+                    usage: Some(crate::llm::LlmUsage {
+                        input_tokens: 100,
+                        output_tokens: 50,
+                        latency_ms: 10,
+                    }),
+                })
+            }
+        }
+
+        let inner = TwoAttemptProvider {
+            calls: std::sync::Mutex::new(0),
+        };
+        let tracker = UsageTrackingProvider {
+            inner: &inner,
+            usage_total: std::sync::Mutex::new(None),
+        };
+        let req = crate::llm::LlmRequest {
+            messages: vec![crate::llm::Message::user("edit please".to_string())],
+            max_tokens: 4000,
+            temperature: 0.1,
+        };
+
+        let staged_dir = tempfile::tempdir().expect("tempdir");
+        let (result, _raw) =
+            complete_edit_proposal_with_retry(&tracker, req, 2, staged_dir.path()).await;
+        result.expect("second attempt must succeed");
+
+        let total = tracker
+            .usage_total
+            .lock()
+            .expect("lock")
+            .clone()
+            .expect("usage must have been recorded");
+        assert_eq!(
+            total.input_tokens, 200,
+            "usage must accumulate across both attempts, not just track the last one"
+        );
+        assert_eq!(total.output_tokens, 100);
+        assert_eq!(total.latency_ms, 20);
+    }
+
+    /// Both malformations Gemini produced in one response: bare object keys
+    /// (`path:` rather than `"path":`) and a literal newline inside a string
+    /// value. The substance was correct; only the syntax was JavaScript.
+    #[test]
+    fn mason_proposal_repairs_bare_keys_and_raw_newlines() {
+        let raw = "{\n  \"summary\": \"add bonus room\",\n  \"rationale\": [\"followed G.rooms shape\"],\n  edits: [\n    {\n      path: \"js/bonus.js\",\n      action: \"create\",\n      summary: \"bonus room\",\n      content: \"G.rooms.bonus = {\nid: 'bonus'\n};\"\n    }\n  ]\n}";
+
+        let proposal =
+            parse_mason_edit_proposal(raw).expect("a JS-literal proposal must be recovered");
+
+        assert_eq!(proposal.edits.len(), 1);
+        assert_eq!(proposal.edits[0].path, "js/bonus.js");
+        assert!(
+            proposal.edits[0].content.contains("G.rooms.bonus"),
+            "file content must survive the repair intact"
+        );
+        assert!(
+            proposal.edits[0].content.contains('\n'),
+            "escaped newlines must decode back to real ones, got {:?}",
+            proposal.edits[0].content
+        );
+    }
+
+    /// Verbatim failure from gemini-flash-latest: a README body containing
+    /// `("Dad's Workshop")` with the inner quotes unescaped, which closed the
+    /// JSON string early and corrupted everything after it.
+    #[test]
+    fn mason_proposal_repairs_unescaped_quotes_in_content() {
+        let raw = r#"{"summary":"add room","rationale":["r"],"edits":[{"path":"README.md","action":"write","summary":"docs","content":"The bonus room ("Dad's Workshop") is optional."}]}"#;
+
+        let proposal =
+            parse_mason_edit_proposal(raw).expect("unescaped inner quotes must be recovered");
+
+        assert_eq!(proposal.edits.len(), 1);
+        assert!(
+            proposal.edits[0].content.contains(r#"("Dad's Workshop")"#),
+            "the quoted phrase must survive intact, got {:?}",
+            proposal.edits[0].content
+        );
+    }
+
+    /// The dangerous case. Mason's `content` is source code, so `",` occurs
+    /// constantly inside it. An earlier version of the repair treated every
+    /// `",` as a string terminator, ended the content string mid-file, and then
+    /// parsed the JavaScript itself as JSON structure — quoting 118 "keys" that
+    /// were really game code. A repair that succeeds wrongly is worse than one
+    /// that fails, because the result gets written to the operator's files.
+    #[test]
+    fn json_repair_does_not_end_a_string_at_code_that_merely_looks_structural() {
+        let raw = r#"{"summary":"s","rationale":[],"edits":[{"path":"js/bonus.js","action":"write","summary":"room","content":"G.rooms.bonus = { id: \"bonus\", verbs: { lookat: \"A dusty attic\", open: \"It creaks\" } };"}]}"#;
+
+        let proposal = parse_mason_edit_proposal(raw).expect("valid input must parse");
+
+        assert_eq!(
+            proposal.edits.len(),
+            1,
+            "the code must stay one content value"
+        );
+        assert!(
+            proposal.edits[0].content.contains("lookat:")
+                && proposal.edits[0].content.contains("open:"),
+            "JS object keys inside content must survive verbatim, got {:?}",
+            proposal.edits[0].content
+        );
+
+        let repair = repair_model_json(raw);
+        assert_eq!(
+            repair.quoted_keys, 0,
+            "nothing inside the content string is a JSON key"
+        );
+    }
+
+    /// A mis-recovered proposal must never reach the filesystem. This is the
+    /// shape a bad repair produces: file content reinterpreted as structure,
+    /// leaving "paths" that are really fragments of source code.
+    #[test]
+    fn mason_edits_with_code_shaped_paths_are_refused() {
+        let bogus = vec![MasonEdit {
+            path: "G.rooms.bonus = {\n  id: \"bonus\"".to_string(),
+            action: "write".to_string(),
+            summary: "s".to_string(),
+            content: "x".to_string(),
+        }];
+        let error = validate_mason_edits(&bogus).expect_err("code-shaped path must be refused");
+        assert!(format!("{error:#}").contains("not a path"));
+
+        let empty = vec![MasonEdit {
+            path: "   ".to_string(),
+            action: "write".to_string(),
+            summary: "s".to_string(),
+            content: "x".to_string(),
+        }];
+        assert!(
+            validate_mason_edits(&empty).is_err(),
+            "empty path must be refused"
+        );
+
+        let good = vec![MasonEdit {
+            path: "js/bonus.js".to_string(),
+            action: "write".to_string(),
+            summary: "s".to_string(),
+            content: "x".to_string(),
+        }];
+        assert!(validate_mason_edits(&good).is_ok(), "a real path must pass");
+    }
+
+    /// The repair must not swallow a genuine structural quote: every value here
+    /// ends legitimately, and the document must round-trip unchanged.
+    #[test]
+    fn json_repair_keeps_real_string_terminators() {
+        let raw = r#"{"summary":"a","rationale":["b","c"],"edits":[{"path":"x","action":"create","summary":"s","content":"c"}]}"#;
+        let repair = repair_model_json(raw);
+
+        assert_eq!(repair.escaped_quotes, 0, "no quote here is a literal");
+        assert_eq!(repair.repaired, raw);
+        assert!(parse_mason_edit_proposal(raw).is_ok());
+    }
+
+    /// Identifiers inside string values must never be treated as keys — Mason's
+    /// `content` fields are full of `foo:` that has to survive untouched.
+    #[test]
+    fn json_repair_leaves_colons_inside_strings_alone() {
+        let raw = r#"{"summary": "uses id: bonus and name: Attic", "edits": []}"#;
+        let repair = repair_model_json(raw);
+
+        assert_eq!(
+            repair.quoted_keys, 0,
+            "nothing inside a string is a key, got {:?}",
+            repair.repaired
+        );
+        assert_eq!(repair.repaired, raw, "a valid document must be unchanged");
+        assert!(!repair.truncated);
+    }
+
+    /// A response cut off by the token budget must say so. Previously this was
+    /// indistinguishable from malformed output, which sent the operator looking
+    /// at the model's formatting instead of at max_tokens.
+    #[test]
+    fn mason_proposal_reports_truncation_as_a_budget_failure() {
+        let truncated = r#"{"summary": "add room", "edits": [{"path": "js/bonus.js", "action": "create", "summary": "Add a"#;
+
+        let error = parse_mason_edit_proposal(truncated).expect_err("truncated input must fail");
+        let rendered = format!("{error:#}");
+
+        assert!(
+            rendered.contains("cut off mid-response"),
+            "truncation must be named as such, got: {rendered}"
+        );
+        assert!(
+            rendered.contains("MASON_EDIT_MAX_TOKENS"),
+            "the operator needs the knob that fixes it, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn mason_edit_budget_is_overridable_and_defaults_high_enough_for_a_module() {
+        // Guards the regression directly: 8000 could not hold one new module
+        // plus two small edits.
+        assert!(MASON_EDIT_MAX_TOKENS >= 32_000);
+        assert_eq!(mason_edit_max_tokens(), MASON_EDIT_MAX_TOKENS);
+    }
+
+    /// Verbatim shape returned by a local 9B model (crow-9b-heretic-4.6) when
+    /// asked for an edit proposal: objects in `rationale`, which is typed as
+    /// a list of strings, and no `edits` at all. It had understood the task —
+    /// it named the right three files — but answered with a plan to read them
+    /// first, which the single-shot edit lane cannot use.
+    const CROW_PLAN_INSTEAD_OF_EDITS: &str = r#"{
+        "summary": "Reading project structure to understand room pattern before creating bonus level.",
+        "rationale": [
+            {"path": "js/data.js", "action": "read", "summary": "Examining G.rooms.living for canonical room shape."},
+            {"path": "js/hints.js", "action": "read", "summary": "Learn the hint ladder format."}
+        ]
+    }"#;
+
+    #[test]
+    fn mason_proposal_reports_a_read_plan_as_such_not_as_a_parse_error() {
+        let error = parse_mason_edit_proposal(CROW_PLAN_INSTEAD_OF_EDITS)
+            .expect_err("a proposal with no edits must fail");
+        let rendered = format!("{error:#}");
+
+        assert!(
+            rendered.contains("plan to inspect 2 file(s)"),
+            "the operator needs to know the model planned instead of editing, got: {rendered}"
+        );
+        assert!(
+            !rendered.contains("parsing Mason edit proposal JSON"),
+            "objects in rationale are recoverable and must not read as a JSON parse failure, got: {rendered}"
+        );
+    }
+
+    #[test]
+    fn mason_proposal_accepts_object_rationale_alongside_real_edits() {
+        let raw = r#"{
+            "summary": "Add the bonus room.",
+            "rationale": [
+                "followed the existing room shape",
+                {"path": "js/data.js", "action": "read", "summary": "canonical room shape"}
+            ],
+            "edits": [
+                {"path": "js/bonus.js", "action": "create", "summary": "bonus room", "content": "G.rooms.bonus = {};"}
+            ]
+        }"#;
+
+        let proposal = parse_mason_edit_proposal(raw).expect("object rationale must be accepted");
+
+        assert_eq!(proposal.edits.len(), 1);
+        assert_eq!(proposal.edits[0].path, "js/bonus.js");
+        assert_eq!(
+            proposal.rationale,
+            vec![
+                "followed the existing room shape".to_string(),
+                "read js/data.js: canonical room shape".to_string(),
+            ],
+            "structured rationale entries must be flattened to readable lines"
+        );
+    }
+
+    #[test]
+    fn mason_proposal_distinguishes_empty_edits_from_a_read_plan() {
+        let error = parse_mason_edit_proposal(r#"{"summary": "nothing to do", "rationale": []}"#)
+            .expect_err("no edits must fail");
+        let rendered = format!("{error:#}");
+
+        assert!(rendered.contains("contained no edits"), "got: {rendered}");
+        assert!(
+            !rendered.contains("plan to inspect"),
+            "there was no read plan here, got: {rendered}"
+        );
+    }
+
+    /// Regression test for the project scan reporting almost nothing about a
+    /// real codebase. The old detector probed ~22 hardcoded names, so a
+    /// vanilla-JS game -- js/, css/, index.html, no dependency manifest --
+    /// scanned as just README.md, and its ~9700 lines of source were invisible
+    /// to the planning phases that consume this manifest.
+    #[test]
+    fn project_scan_sees_a_project_with_no_recognized_manifest() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("index.html"), "<html></html>").expect("write index");
+        std::fs::write(root.join("README.md"), "# game").expect("write readme");
+        std::fs::create_dir(root.join("js")).expect("create js");
+        std::fs::create_dir(root.join("css")).expect("create css");
+        std::fs::create_dir(root.join("docs")).expect("create docs");
+        std::fs::create_dir(root.join("node_modules")).expect("create node_modules");
+        std::fs::create_dir(root.join(".git")).expect("create .git");
+
+        let files = detect_project_files(root);
+        let directories = detect_project_directories(root);
+
+        assert!(
+            files.contains(&"index.html".to_string()),
+            "index.html should be visible even though it is not a recognized marker, got {files:?}"
+        );
+        assert!(
+            directories.contains(&"js".to_string()) && directories.contains(&"css".to_string()),
+            "source directories should be visible, got {directories:?}"
+        );
+
+        // docs/ is a directory. It used to appear in the file candidate list
+        // too, so it was reported under "Detected Files" as well.
+        assert!(
+            !files.contains(&"docs".to_string()),
+            "docs/ is a directory and must not be reported as a file, got {files:?}"
+        );
+        assert!(directories.contains(&"docs".to_string()));
+
+        // Build output and dotfiles are noise, not project shape.
+        assert!(!directories.contains(&"node_modules".to_string()));
+        assert!(!directories.contains(&".git".to_string()));
+
+        // Recognized names lead, so the briefing opens with the high-signal entry.
+        assert_eq!(files.first().map(String::as_str), Some("README.md"));
+    }
+
+    /// The scan must say when it did not recognize the project, rather than
+    /// reporting a thin result that reads like a complete one.
+    #[test]
+    fn runtime_hints_admit_when_the_layout_was_not_recognized() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("index.html"), "<html></html>").expect("write index");
+        std::fs::create_dir(root.join("js")).expect("create js");
+
+        let files = detect_project_files(root);
+        let directories = detect_project_directories(root);
+        let commands = detect_project_commands(root);
+        let hints = detect_runtime_hints(root, &files, &directories, &commands);
+
+        assert!(
+            hints
+                .iter()
+                .any(|hint| hint.contains("NOT been identified")),
+            "an unrecognized layout must be disclosed, got {hints:?}"
+        );
+        assert!(
+            hints
+                .iter()
+                .any(|hint| hint.contains("No build or test command could be inferred")),
+            "an empty command list must be disclosed, got {hints:?}"
+        );
+    }
+
+    /// A recognized project must not trigger the disclosure hints, or they
+    /// become noise that operators learn to ignore.
+    #[test]
+    fn runtime_hints_stay_quiet_for_a_recognized_project() {
+        let dir = tempfile::tempdir().expect("tempdir");
+        let root = dir.path();
+        std::fs::write(root.join("Cargo.toml"), "[package]").expect("write manifest");
+        std::fs::create_dir(root.join("src")).expect("create src");
+
+        let files = detect_project_files(root);
+        let directories = detect_project_directories(root);
+        let commands = detect_project_commands(root);
+        let hints = detect_runtime_hints(root, &files, &directories, &commands);
+
+        assert!(!hints
+            .iter()
+            .any(|hint| hint.contains("NOT been identified")));
+        assert!(!hints
+            .iter()
+            .any(|hint| hint.contains("No build or test command could be inferred")));
+    }
+
     type OpenBrainThoughts = Arc<Mutex<Vec<String>>>;
 
     async fn spawn_openbrain_round_trip_mock() -> (String, OpenBrainThoughts) {
@@ -31511,9 +33953,10 @@ mod tests {
             } else {
                 Arc::new(crate::memory::NoopSemanticMemory)
             };
-        let causal_graph = Arc::new(crate::causal_graph::NoopCausalGraphStore::new(
+        let causal_graph = crate::causal_graph::build_store(
             crate::causal_graph::CausalGraphConfig::from(&paths.setup.typedb),
-        ));
+        )
+        .await;
         let app = AppContext {
             paths,
             pool,
@@ -32641,6 +35084,7 @@ mod tests {
                 continuity_file: Some("trail-state.json".to_string()),
                 llm_edits: true,
                 git_branch: false,
+                tool_loop: false,
             }),
             test_commands: vec!["pytest -q".to_string()],
         };
@@ -33508,5 +35952,29 @@ mod tests {
             "approved": true
         })));
         assert_eq!(shape, "keys:approved+scope");
+    }
+
+    #[test]
+    fn edit_delta_flags_a_rewrite_that_loses_most_of_the_file() {
+        let before = (0..100)
+            .map(|i| format!("line {i}"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let after = "line 0\nline 1";
+
+        let delta = summarize_edit_delta(Some(&before), after);
+
+        assert_eq!(delta.lines_before, 100);
+        assert_eq!(delta.lines_after, 2);
+        assert!(!delta.created);
+        assert!(delta.shrank_sharply(), "a 98% reduction must be flagged");
+    }
+
+    #[test]
+    fn edit_delta_treats_a_new_file_as_creation_not_shrinkage() {
+        let delta = summarize_edit_delta(None, "a\nb\nc");
+        assert!(delta.created);
+        assert!(!delta.shrank_sharply());
+        assert_eq!(delta.lines_before, 0);
     }
 }

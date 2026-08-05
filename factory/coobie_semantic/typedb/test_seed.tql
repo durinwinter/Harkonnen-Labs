@@ -1,0 +1,73 @@
+# Throwaway fixture data for the Phase 6 live-query integration test
+# (tests/typedb_causal_graph.rs).
+#
+# NOT part of the production write-back path. This is hand-written test-only
+# data: it exists solely to prove that `TypeDbCausalGraphStore::query()`
+# (src/causal_graph.rs) returns a real, typed answer to Coobie's causal
+# question ("what caused recent failures on this spec?") against a real
+# TypeDB instance. Nothing in the production code path reads this file.
+#
+# Shaped to satisfy every clause of the live query in src/causal_graph.rs:
+#   $episode isa episode, has run-id "<run_id>";
+#   $outcome isa outcome, has status "failed";
+#   (episode-context: $episode, outcome: $outcome) isa produced-outcome;
+#   $failure isa failure-mode, has label $flabel, has summary $fsummary;
+#   (failure: $failure, outcome: $outcome) isa classifies-failure;
+#   (cause: $cause, effect: $episode, link: $link) isa causally-connects;
+#   $link isa causal-link, has relation-kind $rel, has confidence $conf;
+#
+# Two candidate causes feed one failed effect episode, so the test can also
+# assert confidence-descending sort order (proven working by Task 4).
+#
+# Also includes two DECOY causal chains that are otherwise fully valid/
+# complete but must NEVER appear in the query's results, because the query
+# scopes on run-id "seed-run-1" AND outcome status "failed":
+#   - "decoy-run-other": a complete chain (episode -> produced-outcome ->
+#     failed outcome -> classifies-failure -> failure-mode, plus a
+#     causally-connects cause/effect/link) but tagged with run-id
+#     "seed-run-other" instead of "seed-run-1". If the query's `has run-id`
+#     filter were ever dropped, this decoy would leak into the results.
+#   - "decoy-not-failed": a complete chain within run-id "seed-run-1" (so it
+#     would pass the run-id filter), but its outcome has status "passed", not
+#     "failed". If the query's `has status "failed"` filter were ever
+#     dropped, this decoy would leak into the results.
+# Both decoys use a distinct failure-mode label prefixed "Decoy" and a
+# confidence above 0.85 (the real top hit), so a leak would be unmistakable:
+# it would sort to position 0 and fail the exact-value assertions in the test
+# immediately, not just change the hit count.
+
+insert
+  $ep1 isa episode, has episode-id "seed-ep-1", has run-id "seed-run-1", has spec-id "seed-spec", has phase "implementation";
+  $ep2 isa episode, has episode-id "seed-ep-2", has run-id "seed-run-1", has spec-id "seed-spec", has phase "implementation";
+  $ep3 isa episode, has episode-id "seed-ep-3", has run-id "seed-run-1", has spec-id "seed-spec", has phase "validation";
+  $outcome isa outcome, has outcome-id "seed-outcome-1", has status "failed", has summary "validation failed: assertion mismatch", has confidence 0.9;
+  (episode-context: $ep3, outcome: $outcome) isa produced-outcome;
+  $failure isa failure-mode, has failure-mode-id "seed-fm-1", has label "WrongAnswer", has summary "Test asserted the wrong value";
+  (failure: $failure, outcome: $outcome) isa classifies-failure;
+  $link1 isa causal-link, has causal-link-id "seed-link-1", has relation-kind "phase_sequence", has pearl-level "Associational", has epistemic-warrant "Associational", has warrant-gap false, has confidence 0.85, has structural-spec-json "{}";
+  (cause: $ep1, effect: $ep3, link: $link1) isa causally-connects;
+  $link2 isa causal-link, has causal-link-id "seed-link-2", has relation-kind "resource_contention", has pearl-level "Associational", has epistemic-warrant "Associational", has warrant-gap false, has confidence 0.4, has structural-spec-json "{}";
+  (cause: $ep2, effect: $ep3, link: $link2) isa causally-connects;
+
+  # --- Decoy 1: different-run chain (must be excluded by the `has run-id`
+  # filter). Otherwise a complete, valid causal chain.
+  $dro_cause isa episode, has episode-id "decoy-run-other-ep-cause", has run-id "seed-run-other", has spec-id "seed-spec", has phase "implementation";
+  $dro_effect isa episode, has episode-id "decoy-run-other-ep-effect", has run-id "seed-run-other", has spec-id "seed-spec", has phase "validation";
+  $dro_outcome isa outcome, has outcome-id "decoy-run-other-outcome", has status "failed", has summary "decoy: should never appear (wrong run)", has confidence 0.99;
+  (episode-context: $dro_effect, outcome: $dro_outcome) isa produced-outcome;
+  $dro_failure isa failure-mode, has failure-mode-id "decoy-run-other-fm", has label "DecoyWrongRun", has summary "decoy failure mode: wrong run, must not appear";
+  (failure: $dro_failure, outcome: $dro_outcome) isa classifies-failure;
+  $dro_link isa causal-link, has causal-link-id "decoy-run-other-link", has relation-kind "decoy_wrong_run", has pearl-level "Associational", has epistemic-warrant "Associational", has warrant-gap false, has confidence 0.99, has structural-spec-json "{}";
+  (cause: $dro_cause, effect: $dro_effect, link: $dro_link) isa causally-connects;
+
+  # --- Decoy 2: same-run but non-failed-outcome chain (must be excluded by
+  # the `has status "failed"` filter). Otherwise a complete, valid causal
+  # chain, correctly scoped to run-id "seed-run-1".
+  $dnf_cause isa episode, has episode-id "decoy-not-failed-ep-cause", has run-id "seed-run-1", has spec-id "seed-spec", has phase "implementation";
+  $dnf_effect isa episode, has episode-id "decoy-not-failed-ep-effect", has run-id "seed-run-1", has spec-id "seed-spec", has phase "validation";
+  $dnf_outcome isa outcome, has outcome-id "decoy-not-failed-outcome", has status "passed", has summary "decoy: should never appear (not failed)", has confidence 0.95;
+  (episode-context: $dnf_effect, outcome: $dnf_outcome) isa produced-outcome;
+  $dnf_failure isa failure-mode, has failure-mode-id "decoy-not-failed-fm", has label "DecoyNotFailed", has summary "decoy failure mode: not failed, must not appear";
+  (failure: $dnf_failure, outcome: $dnf_outcome) isa classifies-failure;
+  $dnf_link isa causal-link, has causal-link-id "decoy-not-failed-link", has relation-kind "decoy_not_failed", has pearl-level "Associational", has epistemic-warrant "Associational", has warrant-gap false, has confidence 0.95, has structural-spec-json "{}";
+  (cause: $dnf_cause, effect: $dnf_effect, link: $dnf_link) isa causally-connects;

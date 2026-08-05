@@ -3,131 +3,167 @@
 # TypeDB 3.x target schema for typed cross-run causal queries. This file is a
 # contract for the upcoming Rust driver adapter; SQLite remains the hot path
 # until the adapter is live.
+#
+# TypeDB 3.x schema syntax notes (discovered against a live 3.12.1 server,
+# not assumed from docs):
+#   - Type declarations use the "kind-first" form (`attribute x, value string;`,
+#     `relation x, relates a;`, `entity x, owns a, plays r:role;`), not the
+#     TypeDB 2.x `x sub attribute, value string;` form. The `sub attribute`
+#     form parses but fails at define-time with a "[SYR1] type not found"
+#     error pointing back at the very type being declared.
+#   - Within a single `define` query, a type must be declared before it is
+#     referenced by `owns` or `plays`. Attributes are declared first (no
+#     forward dependencies), then relations (their `relates` roles have no
+#     forward dependencies either), and finally entities, whose `owns` and
+#     `plays` clauses reference the attribute and relation:role types above.
+#   - `relation` is a reserved word and cannot be used as an attribute name
+#     even in the correct kind-first syntax; the `causal-link.relation`
+#     attribute from the original scaffold is renamed to `relation-kind`
+#     here (see task-2 report).
 
 define
 
-agent sub entity,
+attribute agent-name, value string;
+attribute agent-role, value string;
+attribute goal-id, value string;
+attribute episode-id, value string;
+attribute run-id, value string;
+attribute spec-id, value string;
+attribute phase, value string;
+attribute started-at, value datetime;
+attribute ended-at, value datetime;
+attribute observation-id, value string;
+attribute action-id, value string;
+attribute outcome-id, value string;
+attribute artifact-id, value string;
+attribute lesson-id, value string;
+attribute failure-mode-id, value string;
+attribute causal-link-id, value string;
+attribute summary, value string;
+attribute status, value string;
+attribute path, value string;
+attribute artifact-kind, value string;
+attribute label, value string;
+attribute relation-kind, value string;
+attribute pearl-level, value string;
+attribute epistemic-warrant, value string;
+attribute warrant-gap, value boolean;
+attribute structural-spec-json, value string;
+attribute provenance, value string;
+attribute observed-at, value datetime;
+attribute score, value double;
+attribute confidence, value double;
+
+relation participated-in,
+    relates participant,
+    relates episode-context;
+
+relation episode-goal,
+    relates episode-context,
+    relates target-goal;
+
+relation observed-in,
+    relates observation,
+    relates episode-context;
+
+relation acted-in,
+    relates action,
+    relates episode-context;
+
+relation produced-outcome,
+    relates episode-context,
+    relates outcome;
+
+relation produced-artifact,
+    relates episode-context,
+    relates artifact;
+
+relation learned-from,
+    relates lesson,
+    relates episode-context;
+
+relation classifies-failure,
+    relates failure,
+    relates outcome;
+
+relation causally-connects,
+    relates cause,
+    relates effect,
+    relates link;
+
+entity agent,
     owns agent-name,
-    owns agent-role;
+    owns agent-role,
+    plays participated-in:participant;
 
-goal sub entity,
+entity goal,
     owns goal-id,
-    owns summary;
+    owns summary,
+    plays episode-goal:target-goal;
 
-episode sub entity,
+entity episode,
     owns episode-id,
     owns run-id,
     owns spec-id,
     owns phase,
     owns started-at,
-    owns ended-at;
+    owns ended-at,
+    plays participated-in:episode-context,
+    plays episode-goal:episode-context,
+    plays observed-in:episode-context,
+    plays acted-in:episode-context,
+    plays produced-outcome:episode-context,
+    plays produced-artifact:episode-context,
+    plays learned-from:episode-context,
+    plays causally-connects:cause,
+    plays causally-connects:effect;
 
-observation sub entity,
+entity observation,
     owns observation-id,
     owns summary,
     owns score,
-    owns observed-at;
+    owns observed-at,
+    plays observed-in:observation;
 
-action sub entity,
+entity action,
     owns action-id,
     owns summary,
-    owns phase;
+    owns phase,
+    plays acted-in:action;
 
-outcome sub entity,
+entity outcome,
     owns outcome-id,
     owns status,
     owns summary,
-    owns confidence;
+    owns confidence,
+    plays produced-outcome:outcome,
+    plays classifies-failure:outcome;
 
-artifact sub entity,
+entity artifact,
     owns artifact-id,
     owns path,
-    owns artifact-kind;
+    owns artifact-kind,
+    plays produced-artifact:artifact;
 
-lesson sub entity,
+entity lesson,
     owns lesson-id,
     owns summary,
     owns confidence,
-    owns provenance;
+    owns provenance,
+    plays learned-from:lesson;
 
-failure-mode sub entity,
+entity failure-mode,
     owns failure-mode-id,
     owns label,
-    owns summary;
+    owns summary,
+    plays classifies-failure:failure;
 
-causal-link sub entity,
+entity causal-link,
     owns causal-link-id,
-    owns relation,
+    owns relation-kind,
     owns pearl-level,
     owns epistemic-warrant,
     owns warrant-gap,
     owns confidence,
-    owns structural-spec-json;
-
-participated-in sub relation,
-    relates participant,
-    relates episode-context;
-
-episode-goal sub relation,
-    relates episode-context,
-    relates target-goal;
-
-observed-in sub relation,
-    relates observation,
-    relates episode-context;
-
-acted-in sub relation,
-    relates action,
-    relates episode-context;
-
-produced-outcome sub relation,
-    relates episode-context,
-    relates outcome;
-
-produced-artifact sub relation,
-    relates episode-context,
-    relates artifact;
-
-learned-from sub relation,
-    relates lesson,
-    relates episode-context;
-
-classifies-failure sub relation,
-    relates failure,
-    relates outcome;
-
-causally-connects sub relation,
-    relates cause,
-    relates effect,
-    relates link;
-
-agent-name sub attribute, value string;
-agent-role sub attribute, value string;
-goal-id sub attribute, value string;
-episode-id sub attribute, value string;
-run-id sub attribute, value string;
-spec-id sub attribute, value string;
-phase sub attribute, value string;
-started-at sub attribute, value datetime;
-ended-at sub attribute, value datetime;
-observation-id sub attribute, value string;
-action-id sub attribute, value string;
-outcome-id sub attribute, value string;
-artifact-id sub attribute, value string;
-lesson-id sub attribute, value string;
-failure-mode-id sub attribute, value string;
-causal-link-id sub attribute, value string;
-summary sub attribute, value string;
-status sub attribute, value string;
-path sub attribute, value string;
-artifact-kind sub attribute, value string;
-label sub attribute, value string;
-relation sub attribute, value string;
-pearl-level sub attribute, value string;
-epistemic-warrant sub attribute, value string;
-warrant-gap sub attribute, value boolean;
-structural-spec-json sub attribute, value string;
-provenance sub attribute, value string;
-observed-at sub attribute, value datetime;
-score sub attribute, value double;
-confidence sub attribute, value double;
+    owns structural-spec-json,
+    plays causally-connects:link;

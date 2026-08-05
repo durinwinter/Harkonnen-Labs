@@ -15,7 +15,7 @@ default = "codex"
 
 [providers.codex]
 type         = "lmstudio"
-model        = "crow-9b-opus-4.6-distill-heretic_qwen3.5"
+model        = "crow-9b-heretic-4.6"
 api_key_env  = ""
 enabled      = true
 usage_rights = "local"

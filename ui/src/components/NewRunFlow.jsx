@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import OperatorModelFlow from './OperatorModelFlow';
 import ActionCardTile from './ActionCardTile';
 import { getActionCard, NEW_RUN_MODE_CARD_IDS } from './actionCards';
@@ -26,6 +26,35 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
   const [pickerLoading, setPickerLoading] = useState(false);
   const [pickerError, setPickerError] = useState('');
   const [runHiddenScenarios, setRunHiddenScenarios] = useState(true);
+  const [catalog, setCatalog] = useState([]);
+  const [catalogLoaded, setCatalogLoaded] = useState(false);
+
+  // The backend resolves a product name to <repo root>/products/<name> and
+  // fails if that directory does not exist, so the set of valid names is
+  // exactly the set of directories under products/. Load it up front to offer
+  // completions and to catch a bad name before it becomes a raw path error.
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const res = await fetch(`${API_BASE}/fs/directories?path=products`);
+        if (!res.ok) return;
+        const data = await res.json();
+        if (cancelled) return;
+        const names = Array.isArray(data.directories)
+          ? data.directories.map(entry => entry.name).filter(Boolean)
+          : [];
+        setCatalog(names);
+        setCatalogLoaded(true);
+      } catch {
+        // Non-fatal: without a catalog the field simply behaves as it did
+        // before, and the backend still rejects an unknown product.
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   async function loadDirectories(nextPath = '') {
     setPickerLoading(true);
@@ -95,6 +124,18 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
   async function startRun() {
     const trimmedProduct = product.trim();
     const trimmedProjectPath = projectPath.trim();
+
+    // A project path wins over the product name, so only validate the name
+    // when it is the thing that will actually be sent.
+    if (!trimmedProjectPath && trimmedProduct && catalogLoaded && !catalog.includes(trimmedProduct)) {
+      setLaunchError(
+        catalog.length
+          ? `No product named "${trimmedProduct}". Known products: ${catalog.join(', ')}. Pick one, or use Browse to point at a project path instead.`
+          : `No product named "${trimmedProduct}", and products/ is empty. Create products/${trimmedProduct}/ first, or use Browse to point at a project path instead.`
+      );
+      return;
+    }
+
     setLaunching(true);
     setLaunchError('');
     try {
@@ -111,6 +152,14 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
       });
       if (!res.ok) {
         const text = await res.text();
+        // The backend reports a missing product as a raw filesystem path.
+        // Translate it, since the operator chose a name, not a path.
+        if (text.includes('target source not found')) {
+          const missing = text.split('/').pop() || trimmedProduct;
+          throw new Error(
+            `No product named "${missing}" under products/.${catalog.length ? ` Known products: ${catalog.join(', ')}.` : ''} Create that directory, or use Browse to point at a project path instead.`
+          );
+        }
         throw new Error(text || `${res.status} ${res.statusText}`);
       }
       const data = await res.json();
@@ -178,11 +227,24 @@ export default function NewRunFlow({ onClose, onRunStarted }) {
               <input
                 className="nrf-input"
                 type="text"
-                placeholder="e.g. ceres-station, lamdet, my-service"
+                list="nrf-product-catalog"
+                placeholder={catalog.length ? `e.g. ${catalog.slice(0, 2).join(', ')}` : 'e.g. ceres-station, lamdet, my-service'}
                 value={product}
                 onChange={e => setProduct(e.target.value)}
                 onKeyDown={e => e.key === 'Enter' && intent.trim() && draftSpec()}
               />
+              <datalist id="nrf-product-catalog">
+                {catalog.map(name => (
+                  <option key={name} value={name} />
+                ))}
+              </datalist>
+              {catalogLoaded && (
+                <div className="nrf-hint">
+                  {catalog.length
+                    ? `Products available: ${catalog.join(', ')}`
+                    : 'No products found under products/. Create a directory there, or use Browse below to point at a project path.'}
+                </div>
+              )}
             </div>
 
             <div className="nrf-field">

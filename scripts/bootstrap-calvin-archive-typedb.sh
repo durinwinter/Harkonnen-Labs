@@ -11,7 +11,7 @@ mkdir -p "$TYPEDB_DATA" "$BIN_DIR"
 cat > "$TYPEDB_DIR/docker-compose.yml" <<'COMPOSE'
 services:
   typedb:
-    image: typedb/typedb:latest
+    image: typedb/typedb:3.12.1
     container_name: harkonnen-typedb
     restart: unless-stopped
     ports:

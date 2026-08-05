@@ -29,9 +29,11 @@ reqwest = { version = "0.12", features = ["json", "rustls-tls"], default-feature
 tokio = { version = "1", features = ["full"] }
 tokio-stream = { version = "0.1", features = ["sync"] }
 tower = "0.5"
+futures = "0.3"
 tower-http = { version = "0.6", features = ["fs", "cors"] }
 tracing = "0.1"
 tracing-subscriber = { version = "0.3", features = ["fmt", "env-filter"] }
+typedb-driver = "3.12"
 uuid = { version = "1", features = ["v4", "serde"] }
 
 [dev-dependencies]

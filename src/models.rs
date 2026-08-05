@@ -64,6 +64,23 @@ pub struct WorkerHarnessConfig {
     /// (mason/<spec-id>-<short-run-id>) so a real diff is always available.
     #[serde(default)]
     pub git_branch: bool,
+    /// When true, Mason runs the multi-turn tool loop (`src/mason_tools.rs`)
+    /// instead of the single-shot edit transports: it may read files and list
+    /// directories before deciding what to write. Off unless a spec asks for
+    /// it, so every existing spec keeps the single-shot behaviour exactly.
+    /// Requires `llm_edits` — on its own it does nothing.
+    ///
+    /// WHAT THIS GRANTS, beyond iteration: it widens what Mason can *see*.
+    /// The single-shot lane sends a harness-chosen, filtered set of at most
+    /// eight files. Under the tool loop, Mason chooses what to read, and can
+    /// read any file anywhere in the staged workspace — including files it may
+    /// not edit. Build output, VCS internals, factory state and
+    /// credential-bearing files (`.env`, `*.pem`, `*.key`, `credentials.json`
+    /// and similar) are refused, but nothing else is. Everything Mason reads is
+    /// sent to the configured provider. Enable this only for a workspace whose
+    /// full contents you are willing to share with that provider.
+    #[serde(default)]
+    pub tool_loop: bool,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]

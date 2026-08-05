@@ -1,6 +1,6 @@
 services:
   typedb:
-    image: typedb/typedb:latest
+    image: typedb/typedb:3.12.1
     ports:
       - "1729:1729"
     volumes:

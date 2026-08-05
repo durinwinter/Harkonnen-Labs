@@ -81,7 +81,7 @@ enabled     = true
 harmony_url = "http://127.0.0.1:7171"
 
 [typedb]
-enabled = false
+enabled = true
 url = "localhost:1729"
 database = "harkonnen_semantic"
 schema_path = "factory/coobie_semantic/typedb/schema.tql"

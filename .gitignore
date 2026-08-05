@@ -52,3 +52,6 @@ development_datasets/
 
 # Managed-repo stamp tracking — machine-specific absolute path, never portable
 .harkonnen/repo.toml
+
+# Product-specific spec drafts targeting private repos stay local.
+factory/specs/drafts/dad-bonus-level-*.yaml

@@ -23,6 +23,8 @@ pub mod livecodebench;
 pub mod llm;
 pub mod locomo;
 pub mod longmemeval;
+pub mod mason_tools;
+pub mod mason_transport;
 pub mod mcp_registry;
 pub mod mcp_server;
 pub mod memory;
